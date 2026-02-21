@@ -32,6 +32,8 @@ class Rack(Base):
     label       = Column(String, nullable=False)          # e.g. "Rack A"
     room        = Column(String, default="")              # e.g. "RZ-01"
     description = Column(String, default="")
+    map_x       = Column(Float, default=100.0)
+    map_y       = Column(Float, default=100.0)
     created_at  = Column(DateTime, default=datetime.utcnow)
     updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -66,9 +68,6 @@ class SnmpProfile(Base):
     v3_auth_password   = Column(String, default="")
     v3_priv_protocol   = Column(String, default="AES-128")
     v3_priv_password   = Column(String, default="")
-    snmp_timeout       = Column(Integer, default=3)          # seconds per request
-    snmp_retries       = Column(Integer, default=1)          # retry count per request
-    max_parallel_hosts = Column(Integer, default=8)          # per-profile host concurrency
     created_at         = Column(DateTime, default=datetime.utcnow)
     updated_at         = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -106,6 +105,14 @@ class Credential(Base):
     # Optional reference to a shared profile (overrides per-device SNMP fields when set)
     profile_id = Column(Integer, ForeignKey("snmp_profiles.id"), nullable=True)
     profile    = relationship("SnmpProfile", back_populates="credentials")
+
+    # Optional assignment to a managed rack and switch class
+    rack_id    = Column(Integer, ForeignKey("racks.id"), nullable=True)
+    class_id   = Column(Integer, ForeignKey("switch_classes.id"), nullable=True)
+
+    # Optional manual override for vendor and model (empty string means autodetect)
+    vendor     = Column(String, default="")
+    model      = Column(String, default="")
 
 
 class Device(Base):
@@ -169,6 +176,14 @@ class TopologyLink(Base):
     discovered_at  = Column(DateTime, default=datetime.utcnow)
 
 
+class AppSetting(Base):
+    """Global application settings (key-value store)."""
+    __tablename__ = "app_settings"
+
+    key   = Column(String, primary_key=True, index=True)
+    value = Column(String, nullable=False)
+
+
 class ScanRun(Base):
     """Historical summary for one scan execution."""
     __tablename__ = "scan_runs"
@@ -205,25 +220,6 @@ class ScanRunSwitchMetric(Base):
     scan_run = relationship("ScanRun", back_populates="switch_metrics")
 
 
-def _ensure_snmp_profile_policy_columns():
-    """Add new scan policy columns for existing SQLite databases without migrations."""
-    with engine.begin() as conn:
-        if conn.dialect.name != "sqlite":
-            return
-
-        rows = conn.execute(text("PRAGMA table_info(snmp_profiles)")).fetchall()
-        existing = {str(r[1]) for r in rows}
-
-        additions = [
-            ("snmp_timeout", "INTEGER DEFAULT 3"),
-            ("snmp_retries", "INTEGER DEFAULT 1"),
-            ("max_parallel_hosts", "INTEGER DEFAULT 8"),
-        ]
-        for col_name, col_def in additions:
-            if col_name not in existing:
-                conn.execute(text(f"ALTER TABLE snmp_profiles ADD COLUMN {col_name} {col_def}"))
-
-
 def _ensure_device_ping_columns():
     """Add ping-related columns for existing SQLite databases without migrations."""
     with engine.begin() as conn:
@@ -243,7 +239,69 @@ def _ensure_device_ping_columns():
                 conn.execute(text(f"ALTER TABLE devices ADD COLUMN {col_name} {col_def}"))
 
 
+def _ensure_credential_rack_class_columns():
+    """Add rack_id and class_id columns to credentials for existing SQLite databases."""
+    with engine.begin() as conn:
+        if conn.dialect.name != "sqlite":
+            return
+
+        rows = conn.execute(text("PRAGMA table_info(credentials)")).fetchall()
+        existing = {str(r[1]) for r in rows}
+
+        additions = [
+            ("rack_id", "INTEGER"),
+            ("class_id", "INTEGER"),
+            ("vendor", "VARCHAR DEFAULT ''"),
+            ("model", "VARCHAR DEFAULT ''"),
+        ]
+        for col_name, col_def in additions:
+            if col_name not in existing:
+                conn.execute(text(f"ALTER TABLE credentials ADD COLUMN {col_name} {col_def}"))
+
+
+def _ensure_rack_map_columns():
+    """Add map_x and map_y columns to racks for existing SQLite databases."""
+    with engine.begin() as conn:
+        if conn.dialect.name != "sqlite":
+            return
+
+        rows = conn.execute(text("PRAGMA table_info(racks)")).fetchall()
+        existing = {str(r[1]) for r in rows}
+
+        additions = [
+            ("map_x", "FLOAT DEFAULT 100.0"),
+            ("map_y", "FLOAT DEFAULT 100.0"),
+        ]
+        for col_name, col_def in additions:
+            if col_name not in existing:
+                conn.execute(text(f"ALTER TABLE racks ADD COLUMN {col_name} {col_def}"))
+
+
+def _ensure_app_settings_table():
+    """Ensure app_settings table exists and has default values."""
+    with engine.begin() as conn:
+        if conn.dialect.name != "sqlite":
+            return
+        
+        # Create table if it doesn't exist
+        conn.execute(text('''
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key VARCHAR PRIMARY KEY,
+                value VARCHAR NOT NULL
+            )
+        '''))
+        
+        # Insert default values if they don't exist
+        defaults = [
+            ("discovery_interval_sec", "3600"),
+            ("port_update_interval_sec", "30")
+        ]
+        for key, value in defaults:
+            conn.execute(text(f"INSERT OR IGNORE INTO app_settings (key, value) VALUES ('{key}', '{value}')"))
+
 def create_tables():
     Base.metadata.create_all(bind=engine)
-    _ensure_snmp_profile_policy_columns()
+    _ensure_app_settings_table()
     _ensure_device_ping_columns()
+    _ensure_credential_rack_class_columns()
+    _ensure_rack_map_columns()

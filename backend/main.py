@@ -23,15 +23,17 @@ from database import (
     Credential, Device, Port, TopologyLink, SnmpProfile,
     ScanRun, ScanRunSwitchMetric, SessionLocal,
     Rack as RackModel, SwitchClass as SwitchClassModel,
+    AppSetting,
     create_tables, get_db,
 )
 from schemas import (
     CredentialCreate, CredentialOut, CredentialUpdate,
-    DeviceOut, DevicePositionUpdate, DeviceMetaUpdate,
+    DeviceOut, DevicePositionUpdate, DeviceMetaUpdate, RackPositionUpdate,
     ScanResult, ScanRunOut, ScanSwitchMetric, TopologyOut, TopologyLinkOut,
     SnmpProfileCreate, SnmpProfileUpdate, SnmpProfileOut,
     RackCreate, RackUpdate, RackOut,
     SwitchClassCreate, SwitchClassUpdate, SwitchClassOut,
+    AppSettingOut, AppSettingUpdate,
 )
 from snmp_scanner import (
     LldpNeighbor, SwitchData, auto_layout, scan_switch,
@@ -74,6 +76,62 @@ def _log_event(level: int, event: str, **fields):
 @app.on_event("startup")
 def on_startup():
     create_tables()
+    threading.Thread(target=_background_scheduler, daemon=True).start()
+
+def _background_scheduler():
+    """Runs discovery and port scans periodically based on app settings."""
+    last_discovery = 0
+    last_ports = 0
+    
+    while True:
+        time.sleep(5)
+        
+        try:
+            db = SessionLocal()
+            
+            # Read settings
+            discovery_setting = db.query(AppSetting).filter(AppSetting.key == "discovery_interval_sec").first()
+            ports_setting = db.query(AppSetting).filter(AppSetting.key == "port_update_interval_sec").first()
+            
+            discovery_interval = int(discovery_setting.value) if discovery_setting else 3600
+            ports_interval = int(ports_setting.value) if ports_setting else 30
+            
+            now = time.time()
+            
+            # Run discovery scan
+            if discovery_interval > 0 and (now - last_discovery) >= discovery_interval:
+                _log_event(logging.INFO, "scheduler.discovery.start")
+                _execute_scan(db, scan_type="discovery")
+                last_discovery = time.time()
+                
+            # Run ports scan
+            if ports_interval > 0 and (now - last_ports) >= ports_interval:
+                _log_event(logging.INFO, "scheduler.ports.start")
+                _execute_scan(db, scan_type="ports")
+                last_ports = time.time()
+                
+        except Exception as e:
+            _log_event(logging.ERROR, "scheduler.error", error=str(e))
+        finally:
+            db.close()
+
+# ─── App Settings ──────────────────────────────────────────────────────────────
+
+@app.get("/api/settings", response_model=List[AppSettingOut])
+def list_settings(db: Session = Depends(get_db)):
+    return db.query(AppSetting).all()
+
+@app.put("/api/settings/{key}", response_model=AppSettingOut)
+def update_setting(key: str, body: AppSettingUpdate, db: Session = Depends(get_db)):
+    setting = db.query(AppSetting).filter(AppSetting.key == key).first()
+    if not setting:
+        setting = AppSetting(key=key, value=body.value)
+        db.add(setting)
+    else:
+        setting.value = body.value
+    db.commit()
+    db.refresh(setting)
+    return setting
 
 # ─── SNMP Profiles ───────────────────────────────────────────────────────────────
 
@@ -85,9 +143,6 @@ def list_snmp_profiles(db: Session = Depends(get_db)):
 @app.post("/api/snmp-profiles", response_model=SnmpProfileOut, status_code=201)
 def create_snmp_profile(body: SnmpProfileCreate, db: Session = Depends(get_db)):
     payload = body.model_dump()
-    payload["snmp_timeout"] = max(1, min(30, int(payload.get("snmp_timeout", 3))))
-    payload["snmp_retries"] = max(0, min(10, int(payload.get("snmp_retries", 1))))
-    payload["max_parallel_hosts"] = max(1, min(64, int(payload.get("max_parallel_hosts", 8))))
     profile = SnmpProfile(**payload)
     db.add(profile)
     db.commit()
@@ -101,12 +156,6 @@ def update_snmp_profile(profile_id: int, body: SnmpProfileUpdate, db: Session = 
     if not profile:
         raise HTTPException(404, "Profile not found")
     payload = body.model_dump(exclude_none=True)
-    if "snmp_timeout" in payload:
-        payload["snmp_timeout"] = max(1, min(30, int(payload["snmp_timeout"])))
-    if "snmp_retries" in payload:
-        payload["snmp_retries"] = max(0, min(10, int(payload["snmp_retries"])))
-    if "max_parallel_hosts" in payload:
-        payload["max_parallel_hosts"] = max(1, min(64, int(payload["max_parallel_hosts"])))
 
     for k, v in payload.items():
         setattr(profile, k, v)
@@ -231,6 +280,15 @@ def create_credential(body: CredentialCreate, db: Session = Depends(get_db)):
         raise HTTPException(400, f"IP {body.ip} already exists")
     cred = Credential(**body.model_dump())
     db.add(cred)
+    
+    # If device already exists, update its rack/class
+    device = db.query(Device).filter(Device.ip == body.ip).first()
+    if device:
+        if cred.rack_id is not None:
+            device.rack_id = cred.rack_id
+        if cred.class_id is not None:
+            device.class_id = cred.class_id
+
     db.commit()
     db.refresh(cred)
     return cred
@@ -243,6 +301,15 @@ def update_credential(cred_id: int, body: CredentialUpdate, db: Session = Depend
         raise HTTPException(404, "Credential not found")
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(cred, k, v)
+        
+    # If device exists, update its rack/class
+    device = db.query(Device).filter(Device.ip == cred.ip).first()
+    if device:
+        if "rack_id" in body.model_dump(exclude_unset=True):
+            device.rack_id = cred.rack_id
+        if "class_id" in body.model_dump(exclude_unset=True):
+            device.class_id = cred.class_id
+
     db.commit()
     db.refresh(cred)
     return cred
@@ -258,15 +325,6 @@ def delete_credential(cred_id: int, db: Session = Depends(get_db)):
 
 
 # ─── SNMP Scan ────────────────────────────────────────────────────────────────
-
-def _coerce_profile_policy(profile: Optional[SnmpProfile]) -> tuple[int, int, int]:
-    if not profile:
-        return 3, 1, 8
-    timeout = max(1, min(30, int(profile.snmp_timeout or 3)))
-    retries = max(0, min(10, int(profile.snmp_retries or 1)))
-    max_hosts = max(1, min(64, int(profile.max_parallel_hosts or 8)))
-    return timeout, retries, max_hosts
-
 
 def _persist_scan_run(db: Session, result: ScanResult) -> int:
     run = ScanRun(
@@ -299,16 +357,27 @@ def _execute_scan(
     db: Session,
     cancel_event: Optional[threading.Event] = None,
     correlation_id: Optional[str] = None,
+    scan_type: str = "full",
 ) -> ScanResult:
     corr = correlation_id or str(uuid.uuid4())
-    credentials = db.query(Credential).filter(Credential.enabled == True).all()
+    
+    if scan_type == "ports":
+        # Only scan credentials that are already in the Device table
+        known_ips = {d.ip for d in db.query(Device.ip).all()}
+        credentials = db.query(Credential).filter(Credential.enabled == True, Credential.ip.in_(known_ips)).all()
+    else:
+        credentials = db.query(Credential).filter(Credential.enabled == True).all()
+        
     scan_settings = _read_scan_settings()
     configured_max_workers = scan_settings.get("max_workers", 4)
+    global_snmp_timeout = scan_settings.get("snmp_timeout", 3)
+    global_snmp_retries = scan_settings.get("snmp_retries", 1)
 
     _log_event(
         logging.INFO,
         "scan.start",
         correlation_id=corr,
+        scan_type=scan_type,
         enabled_credentials=len(credentials),
         configured_max_workers=configured_max_workers,
     )
@@ -333,13 +402,10 @@ def _execute_scan(
     switch_metrics: List[ScanSwitchMetric] = []
 
     scan_targets = []
-    profile_limits: Dict[str, int] = {}
 
     for cred in credentials:
         p = cred.profile
-        snmp_timeout, snmp_retries, profile_max_hosts = _coerce_profile_policy(p)
         profile_key = f"profile:{p.id}" if p else f"cred:{cred.id}"
-        profile_limits[profile_key] = profile_max_hosts
 
         scan_targets.append({
             "ip": cred.ip,
@@ -354,13 +420,9 @@ def _execute_scan(
             "v3_auth_password": p.v3_auth_password if p else cred.v3_auth_password,
             "v3_priv_protocol": p.v3_priv_protocol if p else cred.v3_priv_protocol,
             "v3_priv_password": p.v3_priv_password if p else cred.v3_priv_password,
-            "snmp_timeout": snmp_timeout,
-            "snmp_retries": snmp_retries,
+            "snmp_timeout": global_snmp_timeout,
+            "snmp_retries": global_snmp_retries,
         })
-
-    profile_semaphores = {
-        k: threading.BoundedSemaphore(v) for k, v in profile_limits.items()
-    }
 
     def _scan_target(target: dict):
         started = time.perf_counter()
@@ -372,33 +434,29 @@ def _execute_scan(
             duration_ms = int((time.perf_counter() - started) * 1000)
             return ip, label, None, "cancelled", duration_ms, ping_ok, ping_rtt
 
-        sem = profile_semaphores[target["profile_key"]]
-        with sem:
-            if cancel_event and cancel_event.is_set():
-                duration_ms = int((time.perf_counter() - started) * 1000)
-                return ip, label, None, "cancelled", duration_ms, ping_ok, ping_rtt
-            try:
-                data = scan_switch(
-                    ip=ip,
-                    snmp_version=target["snmp_version"],
-                    community=target["community"],
-                    snmp_port=target["snmp_port"],
-                    snmp_timeout=target["snmp_timeout"],
-                    snmp_retries=target["snmp_retries"],
-                    v3_security_level=target["v3_security_level"],
-                    v3_username=target["v3_username"],
-                    v3_auth_protocol=target["v3_auth_protocol"],
-                    v3_auth_password=target["v3_auth_password"],
-                    v3_priv_protocol=target["v3_priv_protocol"],
-                    v3_priv_password=target["v3_priv_password"],
-                )
-                duration_ms = int((time.perf_counter() - started) * 1000)
-                if data:
-                    return ip, label, data, "", duration_ms, ping_ok, ping_rtt
-                return ip, label, None, "no SNMP response", duration_ms, ping_ok, ping_rtt
-            except Exception as exc:
-                duration_ms = int((time.perf_counter() - started) * 1000)
-                return ip, label, None, str(exc), duration_ms, ping_ok, ping_rtt
+        try:
+            data = scan_switch(
+                ip=ip,
+                snmp_version=target["snmp_version"],
+                community=target["community"],
+                snmp_port=target["snmp_port"],
+                snmp_timeout=target["snmp_timeout"],
+                snmp_retries=target["snmp_retries"],
+                v3_security_level=target["v3_security_level"],
+                v3_username=target["v3_username"],
+                v3_auth_protocol=target["v3_auth_protocol"],
+                v3_auth_password=target["v3_auth_password"],
+                v3_priv_protocol=target["v3_priv_protocol"],
+                v3_priv_password=target["v3_priv_password"],
+                scan_type=scan_type,
+            )
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            if data:
+                return ip, label, data, "", duration_ms, ping_ok, ping_rtt
+            return ip, label, None, "no SNMP response", duration_ms, ping_ok, ping_rtt
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            return ip, label, None, str(exc), duration_ms, ping_ok, ping_rtt
 
     scan_started = time.perf_counter()
     workers = max(1, min(int(configured_max_workers), len(scan_targets)))
@@ -456,12 +514,17 @@ def _execute_scan(
     new_ips = [ip for ip in discovered_ips if ip not in existing_ips]
     all_ips_ordered = list(existing_ips) + new_ips
     layout = auto_layout(all_ips_ordered)
+    cred_by_ip = {c.ip: c for c in credentials}
 
     for ip in discovered_ips:
         sw = switch_data.get(ip)
         ping_ok, ping_rtt = ping_by_ip.get(ip, (False, 0))
         ping_status = "online" if ping_ok else "offline"
-        model = extract_model(sw.sys_descr, sw.vendor) if sw else ""
+        cred = cred_by_ip.get(ip)
+        
+        # Determine vendor and model (credential overrides autodetect)
+        vendor = cred.vendor if (cred and cred.vendor) else (sw.vendor if sw else "generic")
+        model = cred.model if (cred and cred.model) else (extract_model(sw.sys_descr, sw.vendor) if sw else "")
 
         device = db.query(Device).filter(Device.ip == ip).first()
         if device:
@@ -470,15 +533,21 @@ def _execute_scan(
                 device.sys_descr = sw.sys_descr or device.sys_descr
                 device.location  = sw.location  or device.location
                 device.model     = model        or device.model
-                device.vendor    = sw.vendor
+                device.vendor    = vendor
                 device.last_seen = datetime.utcnow()
             elif ping_ok:
                 device.sys_name = device.sys_name or ip
                 device.sys_descr = device.sys_descr or "Discovered by ping (SNMP unavailable)"
-                device.vendor = device.vendor or "generic"
+                device.vendor = vendor or device.vendor or "generic"
+                device.model = model or device.model
             device.ping_status = ping_status
             device.ping_rtt_ms = ping_rtt if ping_ok else 0
             device.last_ping = datetime.utcnow()
+            if cred:
+                if cred.rack_id is not None:
+                    device.rack_id = cred.rack_id
+                if cred.class_id is not None:
+                    device.class_id = cred.class_id
         else:
             x, y = layout.get(ip, (100.0, 100.0))
             db.add(Device(
@@ -486,80 +555,83 @@ def _execute_scan(
                 sys_name=sw.sys_name if sw else ip,
                 sys_descr=sw.sys_descr if sw else "Discovered by ping (SNMP unavailable)",
                 model=model,
-                vendor=sw.vendor if sw else "generic",
+                vendor=vendor,
                 location=sw.location if sw else "",
                 ping_status=ping_status,
                 ping_rtt_ms=ping_rtt if ping_ok else 0,
                 last_ping=datetime.utcnow(),
                 map_x=x,
                 map_y=y,
+                rack_id=cred.rack_id if cred else None,
+                class_id=cred.class_id if cred else None,
             ))
 
     db.flush()
 
-    dns_cache: Dict[str, str] = {}
-    dns_servers = _read_dns_settings().get("servers", [])
-
-    for ip, sw in switch_data.items():
-        device = db.query(Device).filter(Device.ip == ip).first()
-        if not device:
-            continue
-
-        peers_by_ifindex: Dict[int, List[tuple[str, str, str]]] = {}
-        for mac, peer_ip in sw.arp_table.items():
-            ifindex = sw.mac_ifindex.get(mac)
-            if ifindex is None or not peer_ip:
-                continue
-            peer_host = _resolve_host(peer_ip, dns_cache, dns_servers, correlation_id=corr)
-            peers_by_ifindex.setdefault(ifindex, []).append((mac, peer_ip, peer_host))
-
-        db.query(Port).filter(Port.device_id == device.id).delete()
-        for iface in sw.interfaces.values():
-            if is_virtual(iface.descr, sw.vendor):
-                continue
-
-            peer_mac = ""
-            peer_ip = ""
-            peer_host = ""
-            if iface.index in peers_by_ifindex and peers_by_ifindex[iface.index]:
-                peer_mac, peer_ip, peer_host = sorted(
-                    peers_by_ifindex[iface.index], key=lambda x: x[1]
-                )[0]
-
-            db.add(Port(
-                device_id=device.id,
-                if_index=iface.index,
-                if_descr=iface.descr,
-                if_alias=iface.alias,
-                speed_mbps=iface.speed_mbps,
-                oper_status=iface.oper_status,
-                peer_mac=peer_mac,
-                peer_ip=peer_ip,
-                peer_host=peer_host,
-            ))
-
-    scanned_ips = set(switch_data.keys())
-    db.query(TopologyLink).filter(TopologyLink.local_ip.in_(scanned_ips)).delete(
-        synchronize_session=False
-    )
-
     link_count = 0
-    for ip, sw in switch_data.items():
-        for nbr in sw.lldp_neighbors:
-            if not nbr.remote_sys:
+    if scan_type != "discovery":
+        dns_cache: Dict[str, str] = {}
+        dns_servers = _read_dns_settings().get("servers", [])
+
+        for ip, sw in switch_data.items():
+            device = db.query(Device).filter(Device.ip == ip).first()
+            if not device:
                 continue
-            remote_ip = _resolve_ip(nbr.remote_sys, switch_data)
-            spd_label = speed_label(sw.interfaces[nbr.local_port_idx].speed_mbps) \
-                if nbr.local_port_idx in sw.interfaces else "1G"
-            db.add(TopologyLink(
-                local_ip=ip,
-                local_port=nbr.local_port_desc or str(nbr.local_port_idx),
-                remote_ip=remote_ip,
-                remote_sys=nbr.remote_sys,
-                remote_port=nbr.remote_port,
-                speed_label=spd_label,
-            ))
-            link_count += 1
+
+            peers_by_ifindex: Dict[int, List[tuple[str, str, str]]] = {}
+            for mac, peer_ip in sw.arp_table.items():
+                ifindex = sw.mac_ifindex.get(mac)
+                if ifindex is None or not peer_ip:
+                    continue
+                peer_host = _resolve_host(peer_ip, dns_cache, dns_servers, correlation_id=corr)
+                peers_by_ifindex.setdefault(ifindex, []).append((mac, peer_ip, peer_host))
+
+            db.query(Port).filter(Port.device_id == device.id).delete()
+            for iface in sw.interfaces.values():
+                if is_virtual(iface.descr, sw.vendor):
+                    continue
+
+                peer_mac = ""
+                peer_ip = ""
+                peer_host = ""
+                if iface.index in peers_by_ifindex and peers_by_ifindex[iface.index]:
+                    peer_mac, peer_ip, peer_host = sorted(
+                        peers_by_ifindex[iface.index], key=lambda x: x[1]
+                    )[0]
+
+                db.add(Port(
+                    device_id=device.id,
+                    if_index=iface.index,
+                    if_descr=iface.descr,
+                    if_alias=iface.alias,
+                    speed_mbps=iface.speed_mbps,
+                    oper_status=iface.oper_status,
+                    peer_mac=peer_mac,
+                    peer_ip=peer_ip,
+                    peer_host=peer_host,
+                ))
+
+        scanned_ips = set(switch_data.keys())
+        db.query(TopologyLink).filter(TopologyLink.local_ip.in_(scanned_ips)).delete(
+            synchronize_session=False
+        )
+
+        for ip, sw in switch_data.items():
+            for nbr in sw.lldp_neighbors:
+                if not nbr.remote_sys:
+                    continue
+                remote_ip = _resolve_ip(nbr.remote_sys, switch_data)
+                spd_label = speed_label(sw.interfaces[nbr.local_port_idx].speed_mbps) \
+                    if nbr.local_port_idx in sw.interfaces else "1G"
+                db.add(TopologyLink(
+                    local_ip=ip,
+                    local_port=nbr.local_port_desc or str(nbr.local_port_idx),
+                    remote_ip=remote_ip,
+                    remote_sys=nbr.remote_sys,
+                    remote_port=nbr.remote_port,
+                    speed_label=spd_label,
+                ))
+                link_count += 1
 
     result = ScanResult(
         scanned=len(credentials),
@@ -735,6 +807,21 @@ def update_device_position(
     return device
 
 
+@app.patch("/api/topology/racks/{rack_id}/position", response_model=RackOut)
+def update_rack_position(
+    rack_id: int, body: RackPositionUpdate, db: Session = Depends(get_db)
+):
+    """Persist drag-and-drop position for a rack."""
+    rack = db.query(RackModel).filter(RackModel.id == rack_id).first()
+    if not rack:
+        raise HTTPException(404, "Rack not found")
+    rack.map_x = body.map_x
+    rack.map_y = body.map_y
+    db.commit()
+    db.refresh(rack)
+    return rack
+
+
 @app.patch("/api/topology/devices/{device_id}/meta", response_model=DeviceOut)
 def update_device_meta(
     device_id: int, body: DeviceMetaUpdate, db: Session = Depends(get_db)
@@ -874,18 +961,24 @@ async def update_map_settings(request: Request):
 # ─── Scan Settings ────────────────────────────────────────────────────────────
 
 SCAN_SETTINGS_PATH = os.path.join(MAP_BG_DIR, "scan-settings.json")
-DEFAULT_SCAN_SETTINGS = {"max_workers": 4}
+DEFAULT_SCAN_SETTINGS = {"max_workers": 4, "snmp_timeout": 3, "snmp_retries": 1}
 
 
 def _normalize_scan_settings(value: dict | None):
     value = value or {}
     max_workers = value.get("max_workers", DEFAULT_SCAN_SETTINGS["max_workers"])
+    snmp_timeout = value.get("snmp_timeout", DEFAULT_SCAN_SETTINGS["snmp_timeout"])
+    snmp_retries = value.get("snmp_retries", DEFAULT_SCAN_SETTINGS["snmp_retries"])
     try:
         max_workers = int(max_workers)
+        snmp_timeout = int(snmp_timeout)
+        snmp_retries = int(snmp_retries)
     except (TypeError, ValueError):
-        raise HTTPException(400, "'max_workers' must be an integer")
+        raise HTTPException(400, "Settings must be integers")
     max_workers = max(1, min(128, max_workers))
-    return {"max_workers": max_workers}
+    snmp_timeout = max(1, min(30, snmp_timeout))
+    snmp_retries = max(0, min(10, snmp_retries))
+    return {"max_workers": max_workers, "snmp_timeout": snmp_timeout, "snmp_retries": snmp_retries}
 
 
 def _read_scan_settings():

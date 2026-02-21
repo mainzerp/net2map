@@ -86,7 +86,7 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
           backgroundColor:"#0f172a", border:`1px solid ${isLinked ? cc+"55" : "#334155"}`,
           borderRadius:8, padding:"10px 14px", minWidth:240,
           pointerEvents:"none",
-          fontFamily:"'JetBrains Mono',monospace", fontSize:11, color:"#94a3b8",
+          fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, color:"#94a3b8",
           boxShadow:`0 8px 32px rgba(0,0,0,0.7), 0 0 12px ${cc}18`,
         }}>
           {isLinked && (

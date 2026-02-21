@@ -1,4 +1,4 @@
-﻿"""SNMP scanner â€“ SNMPv2c / SNMPv3, vendor-aware (Aruba CX + FS.com + generic)."""
+﻿"""SNMP scanner “ SNMPv2c / SNMPv3, vendor-aware (Aruba CX + FS.com + generic)."""
 import logging
 import math
 import re
@@ -25,7 +25,7 @@ from pysnmp.hlapi import (
 
 log = logging.getLogger(__name__)
 
-# â”€â”€â”€ Protocol maps â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- Protocol maps ------------------------------------------------------------
 
 AUTH_PROTOCOLS = {
     "MD5":    usmHMACMD5AuthProtocol,
@@ -44,7 +44,7 @@ PRIV_PROTOCOLS = {
     "AES-256": usmAesCfb256Protocol,
 }
 
-# â”€â”€â”€ OID constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- OID constants ------------------------------------------------------------
 
 OID_SYS_NAME      = "1.3.6.1.2.1.1.5.0"
 OID_SYS_DESCR     = "1.3.6.1.2.1.1.1.0"
@@ -69,7 +69,7 @@ OID_ARP_IP  = "1.3.6.1.2.1.4.22.1.3"
 OID_DOT1D_TP_FDB_PORT        = "1.3.6.1.2.1.17.4.3.1.2"
 OID_DOT1D_BASE_PORT_IF_INDEX = "1.3.6.1.2.1.17.1.4.1.2"
 
-# â”€â”€â”€ Vendor enterprise OIDs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- Vendor enterprise OIDs ---------------------------------------------------
 # Used to hard-identify vendor when sysDescr is ambiguous
 VENDOR_OIDS: Dict[str, str] = {
     "1.3.6.1.4.1.47196": "aruba_cx",  # Aruba Networks (CX)
@@ -87,7 +87,7 @@ VENDOR_KEYWORDS: Dict[str, List[str]] = {
 }
 
 
-# â”€â”€â”€ Data classes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- Data classes -------------------------------------------------------------
 
 @dataclass
 class IfInfo:
@@ -116,11 +116,11 @@ class SwitchData:
     vendor:         str = "generic"   # "aruba_cx" | "fs" | "generic"
     interfaces:     Dict[int, IfInfo]       = field(default_factory=dict)
     lldp_neighbors: List[LldpNeighbor]      = field(default_factory=list)
-    arp_table:      Dict[str, str]          = field(default_factory=dict)  # macâ†’ip
-    mac_ifindex:    Dict[str, int]          = field(default_factory=dict)  # macâ†’ifIndex
+    arp_table:      Dict[str, str]          = field(default_factory=dict)  # mac->†’ip
+    mac_ifindex:    Dict[str, int]          = field(default_factory=dict)  # mac->†’ifIndex
 
 
-# â”€â”€â”€ Credentials builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- Credentials builder ------------------------------------------------------
 
 def build_auth(
     snmp_version: str,
@@ -136,7 +136,7 @@ def build_auth(
 ):
     """Return a pysnmp auth object (CommunityData or UsmUserData)."""
     if snmp_version == "v2c":
-        return CommunityData(community, mpModel=1)  # mpModel=1 â†’ SNMPv2c
+        return CommunityData(community, mpModel=1)  # mpModel=1 ->†’ SNMPv2c
 
     # SNMPv3
     sl = v3_security_level
@@ -163,7 +163,7 @@ def build_auth(
     )
 
 
-# â”€â”€â”€ Low-level SNMP helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- Low-level SNMP helpers ---------------------------------------------------
 
 def _transport(ip: str, port: int = 161, timeout: int = 3, retries: int = 1):
     return UdpTransportTarget((ip, port), timeout=timeout, retries=retries)
@@ -211,7 +211,7 @@ def snmp_bulk_walk(ip: str, port: int, auth,
     return rows
 
 
-# â”€â”€â”€ Vendor detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- Vendor detection ---------------------------------------------------------
 
 def detect_vendor(sys_descr: str, sys_object_id: str) -> str:
     """Identify vendor from sysDescr and sysObjectID."""
@@ -227,7 +227,7 @@ def detect_vendor(sys_descr: str, sys_object_id: str) -> str:
     return "generic"
 
 
-# â”€â”€â”€ Vendor-specific model extraction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- Vendor-specific model extraction ----------------------------------------
 
 _MODEL_ARUBA = re.compile(
     r"(Aruba(?:\s+CX)?\s+[\d]{4}[A-Za-z\-]*(?:\s+\d+[A-Za-z]+)?)",
@@ -261,7 +261,7 @@ def extract_model(sys_descr: str, vendor: str) -> str:
     return m.group(1) if m else ""
 
 
-# â”€â”€â”€ Port filter helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- Port filter helpers ------------------------------------------------------
 
 _VIRTUAL_GENERIC = ("loopback", "tunnel", "null", "vlan", "management", "mgmt",
                     "bridge", "cpu", "stack", "oob")
@@ -284,7 +284,7 @@ def is_virtual(if_descr: str, vendor: str) -> bool:
     return any(p in d for p in patterns)
 
 
-# â”€â”€â”€ Speed label helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- Speed label helper -------------------------------------------------------
 
 def speed_label(mbps: int) -> str:
     if mbps >= 100_000: return "100G"
@@ -296,7 +296,7 @@ def speed_label(mbps: int) -> str:
     return "10M"
 
 
-# â”€â”€â”€ Helper: last N OID components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- Helper: last N OID components -------------------------------------------
 
 def _last_n(oid_str: str, n: int = 1) -> List[str]:
     return oid_str.rstrip(".").split(".")[-n:]
@@ -323,7 +323,7 @@ def _oid_to_mac(oid_str: str) -> str:
         return ""
 
 
-# â”€â”€â”€ Main scan function â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- Main scan function -------------------------------------------------------
 
 def scan_switch(
     ip: str,
@@ -340,6 +340,7 @@ def scan_switch(
     v3_auth_password: str = "",
     v3_priv_protocol: str = "AES-128",
     v3_priv_password: str = "",
+    scan_type: str = "full",
 ) -> Optional[SwitchData]:
     """Full SNMP scan of one switch. Returns SwitchData or None on failure."""
 
@@ -354,7 +355,7 @@ def scan_switch(
         v3_priv_password=v3_priv_password,
     )
 
-    # â”€â”€ 1. System scalars â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # -- 1. System scalars ----------------------------------------------------
     scalars = snmp_get(
         ip, snmp_port, auth,
         OID_SYS_NAME, OID_SYS_DESCR,
@@ -375,11 +376,14 @@ def scan_switch(
     )
     sys_oid = (vals[3] if len(vals) > 3 else "").strip()
 
-    # â”€â”€ 2. Vendor detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # -- 2. Vendor detection --------------------------------------------------
     sw.vendor = detect_vendor(sw.sys_descr, sys_oid)
     log.info("Detected vendor=%s for %s (%s)", sw.vendor, ip, sw.sys_name)
 
-    # â”€â”€ 3. Interface table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    if scan_type == "discovery":
+        return sw
+
+    # -- 3. Interface table ---------------------------------------------------
     descr_rows  = snmp_bulk_walk(ip, snmp_port, auth, OID_IF_DESCR, timeout=snmp_timeout, retries=snmp_retries)
     status_rows = snmp_bulk_walk(ip, snmp_port, auth, OID_IF_OPER_STATUS, timeout=snmp_timeout, retries=snmp_retries)
     hspeed_rows = snmp_bulk_walk(ip, snmp_port, auth, OID_IF_HIGH_SPEED, timeout=snmp_timeout, retries=snmp_retries)
@@ -417,7 +421,7 @@ def scan_switch(
         if idx is None: continue
         sw.interfaces.setdefault(idx, IfInfo(index=idx)).alias = val
 
-    # â”€â”€ 4. LLDP neighbor table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # -- 4. LLDP neighbor table -----------------------------------------------
     sys_rows  = snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_SYS_NAME, timeout=snmp_timeout, retries=snmp_retries)
     port_rows = snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_PORT_ID, timeout=snmp_timeout, retries=snmp_retries)
     pdesc_rows= snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_PORT_DESC, timeout=snmp_timeout, retries=snmp_retries)
@@ -454,7 +458,7 @@ def scan_switch(
 
     sw.lldp_neighbors = list(nbr_map.values())
 
-    # â”€â”€ 5. ARP table (best-effort) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # -- 5. ARP table (best-effort) -------------------------------------------
     arp_mac_rows = snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_MAC, timeout=snmp_timeout, retries=snmp_retries)
     arp_ip_rows  = snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_IP, timeout=snmp_timeout, retries=snmp_retries)
     ip_by_suffix: Dict[str, str] = {}
@@ -468,7 +472,7 @@ def scan_switch(
         if mac and arp_ip:
             sw.arp_table[mac] = arp_ip
 
-    # â”€â”€ 6. BRIDGE-MIB FDB: map learned MACs to ifIndex (best-effort) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # -- 6. BRIDGE-MIB FDB: map learned MACs to ifIndex (best-effort) -----------
     base_port_rows = snmp_bulk_walk(ip, snmp_port, auth, OID_DOT1D_BASE_PORT_IF_INDEX, timeout=snmp_timeout, retries=snmp_retries)
     fdb_rows = snmp_bulk_walk(ip, snmp_port, auth, OID_DOT1D_TP_FDB_PORT, timeout=snmp_timeout, retries=snmp_retries)
 
@@ -497,7 +501,7 @@ def scan_switch(
     return sw
 
 
-# â”€â”€â”€ Auto-layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- Auto-layout --------------------------------------------------------------
 
 def auto_layout(ips: List[str]) -> Dict[str, Tuple[float, float]]:
     n = len(ips)

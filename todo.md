@@ -15,13 +15,13 @@
 ## Next Roadmap (High Impact)
 
 - [ ] **Role-based login for settings/actions** -- Add authentication plus roles (read-only / operator / admin) for sensitive actions like scan config, credentials, and metadata changes
-- [ ] **Scan queue + cancel support** -- Move scan execution to background jobs with status endpoint and cancel option to avoid blocked API requests during long scans
-- [ ] **Historical scan runs** -- Persist scan summaries and per-switch durations in DB to compare trends over time (slow switches, discovery drops, error spikes)
-- [ ] **Retry + timeout policy per profile** -- Add configurable retries/timeouts/concurrency limits on SNMP profile level for better control in mixed network environments
+- [x] **Scan queue + cancel support** -- Move scan execution to background jobs with status endpoint and cancel option to avoid blocked API requests during long scans
+- [x] **Historical scan runs** -- Persist scan summaries and per-switch durations in DB to compare trends over time (slow switches, discovery drops, error spikes)
+- [x] **Retry + timeout policy per profile** -- Add configurable retries/timeouts/concurrency limits on SNMP profile level for better control in mixed network environments
 
 ## Observability
 
-- [ ] **Structured JSON logging** -- Emit structured logs for scan start/end, per-device result, and DNS lookup outcomes with correlation/run ID
+- [x] **Structured JSON logging** -- Emit structured logs for scan start/end, per-device result, and DNS lookup outcomes with correlation/run ID
 - [ ] **Prometheus metrics endpoint** -- Expose counters/histograms (scan_duration, switch_scan_duration, scan_errors_total, dns_lookup_duration)
 - [ ] **OpenTelemetry tracing** -- Add spans for run scan -> switch scan -> SNMP steps -> DB writes to troubleshoot performance bottlenecks
 

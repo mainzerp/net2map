@@ -14,10 +14,10 @@ export default function App() {
     <>
       {/* Global styles */}
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         html, body, #root { height: 100%; margin: 0; overflow: hidden; }
-        body { background: #020817; font-family: 'JetBrains Mono', monospace; }
+        body { background: #020817; font-family: 'Inter', system-ui, sans-serif; }
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
@@ -43,7 +43,7 @@ export default function App() {
             <line x1="6"  y1="8"  x2="6"  y2="16" />
             <line x1="18" y1="8"  x2="18" y2="16" />
           </svg>
-          <span style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 14, fontFamily: "'JetBrains Mono', monospace" }}>
+          <span style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 14, fontFamily: "'Inter', system-ui, sans-serif" }}>
             NetMap
           </span>
         </NavLink>
@@ -64,7 +64,7 @@ export default function App() {
                   borderRadius: 6,
                   fontSize: 11,
                   fontWeight: 600,
-                  fontFamily: "'JetBrains Mono', monospace",
+                  fontFamily: "'Inter', system-ui, sans-serif",
                   color: isActive ? "#22d3ee" : "#475569",
                   backgroundColor: isActive ? "#083344" : "transparent",
                   border: `1px solid ${isActive ? "#164e63" : "transparent"}`,

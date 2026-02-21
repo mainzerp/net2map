@@ -10,12 +10,25 @@ AuthProtocol  = Literal["MD5", "SHA", "SHA-224", "SHA-256", "SHA-384", "SHA-512"
 PrivProtocol  = Literal["DES", "3DES", "AES-128", "AES-192", "AES-256"]
 
 
+class AppSettingBase(BaseModel):
+    key:   str
+    value: str
+
+class AppSettingUpdate(BaseModel):
+    value: str
+
+class AppSettingOut(AppSettingBase):
+    class Config:
+        from_attributes = True
+
 # ─── Rack ─────────────────────────────────────────────────────────────────────
 
 class RackBase(BaseModel):
     label:       str
     room:        str = ""
     description: str = ""
+    map_x:       float = 100.0
+    map_y:       float = 100.0
 
 
 class RackCreate(RackBase):
@@ -26,6 +39,8 @@ class RackUpdate(BaseModel):
     label:       Optional[str] = None
     room:        Optional[str] = None
     description: Optional[str] = None
+    map_x:       Optional[float] = None
+    map_y:       Optional[float] = None
 
 
 class RackOut(RackBase):
@@ -76,9 +91,6 @@ class SnmpProfileBase(BaseModel):
     v3_auth_password:  str           = ""
     v3_priv_protocol:  PrivProtocol  = "AES-128"
     v3_priv_password:  str           = ""
-    snmp_timeout:      int           = 3
-    snmp_retries:      int           = 1
-    max_parallel_hosts:int           = 8
 
 
 class SnmpProfileCreate(SnmpProfileBase):
@@ -95,9 +107,6 @@ class SnmpProfileUpdate(BaseModel):
     v3_auth_password:  Optional[str]           = None
     v3_priv_protocol:  Optional[PrivProtocol]  = None
     v3_priv_password:  Optional[str]           = None
-    snmp_timeout:      Optional[int]           = None
-    snmp_retries:      Optional[int]           = None
-    max_parallel_hosts:Optional[int]           = None
 
 
 class SnmpProfileOut(SnmpProfileBase):
@@ -127,6 +136,12 @@ class CredentialBase(BaseModel):
     v3_auth_password:  str           = ""
     v3_priv_protocol:  PrivProtocol  = "AES-128"
     v3_priv_password:  str           = ""
+    # Optional assignments
+    profile_id:   Optional[int] = None
+    rack_id:      Optional[int] = None
+    class_id:     Optional[int] = None
+    vendor:       str = ""
+    model:        str = ""
 
 
 class CredentialCreate(CredentialBase):
@@ -148,11 +163,14 @@ class CredentialUpdate(BaseModel):
     v3_priv_protocol:  Optional[PrivProtocol]  = None
     v3_priv_password:  Optional[str]           = None
     profile_id:        Optional[int]           = None
+    rack_id:           Optional[int]           = None
+    class_id:          Optional[int]           = None
+    vendor:            Optional[str]           = None
+    model:             Optional[str]           = None
 
 
 class CredentialOut(CredentialBase):
     id:         int
-    profile_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
@@ -203,6 +221,10 @@ class DeviceOut(DeviceBase):
     class Config:
         from_attributes = True
 
+
+class RackPositionUpdate(BaseModel):
+    map_x: float
+    map_y: float
 
 class DevicePositionUpdate(BaseModel):
     map_x: float

@@ -96,7 +96,7 @@ export default function DashboardPage() {
   return (
     <div style={{
       padding: "32px 40px", maxWidth: 1100, margin: "0 auto",
-      fontFamily: "'JetBrains Mono',monospace",
+      fontFamily: "'Inter', system-ui, sans-serif",
     }}>
       {/* Title row */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
@@ -109,7 +109,7 @@ export default function DashboardPage() {
           style={{
             border: "1px solid #1e293b", background: "none",
             color: "#475569", borderRadius: 6, padding: "6px 14px",
-            cursor: "pointer", fontFamily: "'JetBrains Mono',monospace", fontSize: 11,
+            cursor: "pointer", fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11,
           }}
         >Refresh</button>
       </div>
@@ -245,7 +245,7 @@ export default function DashboardPage() {
             flex: "1 1 200px", padding: "18px 24px", borderRadius: 10,
             backgroundColor: "#083344", border: "1px solid #164e63",
             cursor: "pointer", textAlign: "left",
-            fontFamily: "'JetBrains Mono',monospace",
+            fontFamily: "'Inter', system-ui, sans-serif",
           }}
         >
           <div style={{ fontSize: 13, fontWeight: 600, color: "#22d3ee", marginBottom: 4 }}>Topology Map</div>
@@ -257,7 +257,7 @@ export default function DashboardPage() {
             flex: "1 1 200px", padding: "18px 24px", borderRadius: 10,
             backgroundColor: "#0a0e18", border: "1px solid #1e293b",
             cursor: "pointer", textAlign: "left",
-            fontFamily: "'JetBrains Mono',monospace",
+            fontFamily: "'Inter', system-ui, sans-serif",
           }}
         >
           <div style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8", marginBottom: 4 }}>Settings</div>

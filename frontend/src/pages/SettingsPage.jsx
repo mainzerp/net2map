@@ -7,9 +7,9 @@ function MapSettingsTabContent({ url, opacity, scale, fileRef, onUpload, onRemov
   const btnStyle = {
     border:"1px solid #1e293b", background:"#0f172a", color:"#94a3b8",
     borderRadius:6, padding:"6px 14px", cursor:"pointer",
-    fontFamily:"'JetBrains Mono',monospace", fontSize:11,
+    fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
   };
-  const labelStyle = { color:"#94a3b8", fontSize:11, fontFamily:"'JetBrains Mono',monospace" };
+  const labelStyle = { color:"#94a3b8", fontSize:11, fontFamily:"'Inter', system-ui, sans-serif" };
   const valStyle   = { color:"#64748b", fontSize:11, fontFamily:"monospace", minWidth:36 };
 
   return (
@@ -112,7 +112,7 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
   const needAuth = isV3 && F.v3_security_level !== "noAuthNoPriv";
   const needPriv = isV3 && F.v3_security_level === "authPriv";
 
-  const inp = { backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5, color:"#e2e8f0", padding:"5px 8px", fontFamily:"'JetBrains Mono',monospace", fontSize:11, width:"100%" };
+  const inp = { backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5, color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, width:"100%" };
   const sel = { ...inp, cursor:"pointer" };
 
   return (
@@ -128,7 +128,7 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
             <div style={{fontSize:10,color:"#475569",marginBottom:4}}>SNMP Version</div>
             <div style={{display:"flex",gap:6}}>
               {["v2c","v3"].map(v=>(
-                <button key={v} type="button" onClick={()=>set("snmp_version",v)} style={{padding:"4px 14px",borderRadius:5,fontSize:11,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace",fontWeight:F.snmp_version===v?600:400,backgroundColor:F.snmp_version===v?"#083344":"transparent",border:`1px solid ${F.snmp_version===v?"#164e63":"#1e293b"}`,color:F.snmp_version===v?"#22d3ee":"#475569"}}>{v}</button>
+                <button key={v} type="button" onClick={()=>set("snmp_version",v)} style={{padding:"4px 14px",borderRadius:5,fontSize:11,cursor:"pointer",fontFamily:"'Inter', system-ui, sans-serif",fontWeight:F.snmp_version===v?600:400,backgroundColor:F.snmp_version===v?"#083344":"transparent",border:`1px solid ${F.snmp_version===v?"#164e63":"#1e293b"}`,color:F.snmp_version===v?"#22d3ee":"#475569"}}>{v}</button>
               ))}
             </div>
           </div>
@@ -185,8 +185,8 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
           </div>
           {err && <div style={{color:"#f87171",fontSize:11,marginBottom:8}}>{err}</div>}
           <div style={{display:"flex",gap:6}}>
-            <button type="submit" style={{flex:1,backgroundColor:"#083344",border:"1px solid #164e63",color:"#22d3ee",borderRadius:6,padding:"6px",cursor:"pointer",fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:600}}>{editId?"Save":"Create profile"}</button>
-            {editId && <button type="button" onClick={resetForm} style={{backgroundColor:"transparent",border:"1px solid #1e293b",color:"#64748b",borderRadius:6,padding:"6px 12px",cursor:"pointer",fontFamily:"'JetBrains Mono',monospace",fontSize:11}}>Cancel</button>}
+            <button type="submit" style={{flex:1,backgroundColor:"#083344",border:"1px solid #164e63",color:"#22d3ee",borderRadius:6,padding:"6px",cursor:"pointer",fontFamily:"'Inter', system-ui, sans-serif",fontSize:11,fontWeight:600}}>{editId?"Save":"Create profile"}</button>
+            {editId && <button type="button" onClick={resetForm} style={{backgroundColor:"transparent",border:"1px solid #1e293b",color:"#64748b",borderRadius:6,padding:"6px 12px",cursor:"pointer",fontFamily:"'Inter', system-ui, sans-serif",fontSize:11}}>Cancel</button>}
           </div>
         </form>
         {loading ? <div style={{color:"#475569",fontSize:11}}>Loading...</div> : profiles.length === 0 ? (
@@ -202,8 +202,8 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
                 timeout {p.snmp_timeout ?? 3}s - retries {p.snmp_retries ?? 1} - hosts {p.max_parallel_hosts ?? 8}
               </div>
             </div>
-            <button onClick={()=>startEdit(p)} style={{background:"none",border:"1px solid #1e293b",color:"#475569",borderRadius:5,padding:"2px 8px",cursor:"pointer",fontSize:10,fontFamily:"'JetBrains Mono',monospace"}}>Edit</button>
-            <button onClick={()=>remove(p.id)} style={{background:"none",border:"1px solid #450a0a",color:"#7f1d1d",borderRadius:5,padding:"2px 8px",cursor:"pointer",fontSize:10,fontFamily:"'JetBrains Mono',monospace"}}>X</button>
+            <button onClick={()=>startEdit(p)} style={{background:"none",border:"1px solid #1e293b",color:"#475569",borderRadius:5,padding:"2px 8px",cursor:"pointer",fontSize:10,fontFamily:"'Inter', system-ui, sans-serif"}}>Edit</button>
+            <button onClick={()=>remove(p.id)} style={{background:"none",border:"1px solid #450a0a",color:"#7f1d1d",borderRadius:5,padding:"2px 8px",cursor:"pointer",fontSize:10,fontFamily:"'Inter', system-ui, sans-serif"}}>X</button>
           </div>
         ))}
       </div>
@@ -293,7 +293,7 @@ function CredentialsTabContent({ profiles }) {
   const inp = {
     backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
     color:"#e2e8f0", padding:"5px 8px",
-    fontFamily:"'JetBrains Mono',monospace", fontSize:11, width:"100%",
+    fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, width:"100%",
   };
   const sel = { ...inp, cursor:"pointer" };
   const lbl = () => ({ fontSize:10, color:"#475569", display:"block", userSelect:"none" });
@@ -347,7 +347,7 @@ function CredentialsTabContent({ profiles }) {
               {["v2c","v3"].map(v => (
                 <button key={v} type="button" onClick={()=>set("snmp_version",v)} style={{
                   padding:"4px 14px", borderRadius:5, fontSize:11, cursor:"pointer",
-                  fontFamily:"'JetBrains Mono',monospace", fontWeight: F.snmp_version===v ? 600 : 400,
+                  fontFamily:"'Inter', system-ui, sans-serif", fontWeight: F.snmp_version===v ? 600 : 400,
                   backgroundColor: F.snmp_version===v ? "#083344" : "transparent",
                   border: `1px solid ${F.snmp_version===v ? "#164e63" : "#1e293b"}`,
                   color: F.snmp_version===v ? "#22d3ee" : "#475569",
@@ -521,7 +521,7 @@ function CredentialsTabContent({ profiles }) {
                     style={{
                       background:"none",border:"1px solid #854d0e",color:"#fbbf24",
                       borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:10,
-                      fontFamily:"'JetBrains Mono',monospace",flexShrink:0,
+                      fontFamily:"'Inter', system-ui, sans-serif",flexShrink:0,
                     }}
                   >+ Add credentials</button>
                 </div>
@@ -588,9 +588,9 @@ function RacksTabContent() {
     refreshAll();
   };
 
-  const INPUT = { width:"100%", backgroundColor:"#020817", border:"1px solid #1e293b", borderRadius:4, padding:"5px 8px", color:"#e2e8f0", fontFamily:"'JetBrains Mono',monospace", fontSize:11, boxSizing:"border-box" };
+  const INPUT = { width:"100%", backgroundColor:"#020817", border:"1px solid #1e293b", borderRadius:4, padding:"5px 8px", color:"#e2e8f0", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, boxSizing:"border-box" };
   const LBL   = { color:"#94a3b8", fontSize:10, marginBottom:3, display:"block" };
-  const BTNP  = { backgroundColor:"#083344", border:"1px solid #164e63", color:"#22d3ee", borderRadius:6, padding:"6px", cursor:"pointer", fontFamily:"'JetBrains Mono',monospace", fontSize:11, fontWeight:600 };
+  const BTNP  = { backgroundColor:"#083344", border:"1px solid #164e63", color:"#22d3ee", borderRadius:6, padding:"6px", cursor:"pointer", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, fontWeight:600 };
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:16, overflowY:"auto", paddingTop:20, flex:1 }}>
@@ -607,7 +607,7 @@ function RacksTabContent() {
         {err && <div style={{ color:"#f87171", fontSize:11 }}>{err}</div>}
         <div style={{ display:"flex", gap:6 }}>
           <button type="submit" style={{ ...BTNP, flex:1 }}>{editId ? "Save" : "Create rack"}</button>
-          {editId && <button type="button" onClick={resetForm} style={{ backgroundColor:"transparent", border:"1px solid #1e293b", color:"#64748b", borderRadius:6, padding:"6px 12px", cursor:"pointer", fontFamily:"'JetBrains Mono',monospace", fontSize:11 }}>Cancel</button>}
+          {editId && <button type="button" onClick={resetForm} style={{ backgroundColor:"transparent", border:"1px solid #1e293b", color:"#64748b", borderRadius:6, padding:"6px 12px", cursor:"pointer", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11 }}>Cancel</button>}
         </div>
       </form>
 
@@ -631,8 +631,8 @@ function RacksTabContent() {
                 )}
               </div>
               <div style={{ display:"flex", gap:4, flexShrink:0 }}>
-                <button onClick={() => startEdit(rack)} style={{ background:"none", border:"1px solid #1e293b", color:"#64748b", borderRadius:4, padding:"2px 8px", cursor:"pointer", fontSize:10, fontFamily:"'JetBrains Mono',monospace" }}>Edit</button>
-                <button onClick={() => remove(rack.id)} style={{ background:"none", border:"1px solid #7f1d1d", color:"#f87171", borderRadius:4, padding:"2px 8px", cursor:"pointer", fontSize:10, fontFamily:"'JetBrains Mono',monospace" }}>Delete</button>
+                <button onClick={() => startEdit(rack)} style={{ background:"none", border:"1px solid #1e293b", color:"#64748b", borderRadius:4, padding:"2px 8px", cursor:"pointer", fontSize:10, fontFamily:"'Inter', system-ui, sans-serif" }}>Edit</button>
+                <button onClick={() => remove(rack.id)} style={{ background:"none", border:"1px solid #7f1d1d", color:"#f87171", borderRadius:4, padding:"2px 8px", cursor:"pointer", fontSize:10, fontFamily:"'Inter', system-ui, sans-serif" }}>Delete</button>
               </div>
             </div>
             <div style={{ marginTop:10, borderTop:"1px solid #0f172a", paddingTop:8 }}>
@@ -652,12 +652,12 @@ function RacksTabContent() {
               )}
               <div style={{ display:"flex", gap:4 }}>
                 <select value={selVal} onChange={e => setAssignSel(p => ({...p, [rack.id]:e.target.value}))}
-                  style={{ flex:1, backgroundColor:"#020817", border:"1px solid #1e293b", borderRadius:4, padding:"4px 6px", color:selVal?"#e2e8f0":"#475569", fontFamily:"'JetBrains Mono',monospace", fontSize:10 }}>
+                  style={{ flex:1, backgroundColor:"#020817", border:"1px solid #1e293b", borderRadius:4, padding:"4px 6px", color:selVal?"#e2e8f0":"#475569", fontFamily:"'Inter', system-ui, sans-serif", fontSize:10 }}>
                   <option value="">-- Assign switch --</option>
                   {available.map(d => <option key={d.id} value={d.id}>{d.sys_name || d.ip} ({d.ip})</option>)}
                 </select>
                 <button onClick={() => assignDevice(rack.id)} disabled={!selVal}
-                  style={{ backgroundColor:selVal?"#083344":"#0a0e18", border:"1px solid #164e63", color:selVal?"#22d3ee":"#1e3a5f", borderRadius:4, padding:"4px 10px", cursor:selVal?"pointer":"not-allowed", fontFamily:"'JetBrains Mono',monospace", fontSize:10 }}>
+                  style={{ backgroundColor:selVal?"#083344":"#0a0e18", border:"1px solid #164e63", color:selVal?"#22d3ee":"#1e3a5f", borderRadius:4, padding:"4px 10px", cursor:selVal?"pointer":"not-allowed", fontFamily:"'Inter', system-ui, sans-serif", fontSize:10 }}>
                   Assign
                 </button>
               </div>
@@ -724,9 +724,9 @@ function ClassesTabContent() {
     refreshAll();
   };
 
-  const INPUT = { width:"100%", backgroundColor:"#020817", border:"1px solid #1e293b", borderRadius:4, padding:"5px 8px", color:"#e2e8f0", fontFamily:"'JetBrains Mono',monospace", fontSize:11, boxSizing:"border-box" };
+  const INPUT = { width:"100%", backgroundColor:"#020817", border:"1px solid #1e293b", borderRadius:4, padding:"5px 8px", color:"#e2e8f0", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, boxSizing:"border-box" };
   const LBL   = { color:"#94a3b8", fontSize:10, marginBottom:3, display:"block" };
-  const BTNP  = { backgroundColor:"#083344", border:"1px solid #164e63", color:"#22d3ee", borderRadius:6, padding:"6px", cursor:"pointer", fontFamily:"'JetBrains Mono',monospace", fontSize:11, fontWeight:600 };
+  const BTNP  = { backgroundColor:"#083344", border:"1px solid #164e63", color:"#22d3ee", borderRadius:6, padding:"6px", cursor:"pointer", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, fontWeight:600 };
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:16, overflowY:"auto", paddingTop:20, flex:1 }}>
@@ -750,7 +750,7 @@ function ClassesTabContent() {
         {err && <div style={{ color:"#f87171", fontSize:11 }}>{err}</div>}
         <div style={{ display:"flex", gap:6 }}>
           <button type="submit" style={{ ...BTNP, flex:1 }}>{editId ? "Save" : "Create class"}</button>
-          {editId && <button type="button" onClick={resetForm} style={{ backgroundColor:"transparent", border:"1px solid #1e293b", color:"#64748b", borderRadius:6, padding:"6px 12px", cursor:"pointer", fontFamily:"'JetBrains Mono',monospace", fontSize:11 }}>Cancel</button>}
+          {editId && <button type="button" onClick={resetForm} style={{ backgroundColor:"transparent", border:"1px solid #1e293b", color:"#64748b", borderRadius:6, padding:"6px 12px", cursor:"pointer", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11 }}>Cancel</button>}
         </div>
       </form>
 
@@ -775,8 +775,8 @@ function ClassesTabContent() {
                   {sc.description && <div style={{ color:"#475569", fontSize:10, marginTop:2, marginLeft:17 }}>{sc.description}</div>}
                 </div>
                 <div style={{ display:"flex", gap:4, flexShrink:0 }}>
-                  <button onClick={() => startEdit(sc)} style={{ background:"none", border:"1px solid #1e293b", color:"#64748b", borderRadius:4, padding:"2px 8px", cursor:"pointer", fontSize:10, fontFamily:"'JetBrains Mono',monospace" }}>Edit</button>
-                  <button onClick={() => remove(sc.id)} style={{ background:"none", border:"1px solid #7f1d1d", color:"#f87171", borderRadius:4, padding:"2px 8px", cursor:"pointer", fontSize:10, fontFamily:"'JetBrains Mono',monospace" }}>Delete</button>
+                  <button onClick={() => startEdit(sc)} style={{ background:"none", border:"1px solid #1e293b", color:"#64748b", borderRadius:4, padding:"2px 8px", cursor:"pointer", fontSize:10, fontFamily:"'Inter', system-ui, sans-serif" }}>Edit</button>
+                  <button onClick={() => remove(sc.id)} style={{ background:"none", border:"1px solid #7f1d1d", color:"#f87171", borderRadius:4, padding:"2px 8px", cursor:"pointer", fontSize:10, fontFamily:"'Inter', system-ui, sans-serif" }}>Delete</button>
                 </div>
               </div>
               <div style={{ marginTop:10, borderTop:"1px solid #0f172a", paddingTop:8 }}>
@@ -796,12 +796,12 @@ function ClassesTabContent() {
                 )}
                 <div style={{ display:"flex", gap:4 }}>
                   <select value={selVal} onChange={e => setAssignSel(p => ({...p, [sc.id]:e.target.value}))}
-                    style={{ flex:1, backgroundColor:"#020817", border:"1px solid #1e293b", borderRadius:4, padding:"4px 6px", color:selVal?"#e2e8f0":"#475569", fontFamily:"'JetBrains Mono',monospace", fontSize:10 }}>
+                    style={{ flex:1, backgroundColor:"#020817", border:"1px solid #1e293b", borderRadius:4, padding:"4px 6px", color:selVal?"#e2e8f0":"#475569", fontFamily:"'Inter', system-ui, sans-serif", fontSize:10 }}>
                     <option value="">-- Assign switch --</option>
                     {available.map(d => <option key={d.id} value={d.id}>{d.sys_name || d.ip} ({d.ip})</option>)}
                   </select>
                   <button onClick={() => assignDevice(sc.id)} disabled={!selVal}
-                    style={{ backgroundColor:selVal?"#083344":"#0a0e18", border:"1px solid #164e63", color:selVal?"#22d3ee":"#1e3a5f", borderRadius:4, padding:"4px 10px", cursor:selVal?"pointer":"not-allowed", fontFamily:"'JetBrains Mono',monospace", fontSize:10 }}>
+                    style={{ backgroundColor:selVal?"#083344":"#0a0e18", border:"1px solid #164e63", color:selVal?"#22d3ee":"#1e3a5f", borderRadius:4, padding:"4px 10px", cursor:selVal?"pointer":"not-allowed", fontFamily:"'Inter', system-ui, sans-serif", fontSize:10 }}>
                     Assign
                   </button>
                 </div>
@@ -922,7 +922,7 @@ function EngineTabContent() {
   const btnStyle = {
     border: "1px solid #164e63", background: "#083344", color: "#22d3ee",
     borderRadius: 6, padding: "10px 24px", cursor: "pointer",
-    fontFamily: "'JetBrains Mono',monospace", fontSize: 12, fontWeight: 600,
+    fontFamily: "'Inter', system-ui, sans-serif", fontSize: 12, fontWeight: 600,
     transition: "all 0.15s",
   };
 
@@ -951,7 +951,7 @@ function EngineTabContent() {
             disabled={settingsLoading || settingsSaving || scanning}
             style={{
               width:90, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
-              color:"#e2e8f0", padding:"5px 8px", fontFamily:"'JetBrains Mono',monospace", fontSize:11,
+              color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
             }}
           />
           <button
@@ -960,7 +960,7 @@ function EngineTabContent() {
             style={{
               border:"1px solid #1e293b", background:"#0f172a", color:"#94a3b8",
               borderRadius:6, padding:"5px 10px", cursor:(settingsLoading || settingsSaving || scanning)?"default":"pointer",
-              fontFamily:"'JetBrains Mono',monospace", fontSize:10,
+              fontFamily:"'Inter', system-ui, sans-serif", fontSize:10,
               opacity:(settingsLoading || settingsSaving || scanning)?0.6:1,
             }}
           >{settingsSaving ? "Saving..." : "Save"}</button>
@@ -984,7 +984,7 @@ function EngineTabContent() {
               style={{
                 border:"1px solid #7f1d1d", background:"#1c1917", color:"#f87171",
                 borderRadius:6, padding:"10px 18px", cursor:"pointer",
-                fontFamily:"'JetBrains Mono',monospace", fontSize:11, fontWeight:600,
+                fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, fontWeight:600,
               }}
             >Cancel</button>
           )}
@@ -1175,7 +1175,7 @@ function DnsSettingsTabContent() {
   const textareaStyle = {
     backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:6,
     color:"#e2e8f0", padding:"8px 10px", minHeight:140, resize:"vertical",
-    fontFamily:"'JetBrains Mono',monospace", fontSize:11, width:"100%",
+    fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, width:"100%",
   };
 
   return (
@@ -1209,7 +1209,7 @@ function DnsSettingsTabContent() {
                 style={{
                   border:"1px solid #164e63", background:"#083344", color:"#22d3ee",
                   borderRadius:6, padding:"8px 16px", cursor:saving ? "wait" : "pointer",
-                  fontFamily:"'JetBrains Mono',monospace", fontSize:11, fontWeight:600,
+                  fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, fontWeight:600,
                   opacity:saving ? 0.7 : 1,
                 }}
               >{saving ? "Saving..." : "Save DNS Settings"}</button>
@@ -1308,7 +1308,7 @@ export default function SettingsPage() {
   return (
     <div style={{
       display:"flex", height:"calc(100vh - 48px)", overflow:"hidden",
-      backgroundColor:"#020817", fontFamily:"'JetBrains Mono',monospace",
+      backgroundColor:"#020817", fontFamily:"'Inter', system-ui, sans-serif",
     }}>
       {/* Sidebar */}
       <div style={{

@@ -41,7 +41,7 @@ export default function LogsPage() {
       padding: "24px 32px",
       maxWidth: 1400,
       margin: "0 auto",
-      fontFamily: "'JetBrains Mono',monospace",
+      fontFamily: "'Inter', system-ui, sans-serif",
       color: "#94a3b8",
     }}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,gap:12,flexWrap:"wrap"}}>

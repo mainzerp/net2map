@@ -8,7 +8,7 @@ function ActiveLinkBar({ link, color, onClear }) {
     <div style={{
       marginBottom:10, padding:"9px 14px",
       backgroundColor:`${color}0e`, border:`1px solid ${color}44`,
-      borderRadius:8, fontFamily:"'JetBrains Mono',monospace", fontSize:11,
+      borderRadius:8, fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
       display:"flex", alignItems:"center", justifyContent:"space-between", gap:8,
     }}>
       <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
@@ -52,7 +52,7 @@ function FilterBar({ racks, classes, filters, onFilterChange }) {
 
   const btnStyle = (active) => ({
     fontSize: 10, padding: "3px 8px", borderRadius: 4, cursor: "pointer",
-    fontFamily: "'JetBrains Mono',monospace", border: "1px solid",
+    fontFamily: "'Inter', system-ui, sans-serif", border: "1px solid",
     borderColor: active ? "#164e63" : "#1e293b",
     backgroundColor: active ? "#083344" : "#0a0e18",
     color: active ? "#22d3ee" : "#475569",
@@ -64,7 +64,7 @@ function FilterBar({ racks, classes, filters, onFilterChange }) {
       display: "flex", alignItems: "center", gap: 12, marginBottom: 10,
       padding: "8px 12px", backgroundColor: "#020817",
       border: "1px solid #0f172a", borderRadius: 8,
-      fontFamily: "'JetBrains Mono',monospace", flexWrap: "wrap",
+      fontFamily: "'Inter', system-ui, sans-serif", flexWrap: "wrap",
     }}>
       {racks.length > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -105,7 +105,7 @@ function FilterBar({ racks, classes, filters, onFilterChange }) {
       {hasFilters && (
         <button onClick={clearFilters} style={{
           fontSize: 9, padding: "3px 8px", borderRadius: 4, cursor: "pointer",
-          fontFamily: "'JetBrains Mono',monospace",
+          fontFamily: "'Inter', system-ui, sans-serif",
           border: "1px solid #7f1d1d", backgroundColor: "transparent",
           color: "#f87171",
         }}>Clear filters</button>
@@ -620,7 +620,7 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
       position:"fixed", right:0, top:48, bottom:0, width:760,
       backgroundColor:"#020817", borderLeft:"1px solid #1e293b",
       zIndex:100, display:"flex", flexDirection:"column",
-      fontFamily:"'JetBrains Mono',monospace",
+      fontFamily:"'Inter', system-ui, sans-serif",
       boxShadow:"-8px 0 40px rgba(0,0,0,0.6)",
       animation:"slideIn 0.2s ease",
     }}>
@@ -1010,7 +1010,7 @@ export default function MapPage() {
         padding: "8px 24px", borderBottom: "1px solid #0f172a",
         display: "flex", alignItems: "center", justifyContent: "space-between",
         backgroundColor: "#020817", fontSize: 11,
-        fontFamily: "'JetBrains Mono',monospace",
+        fontFamily: "'Inter', system-ui, sans-serif",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <span style={{ color: "#475569" }}><span style={{ color: "#22c55e" }}>|</span> {topology.nodes.length} Switches</span>
@@ -1024,7 +1024,7 @@ export default function MapPage() {
             style={{
               border: "1px solid #1e293b", background: "none",
               color: "#475569", borderRadius: 6, padding: "4px 10px",
-              cursor: "pointer", fontFamily: "'JetBrains Mono',monospace", fontSize: 11,
+              cursor: "pointer", fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11,
             }}
           >(R)</button>
         </div>

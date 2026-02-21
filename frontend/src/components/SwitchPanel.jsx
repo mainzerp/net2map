@@ -124,7 +124,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
                   fontSize:10, padding:"3px 10px", borderRadius:5,
                   border:"1px solid #164e63", backgroundColor:"#083344",
                   color:"#22d3ee", cursor:"pointer",
-                  fontFamily:"'JetBrains Mono',monospace",
+                  fontFamily:"'Inter', system-ui, sans-serif",
                 }}
               >{r.label}</button>
             ))}
@@ -149,7 +149,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
               style={{
                 fontSize:10, padding:"5px 6px", borderRadius:5,
                 border:"1px solid #1e293b", backgroundColor:"#020817",
-                color:"#94a3b8", fontFamily:"'JetBrains Mono',monospace",
+                color:"#94a3b8", fontFamily:"'Inter', system-ui, sans-serif",
               }}
             >
               <option value="aruba_cx">{VENDOR_LABEL.aruba_cx}</option>
@@ -167,7 +167,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
               style={{
                 fontSize:10, padding:"5px 6px", borderRadius:5,
                 border:"1px solid #1e293b", backgroundColor:"#020817",
-                color:"#94a3b8", fontFamily:"'JetBrains Mono',monospace",
+                color:"#94a3b8", fontFamily:"'Inter', system-ui, sans-serif",
               }}
             />
           </div>
@@ -177,7 +177,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
               style={{
                 fontSize:10, padding:"4px 10px", borderRadius:5,
                 border:"1px solid #1e293b", backgroundColor:"transparent",
-                color:"#64748b", cursor:"pointer", fontFamily:"'JetBrains Mono',monospace",
+                color:"#64748b", cursor:"pointer", fontFamily:"'Inter', system-ui, sans-serif",
               }}
             >Close</button>
             <button
@@ -188,7 +188,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
                 border:"1px solid #164e63", backgroundColor:"#083344",
                 color:"#22d3ee", cursor:savingMeta ? "default" : "pointer",
                 opacity:savingMeta ? 0.65 : 1,
-                fontFamily:"'JetBrains Mono',monospace",
+                fontFamily:"'Inter', system-ui, sans-serif",
               }}
             >{savingMeta ? "Saving..." : "Save"}</button>
           </div>
