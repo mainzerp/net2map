@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { speedColor, VENDOR_LABEL } from "../api.js";
 import Port from "./Port.jsx";
 
@@ -10,6 +10,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
   const [vendorInput, setVendorInput] = useState(device.vendor || "generic");
   const [modelInput, setModelInput] = useState(device.model || "");
   const [savingMeta, setSavingMeta] = useState(false);
+  const panelRef = useRef(null);
   const activePorts = device.ports.filter(p => p.oper_status === 1);
   const pingStatus = device.ping_status || "unknown";
   const statusColor = pingStatus === "online" ? "#22c55e" : pingStatus === "offline" ? "#f87171" : "#64748b";
@@ -18,6 +19,16 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
     setVendorInput(device.vendor || "generic");
     setModelInput(device.model || "");
   }, [device.id, device.vendor, device.model]);
+
+  useEffect(() => {
+    if (!showEdit) return;
+    const onMouseDown = (e) => {
+      if (!panelRef.current) return;
+      if (!panelRef.current.contains(e.target)) setShowEdit(false);
+    };
+    window.addEventListener("mousedown", onMouseDown);
+    return () => window.removeEventListener("mousedown", onMouseDown);
+  }, [showEdit]);
 
   const saveMeta = async () => {
     if (!onUpdateMeta || savingMeta) return;
@@ -34,9 +45,11 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
   };
 
   return (
-    <div style={{
-      backgroundColor:"#0f172a", border:"1px solid #1e293b",
-      borderRadius:10, marginBottom:6, overflow:"hidden",
+    <div ref={panelRef} style={{
+      backgroundColor:"#0f172a", border: showEdit ? "1px solid #164e63" : "1px solid #1e293b",
+      borderRadius:10, marginBottom:6, overflow:"visible", position:"relative",
+      boxShadow: showEdit ? "0 0 0 1px #083344, 0 0 12px #083344" : "none",
+      transition:"all 0.15s",
     }}>
       <div onClick={() => setOpen(!open)} style={{
         display:"flex", alignItems:"center", justifyContent:"space-between",
@@ -121,50 +134,64 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
 
       {showEdit && onUpdateMeta && (
         <div style={{
-          padding:"8px 14px 10px", borderBottom:"1px solid #1e293b",
-          backgroundColor:"#080d18",
-          display:"flex", alignItems:"flex-end", gap:8, flexWrap:"wrap",
-        }}>
+          position:"absolute", top:8, left:"calc(100% + 10px)", zIndex:30,
+          width:270, padding:"10px", borderRadius:8,
+          backgroundColor:"#080d18", border:"1px solid #1e293b",
+          boxShadow:"0 8px 24px rgba(0,0,0,0.45)",
+          display:"flex", flexDirection:"column", gap:8,
+        }} onClick={e => e.stopPropagation()}>
+          <div style={{fontSize:10,color:"#64748b",letterSpacing:1}}>EDIT SWITCH</div>
           <div style={{display:"flex",flexDirection:"column",gap:4}}>
             <div style={{fontSize:10,color:"#475569"}}>Vendor</div>
             <select
               value={vendorInput}
               onChange={e => setVendorInput(e.target.value)}
               style={{
-                fontSize:10, padding:"4px 6px", borderRadius:5,
+                fontSize:10, padding:"5px 6px", borderRadius:5,
                 border:"1px solid #1e293b", backgroundColor:"#020817",
                 color:"#94a3b8", fontFamily:"'JetBrains Mono',monospace",
               }}
             >
               <option value="aruba_cx">{VENDOR_LABEL.aruba_cx}</option>
               <option value="fs">{VENDOR_LABEL.fs}</option>
+              <option value="unifi">{VENDOR_LABEL.unifi}</option>
               <option value="generic">{VENDOR_LABEL.generic}</option>
             </select>
           </div>
-          <div style={{display:"flex",flexDirection:"column",gap:4,minWidth:180,flex:1}}>
+          <div style={{display:"flex",flexDirection:"column",gap:4}}>
             <div style={{fontSize:10,color:"#475569"}}>Model</div>
             <input
               value={modelInput}
               onChange={e => setModelInput(e.target.value)}
-              placeholder="e.g. Aruba CX 6100"
+              placeholder="e.g. UniFi USW-24"
               style={{
-                fontSize:10, padding:"4px 6px", borderRadius:5,
+                fontSize:10, padding:"5px 6px", borderRadius:5,
                 border:"1px solid #1e293b", backgroundColor:"#020817",
                 color:"#94a3b8", fontFamily:"'JetBrains Mono',monospace",
               }}
             />
           </div>
-          <button
-            onClick={saveMeta}
-            disabled={savingMeta}
-            style={{
-              fontSize:10, padding:"4px 10px", borderRadius:5,
-              border:"1px solid #164e63", backgroundColor:"#083344",
-              color:"#22d3ee", cursor:savingMeta ? "default" : "pointer",
-              opacity:savingMeta ? 0.65 : 1,
-              fontFamily:"'JetBrains Mono',monospace",
-            }}
-          >{savingMeta ? "Saving..." : "Save"}</button>
+          <div style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
+            <button
+              onClick={() => setShowEdit(false)}
+              style={{
+                fontSize:10, padding:"4px 10px", borderRadius:5,
+                border:"1px solid #1e293b", backgroundColor:"transparent",
+                color:"#64748b", cursor:"pointer", fontFamily:"'JetBrains Mono',monospace",
+              }}
+            >Close</button>
+            <button
+              onClick={saveMeta}
+              disabled={savingMeta}
+              style={{
+                fontSize:10, padding:"4px 10px", borderRadius:5,
+                border:"1px solid #164e63", backgroundColor:"#083344",
+                color:"#22d3ee", cursor:savingMeta ? "default" : "pointer",
+                opacity:savingMeta ? 0.65 : 1,
+                fontFamily:"'JetBrains Mono',monospace",
+              }}
+            >{savingMeta ? "Saving..." : "Save"}</button>
+          </div>
         </div>
       )}
 
