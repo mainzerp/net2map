@@ -76,6 +76,9 @@ class SnmpProfileBase(BaseModel):
     v3_auth_password:  str           = ""
     v3_priv_protocol:  PrivProtocol  = "AES-128"
     v3_priv_password:  str           = ""
+    snmp_timeout:      int           = 3
+    snmp_retries:      int           = 1
+    max_parallel_hosts:int           = 8
 
 
 class SnmpProfileCreate(SnmpProfileBase):
@@ -92,6 +95,9 @@ class SnmpProfileUpdate(BaseModel):
     v3_auth_password:  Optional[str]           = None
     v3_priv_protocol:  Optional[PrivProtocol]  = None
     v3_priv_password:  Optional[str]           = None
+    snmp_timeout:      Optional[int]           = None
+    snmp_retries:      Optional[int]           = None
+    max_parallel_hosts:Optional[int]           = None
 
 
 class SnmpProfileOut(SnmpProfileBase):
@@ -245,6 +251,22 @@ class ScanSwitchMetric(BaseModel):
     error:       str = ""
 
 
+class ScanRunOut(BaseModel):
+    id:                int
+    status:            str
+    scanned:           int
+    found:             int
+    links:             int
+    max_workers:       int
+    total_duration_ms: int
+    error_count:       int
+    created_at:        datetime
+    switch_metrics:    List[ScanSwitchMetric] = []
+
+    class Config:
+        from_attributes = True
+
+
 class ScanResult(BaseModel):
     scanned:            int
     found:              int
@@ -253,3 +275,5 @@ class ScanResult(BaseModel):
     max_workers:        int = 1
     total_duration_ms:  int = 0
     switch_metrics:     List[ScanSwitchMetric] = []
+    status:             str = "finished"
+    run_id:             Optional[int] = None

@@ -6,9 +6,11 @@ import socket
 import shutil
 import ipaddress
 import time
+import threading
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import List
+from typing import Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,13 +19,14 @@ from sqlalchemy.orm import Session
 
 from database import (
     Credential, Device, Port, TopologyLink, SnmpProfile,
+    ScanRun, ScanRunSwitchMetric, SessionLocal,
     Rack as RackModel, SwitchClass as SwitchClassModel,
     create_tables, get_db,
 )
 from schemas import (
     CredentialCreate, CredentialOut, CredentialUpdate,
     DeviceOut, DevicePositionUpdate, DeviceMetaUpdate,
-    ScanResult, ScanSwitchMetric, TopologyOut, TopologyLinkOut,
+    ScanResult, ScanRunOut, ScanSwitchMetric, TopologyOut, TopologyLinkOut,
     SnmpProfileCreate, SnmpProfileUpdate, SnmpProfileOut,
     RackCreate, RackUpdate, RackOut,
     SwitchClassCreate, SwitchClassUpdate, SwitchClassOut,
@@ -47,6 +50,10 @@ app.add_middleware(
 )
 
 
+SCAN_JOBS: Dict[str, dict] = {}
+SCAN_JOBS_LOCK = threading.Lock()
+
+
 @app.on_event("startup")
 def on_startup():
     create_tables()
@@ -60,7 +67,11 @@ def list_snmp_profiles(db: Session = Depends(get_db)):
 
 @app.post("/api/snmp-profiles", response_model=SnmpProfileOut, status_code=201)
 def create_snmp_profile(body: SnmpProfileCreate, db: Session = Depends(get_db)):
-    profile = SnmpProfile(**body.model_dump())
+    payload = body.model_dump()
+    payload["snmp_timeout"] = max(1, min(30, int(payload.get("snmp_timeout", 3))))
+    payload["snmp_retries"] = max(0, min(10, int(payload.get("snmp_retries", 1))))
+    payload["max_parallel_hosts"] = max(1, min(64, int(payload.get("max_parallel_hosts", 8))))
+    profile = SnmpProfile(**payload)
     db.add(profile)
     db.commit()
     db.refresh(profile)
@@ -72,7 +83,15 @@ def update_snmp_profile(profile_id: int, body: SnmpProfileUpdate, db: Session = 
     profile = db.query(SnmpProfile).filter(SnmpProfile.id == profile_id).first()
     if not profile:
         raise HTTPException(404, "Profile not found")
-    for k, v in body.model_dump(exclude_none=True).items():
+    payload = body.model_dump(exclude_none=True)
+    if "snmp_timeout" in payload:
+        payload["snmp_timeout"] = max(1, min(30, int(payload["snmp_timeout"])))
+    if "snmp_retries" in payload:
+        payload["snmp_retries"] = max(0, min(10, int(payload["snmp_retries"])))
+    if "max_parallel_hosts" in payload:
+        payload["max_parallel_hosts"] = max(1, min(64, int(payload["max_parallel_hosts"])))
+
+    for k, v in payload.items():
         setattr(profile, k, v)
     db.commit()
     db.refresh(profile)
@@ -210,15 +229,46 @@ def delete_credential(cred_id: int, db: Session = Depends(get_db)):
 
 # ─── SNMP Scan ────────────────────────────────────────────────────────────────
 
-@app.post("/api/scan", response_model=ScanResult)
-def run_scan(db: Session = Depends(get_db)):
-    """
-    Scan all enabled credentials via SNMPv2c or SNMPv3.
-    Discovered devices and LLDP links are upserted into the DB.
-    """
+def _coerce_profile_policy(profile: Optional[SnmpProfile]) -> tuple[int, int, int]:
+    if not profile:
+        return 3, 1, 8
+    timeout = max(1, min(30, int(profile.snmp_timeout or 3)))
+    retries = max(0, min(10, int(profile.snmp_retries or 1)))
+    max_hosts = max(1, min(64, int(profile.max_parallel_hosts or 8)))
+    return timeout, retries, max_hosts
+
+
+def _persist_scan_run(db: Session, result: ScanResult) -> int:
+    run = ScanRun(
+        status=result.status,
+        scanned=result.scanned,
+        found=result.found,
+        links=result.links,
+        max_workers=result.max_workers,
+        total_duration_ms=result.total_duration_ms,
+        error_count=len(result.errors or []),
+    )
+    db.add(run)
+    db.flush()
+
+    for metric in result.switch_metrics:
+        db.add(ScanRunSwitchMetric(
+            scan_run_id=run.id,
+            ip=metric.ip,
+            label=metric.label,
+            duration_ms=metric.duration_ms,
+            success=metric.success,
+            error=metric.error,
+        ))
+
+    db.commit()
+    return run.id
+
+
+def _execute_scan(db: Session, cancel_event: Optional[threading.Event] = None) -> ScanResult:
     credentials = db.query(Credential).filter(Credential.enabled == True).all()
     scan_settings = _read_scan_settings()
-    max_workers = scan_settings.get("max_workers", 4)
+    configured_max_workers = scan_settings.get("max_workers", 4)
 
     if not credentials:
         return ScanResult(
@@ -226,21 +276,29 @@ def run_scan(db: Session = Depends(get_db)):
             found=0,
             links=0,
             errors=["No enabled credentials"],
-            max_workers=max_workers,
+            max_workers=configured_max_workers,
             total_duration_ms=0,
             switch_metrics=[],
+            status="finished",
         )
 
     errors: List[str] = []
-    switch_data: dict[str, SwitchData] = {}
+    switch_data: Dict[str, SwitchData] = {}
     switch_metrics: List[ScanSwitchMetric] = []
 
     scan_targets = []
+    profile_limits: Dict[str, int] = {}
+
     for cred in credentials:
         p = cred.profile
+        snmp_timeout, snmp_retries, profile_max_hosts = _coerce_profile_policy(p)
+        profile_key = f"profile:{p.id}" if p else f"cred:{cred.id}"
+        profile_limits[profile_key] = profile_max_hosts
+
         scan_targets.append({
             "ip": cred.ip,
             "label": cred.label,
+            "profile_key": profile_key,
             "snmp_port": cred.snmp_port,
             "snmp_version": p.snmp_version if p else cred.snmp_version,
             "community": p.community if p else cred.community,
@@ -250,35 +308,54 @@ def run_scan(db: Session = Depends(get_db)):
             "v3_auth_password": p.v3_auth_password if p else cred.v3_auth_password,
             "v3_priv_protocol": p.v3_priv_protocol if p else cred.v3_priv_protocol,
             "v3_priv_password": p.v3_priv_password if p else cred.v3_priv_password,
+            "snmp_timeout": snmp_timeout,
+            "snmp_retries": snmp_retries,
         })
+
+    profile_semaphores = {
+        k: threading.BoundedSemaphore(v) for k, v in profile_limits.items()
+    }
 
     def _scan_target(target: dict):
         started = time.perf_counter()
         ip = target["ip"]
         label = target["label"]
-        try:
-            data = scan_switch(
-                ip=ip,
-                snmp_version=target["snmp_version"],
-                community=target["community"],
-                snmp_port=target["snmp_port"],
-                v3_security_level=target["v3_security_level"],
-                v3_username=target["v3_username"],
-                v3_auth_protocol=target["v3_auth_protocol"],
-                v3_auth_password=target["v3_auth_password"],
-                v3_priv_protocol=target["v3_priv_protocol"],
-                v3_priv_password=target["v3_priv_password"],
-            )
+
+        if cancel_event and cancel_event.is_set():
             duration_ms = int((time.perf_counter() - started) * 1000)
-            if data:
-                return ip, label, data, "", duration_ms
-            return ip, label, None, "no SNMP response", duration_ms
-        except Exception as exc:
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            return ip, label, None, str(exc), duration_ms
+            return ip, label, None, "cancelled", duration_ms
+
+        sem = profile_semaphores[target["profile_key"]]
+        with sem:
+            if cancel_event and cancel_event.is_set():
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                return ip, label, None, "cancelled", duration_ms
+            try:
+                data = scan_switch(
+                    ip=ip,
+                    snmp_version=target["snmp_version"],
+                    community=target["community"],
+                    snmp_port=target["snmp_port"],
+                    snmp_timeout=target["snmp_timeout"],
+                    snmp_retries=target["snmp_retries"],
+                    v3_security_level=target["v3_security_level"],
+                    v3_username=target["v3_username"],
+                    v3_auth_protocol=target["v3_auth_protocol"],
+                    v3_auth_password=target["v3_auth_password"],
+                    v3_priv_protocol=target["v3_priv_protocol"],
+                    v3_priv_password=target["v3_priv_password"],
+                )
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                if data:
+                    return ip, label, data, "", duration_ms
+                return ip, label, None, "no SNMP response", duration_ms
+            except Exception as exc:
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                return ip, label, None, str(exc), duration_ms
 
     scan_started = time.perf_counter()
-    workers = max(1, min(int(max_workers), len(scan_targets)))
+    workers = max(1, min(int(configured_max_workers), len(scan_targets)))
+
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(_scan_target, target) for target in scan_targets]
         for fut in as_completed(futures):
@@ -289,13 +366,16 @@ def run_scan(db: Session = Depends(get_db)):
                     ip=ip, label=label, duration_ms=duration_ms, success=True, error=""
                 ))
             else:
-                errors.append(f"{ip}: {error_msg}")
+                if error_msg and error_msg != "cancelled":
+                    errors.append(f"{ip}: {error_msg}")
                 switch_metrics.append(ScanSwitchMetric(
-                    ip=ip, label=label, duration_ms=duration_ms, success=False, error=error_msg
+                    ip=ip, label=label, duration_ms=duration_ms,
+                    success=False, error=error_msg or "no SNMP response"
                 ))
 
     total_duration_ms = int((time.perf_counter() - scan_started) * 1000)
     switch_metrics.sort(key=lambda m: m.duration_ms, reverse=True)
+    status = "cancelled" if (cancel_event and cancel_event.is_set()) else "finished"
 
     if not switch_data:
         return ScanResult(
@@ -306,16 +386,14 @@ def run_scan(db: Session = Depends(get_db)):
             max_workers=workers,
             total_duration_ms=total_duration_ms,
             switch_metrics=switch_metrics,
+            status=status,
         )
 
-    # --- determine positions for genuinely new IPs ---
     existing_ips = {d.ip for d in db.query(Device.ip).all()}
     new_ips = [ip for ip in switch_data if ip not in existing_ips]
-    # keep positions of existing + layout new ones around them
     all_ips_ordered = list(existing_ips) + new_ips
     layout = auto_layout(all_ips_ordered)
 
-    # --- upsert devices ---
     for ip, sw in switch_data.items():
         model = extract_model(sw.sys_descr, sw.vendor)
 
@@ -329,22 +407,20 @@ def run_scan(db: Session = Depends(get_db)):
             device.last_seen = datetime.utcnow()
         else:
             x, y = layout.get(ip, (100.0, 100.0))
-            device = Device(
+            db.add(Device(
                 ip=ip,
-                sys_name  = sw.sys_name,
-                sys_descr = sw.sys_descr,
-                model     = model,
-                vendor    = sw.vendor,
-                location  = sw.location,
-                map_x     = x,
-                map_y     = y,
-            )
-            db.add(device)
+                sys_name=sw.sys_name,
+                sys_descr=sw.sys_descr,
+                model=model,
+                vendor=sw.vendor,
+                location=sw.location,
+                map_x=x,
+                map_y=y,
+            ))
 
-    db.flush()  # get IDs
+    db.flush()
 
-    # --- upsert ports ---
-    dns_cache: dict[str, str] = {}
+    dns_cache: Dict[str, str] = {}
     dns_servers = _read_dns_settings().get("servers", [])
 
     for ip, sw in switch_data.items():
@@ -352,7 +428,7 @@ def run_scan(db: Session = Depends(get_db)):
         if not device:
             continue
 
-        peers_by_ifindex: dict[int, list[tuple[str, str, str]]] = {}
+        peers_by_ifindex: Dict[int, List[tuple[str, str, str]]] = {}
         for mac, peer_ip in sw.arp_table.items():
             ifindex = sw.mac_ifindex.get(mac)
             if ifindex is None or not peer_ip:
@@ -360,7 +436,6 @@ def run_scan(db: Session = Depends(get_db)):
             peer_host = _resolve_host(peer_ip, dns_cache, dns_servers)
             peers_by_ifindex.setdefault(ifindex, []).append((mac, peer_ip, peer_host))
 
-        # delete old ports for this device then re-insert
         db.query(Port).filter(Port.device_id == device.id).delete()
         for iface in sw.interfaces.values():
             if is_virtual(iface.descr, sw.vendor):
@@ -374,21 +449,18 @@ def run_scan(db: Session = Depends(get_db)):
                     peers_by_ifindex[iface.index], key=lambda x: x[1]
                 )[0]
 
-            port = Port(
-                device_id   = device.id,
-                if_index    = iface.index,
-                if_descr    = iface.descr,
-                if_alias    = iface.alias,
-                speed_mbps  = iface.speed_mbps,
-                oper_status = iface.oper_status,
-                peer_mac    = peer_mac,
-                peer_ip     = peer_ip,
-                peer_host   = peer_host,
-            )
-            db.add(port)
+            db.add(Port(
+                device_id=device.id,
+                if_index=iface.index,
+                if_descr=iface.descr,
+                if_alias=iface.alias,
+                speed_mbps=iface.speed_mbps,
+                oper_status=iface.oper_status,
+                peer_mac=peer_mac,
+                peer_ip=peer_ip,
+                peer_host=peer_host,
+            ))
 
-    # --- upsert LLDP topology links ---
-    # remove stale links then rebuild
     scanned_ips = set(switch_data.keys())
     db.query(TopologyLink).filter(TopologyLink.local_ip.in_(scanned_ips)).delete(
         synchronize_session=False
@@ -399,31 +471,151 @@ def run_scan(db: Session = Depends(get_db)):
         for nbr in sw.lldp_neighbors:
             if not nbr.remote_sys:
                 continue
-            remote_ip  = _resolve_ip(nbr.remote_sys, switch_data)
-            spd_label  = speed_label(sw.interfaces[nbr.local_port_idx].speed_mbps)\
-                         if nbr.local_port_idx in sw.interfaces else "1G"
-            link = TopologyLink(
-                local_ip      = ip,
-                local_port    = nbr.local_port_desc or str(nbr.local_port_idx),
-                remote_ip     = remote_ip,
-                remote_sys    = nbr.remote_sys,
-                remote_port   = nbr.remote_port,
-                speed_label   = spd_label,
-            )
-            db.add(link)
+            remote_ip = _resolve_ip(nbr.remote_sys, switch_data)
+            spd_label = speed_label(sw.interfaces[nbr.local_port_idx].speed_mbps) \
+                if nbr.local_port_idx in sw.interfaces else "1G"
+            db.add(TopologyLink(
+                local_ip=ip,
+                local_port=nbr.local_port_desc or str(nbr.local_port_idx),
+                remote_ip=remote_ip,
+                remote_sys=nbr.remote_sys,
+                remote_port=nbr.remote_port,
+                speed_label=spd_label,
+            ))
             link_count += 1
 
-    db.commit()
-
-    return ScanResult(
-        scanned = len(credentials),
-        found   = len(switch_data),
-        links   = link_count,
-        errors  = errors,
-        max_workers = workers,
-        total_duration_ms = total_duration_ms,
-        switch_metrics = switch_metrics,
+    result = ScanResult(
+        scanned=len(credentials),
+        found=len(switch_data),
+        links=link_count,
+        errors=errors,
+        max_workers=workers,
+        total_duration_ms=total_duration_ms,
+        switch_metrics=switch_metrics,
+        status=status,
     )
+    result.run_id = _persist_scan_run(db, result)
+    return result
+
+
+def _run_scan_job(job_id: str, cancel_event: threading.Event):
+    db = SessionLocal()
+    try:
+        result = _execute_scan(db, cancel_event)
+    except Exception as exc:
+        result = ScanResult(
+            scanned=0,
+            found=0,
+            links=0,
+            errors=[str(exc)],
+            max_workers=1,
+            total_duration_ms=0,
+            switch_metrics=[],
+            status="failed",
+        )
+    finally:
+        db.close()
+
+    with SCAN_JOBS_LOCK:
+        state = SCAN_JOBS.get(job_id)
+        if not state:
+            return
+        state["finished_at"] = datetime.utcnow().isoformat()
+        state["result"] = result.model_dump()
+        state["status"] = result.status if result.status in {"finished", "cancelled"} else "failed"
+
+
+@app.post("/api/scan", response_model=ScanResult)
+def run_scan(db: Session = Depends(get_db)):
+    """Synchronous scan execution (compatibility endpoint)."""
+    return _execute_scan(db, None)
+
+
+@app.post("/api/scan/jobs")
+def start_scan_job():
+    """Start background scan job and return job ID immediately."""
+    job_id = str(uuid.uuid4())
+    cancel_event = threading.Event()
+
+    with SCAN_JOBS_LOCK:
+        SCAN_JOBS[job_id] = {
+            "id": job_id,
+            "status": "running",
+            "started_at": datetime.utcnow().isoformat(),
+            "finished_at": None,
+            "result": None,
+            "cancel_requested": False,
+            "cancel_event": cancel_event,
+            "thread": None,
+        }
+
+    t = threading.Thread(target=_run_scan_job, args=(job_id, cancel_event), daemon=True)
+    with SCAN_JOBS_LOCK:
+        SCAN_JOBS[job_id]["thread"] = t
+    t.start()
+
+    return {"job_id": job_id, "status": "running"}
+
+
+@app.get("/api/scan/jobs/{job_id}")
+def get_scan_job(job_id: str):
+    with SCAN_JOBS_LOCK:
+        state = SCAN_JOBS.get(job_id)
+        if not state:
+            raise HTTPException(404, "Scan job not found")
+        return {
+            "id": state["id"],
+            "status": state["status"],
+            "started_at": state["started_at"],
+            "finished_at": state["finished_at"],
+            "cancel_requested": state["cancel_requested"],
+            "result": state["result"],
+        }
+
+
+@app.post("/api/scan/jobs/{job_id}/cancel")
+def cancel_scan_job(job_id: str):
+    with SCAN_JOBS_LOCK:
+        state = SCAN_JOBS.get(job_id)
+        if not state:
+            raise HTTPException(404, "Scan job not found")
+        if state["status"] != "running":
+            return {"id": job_id, "status": state["status"], "cancel_requested": state["cancel_requested"]}
+        state["cancel_requested"] = True
+        state["cancel_event"].set()
+        return {"id": job_id, "status": state["status"], "cancel_requested": True}
+
+
+@app.get("/api/scan-runs", response_model=List[ScanRunOut])
+def list_scan_runs(limit: int = 20, db: Session = Depends(get_db)):
+    clamped = max(1, min(200, limit))
+    runs = db.query(ScanRun).order_by(ScanRun.created_at.desc()).limit(clamped).all()
+
+    out: List[ScanRunOut] = []
+    for run in runs:
+        metrics = [
+            ScanSwitchMetric(
+                ip=m.ip,
+                label=m.label,
+                duration_ms=m.duration_ms,
+                success=bool(m.success),
+                error=m.error or "",
+            )
+            for m in run.switch_metrics
+        ]
+        out.append(ScanRunOut(
+            id=run.id,
+            status=run.status,
+            scanned=run.scanned,
+            found=run.found,
+            links=run.links,
+            max_workers=run.max_workers,
+            total_duration_ms=run.total_duration_ms,
+            error_count=run.error_count,
+            created_at=run.created_at,
+            switch_metrics=metrics,
+        ))
+    return out
 
 
 # ─── Topology ─────────────────────────────────────────────────────────────────

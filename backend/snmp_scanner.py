@@ -167,13 +167,16 @@ def _transport(ip: str, port: int = 161, timeout: int = 3, retries: int = 1):
     return UdpTransportTarget((ip, port), timeout=timeout, retries=retries)
 
 
-def snmp_get(ip: str, port: int, auth, *oids: str) -> Dict[str, str]:
+def snmp_get(ip: str, port: int, auth,
+             *oids: str,
+             timeout: int = 3,
+             retries: int = 1) -> Dict[str, str]:
     """GET one or more scalar OIDs. Returns {oid_str: value_str}."""
     result: Dict[str, str] = {}
     objects = [ObjectType(ObjectIdentity(o)) for o in oids]
     try:
         error_indication, error_status, _, var_binds = next(
-            getCmd(SnmpEngine(), auth, _transport(ip, port), ContextData(), *objects)
+            getCmd(SnmpEngine(), auth, _transport(ip, port, timeout, retries), ContextData(), *objects)
         )
         if error_indication or error_status:
             return result
@@ -185,12 +188,14 @@ def snmp_get(ip: str, port: int, auth, *oids: str) -> Dict[str, str]:
 
 
 def snmp_bulk_walk(ip: str, port: int, auth,
-                   oid: str, max_rows: int = 500) -> List[Tuple[str, str]]:
+                   oid: str, max_rows: int = 500,
+                   timeout: int = 3,
+                   retries: int = 1) -> List[Tuple[str, str]]:
     """SNMPv2c/v3 GETBULK walk. Returns [(oid_str, value_str)]."""
     rows: List[Tuple[str, str]] = []
     try:
         for error_indication, error_status, _, var_binds in bulkCmd(
-            SnmpEngine(), auth, _transport(ip, port), ContextData(),
+            SnmpEngine(), auth, _transport(ip, port, timeout, retries), ContextData(),
             0, 25,
             ObjectType(ObjectIdentity(oid)),
             maxRows=max_rows, lexicographicMode=False,
@@ -315,6 +320,8 @@ def scan_switch(
     snmp_version: str = "v2c",
     community: str = "public",
     snmp_port: int = 161,
+    snmp_timeout: int = 3,
+    snmp_retries: int = 1,
     # v3
     v3_security_level: str = "authPriv",
     v3_username: str = "",
@@ -337,9 +344,13 @@ def scan_switch(
     )
 
     # â”€â”€ 1. System scalars â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    scalars = snmp_get(ip, snmp_port, auth,
-                       OID_SYS_NAME, OID_SYS_DESCR,
-                       OID_SYS_LOCATION, OID_SYS_OBJECT_ID)
+    scalars = snmp_get(
+        ip, snmp_port, auth,
+        OID_SYS_NAME, OID_SYS_DESCR,
+        OID_SYS_LOCATION, OID_SYS_OBJECT_ID,
+        timeout=snmp_timeout,
+        retries=snmp_retries,
+    )
     if not scalars:
         log.warning("No SNMP response from %s", ip)
         return None
@@ -358,10 +369,10 @@ def scan_switch(
     log.info("Detected vendor=%s for %s (%s)", sw.vendor, ip, sw.sys_name)
 
     # â”€â”€ 3. Interface table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    descr_rows  = snmp_bulk_walk(ip, snmp_port, auth, OID_IF_DESCR)
-    status_rows = snmp_bulk_walk(ip, snmp_port, auth, OID_IF_OPER_STATUS)
-    hspeed_rows = snmp_bulk_walk(ip, snmp_port, auth, OID_IF_HIGH_SPEED)
-    alias_rows  = snmp_bulk_walk(ip, snmp_port, auth, OID_IF_ALIAS)
+    descr_rows  = snmp_bulk_walk(ip, snmp_port, auth, OID_IF_DESCR, timeout=snmp_timeout, retries=snmp_retries)
+    status_rows = snmp_bulk_walk(ip, snmp_port, auth, OID_IF_OPER_STATUS, timeout=snmp_timeout, retries=snmp_retries)
+    hspeed_rows = snmp_bulk_walk(ip, snmp_port, auth, OID_IF_HIGH_SPEED, timeout=snmp_timeout, retries=snmp_retries)
+    alias_rows  = snmp_bulk_walk(ip, snmp_port, auth, OID_IF_ALIAS, timeout=snmp_timeout, retries=snmp_retries)
 
     def _idx(oid_s: str) -> Optional[int]:
         try:
@@ -396,9 +407,9 @@ def scan_switch(
         sw.interfaces.setdefault(idx, IfInfo(index=idx)).alias = val
 
     # â”€â”€ 4. LLDP neighbor table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    sys_rows  = snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_SYS_NAME)
-    port_rows = snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_PORT_ID)
-    pdesc_rows= snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_PORT_DESC)
+    sys_rows  = snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_SYS_NAME, timeout=snmp_timeout, retries=snmp_retries)
+    port_rows = snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_PORT_ID, timeout=snmp_timeout, retries=snmp_retries)
+    pdesc_rows= snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_PORT_DESC, timeout=snmp_timeout, retries=snmp_retries)
 
     nbr_map: Dict[Tuple[int, int], LldpNeighbor] = {}
 
@@ -433,8 +444,8 @@ def scan_switch(
     sw.lldp_neighbors = list(nbr_map.values())
 
     # â”€â”€ 5. ARP table (best-effort) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    arp_mac_rows = snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_MAC)
-    arp_ip_rows  = snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_IP)
+    arp_mac_rows = snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_MAC, timeout=snmp_timeout, retries=snmp_retries)
+    arp_ip_rows  = snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_IP, timeout=snmp_timeout, retries=snmp_retries)
     ip_by_suffix: Dict[str, str] = {}
     for oid_s, val in arp_ip_rows:
         suffix = ".".join(oid_s.split(".")[-5:])
@@ -447,8 +458,8 @@ def scan_switch(
             sw.arp_table[mac] = arp_ip
 
     # â”€â”€ 6. BRIDGE-MIB FDB: map learned MACs to ifIndex (best-effort) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    base_port_rows = snmp_bulk_walk(ip, snmp_port, auth, OID_DOT1D_BASE_PORT_IF_INDEX)
-    fdb_rows = snmp_bulk_walk(ip, snmp_port, auth, OID_DOT1D_TP_FDB_PORT)
+    base_port_rows = snmp_bulk_walk(ip, snmp_port, auth, OID_DOT1D_BASE_PORT_IF_INDEX, timeout=snmp_timeout, retries=snmp_retries)
+    fdb_rows = snmp_bulk_walk(ip, snmp_port, auth, OID_DOT1D_TP_FDB_PORT, timeout=snmp_timeout, retries=snmp_retries)
 
     bridge_to_ifindex: Dict[int, int] = {}
     for oid_s, ifindex_val in base_port_rows:

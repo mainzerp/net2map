@@ -69,6 +69,7 @@ const EMPTY_PROFILE_FORM = {
   v3_security_level:"authPriv", v3_username:"",
   v3_auth_protocol:"SHA-256", v3_auth_password:"",
   v3_priv_protocol:"AES-128", v3_priv_password:"",
+  snmp_timeout:3, snmp_retries:1, max_parallel_hosts:8,
 };
 
 function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
@@ -77,7 +78,15 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
   const [err, setErr]           = useState("");
 
   const resetForm = () => { setForm({ ...EMPTY_PROFILE_FORM }); setEditId(null); setErr(""); };
-  const startEdit = (p) => { setEditId(p.id); setForm({ label:p.label, snmp_version:p.snmp_version, community:p.community, v3_security_level:p.v3_security_level, v3_username:p.v3_username, v3_auth_protocol:p.v3_auth_protocol, v3_auth_password:p.v3_auth_password, v3_priv_protocol:p.v3_priv_protocol, v3_priv_password:p.v3_priv_password }); setErr(""); };
+  const startEdit = (p) => { setEditId(p.id); setForm({
+    label:p.label, snmp_version:p.snmp_version, community:p.community,
+    v3_security_level:p.v3_security_level, v3_username:p.v3_username,
+    v3_auth_protocol:p.v3_auth_protocol, v3_auth_password:p.v3_auth_password,
+    v3_priv_protocol:p.v3_priv_protocol, v3_priv_password:p.v3_priv_password,
+    snmp_timeout:p.snmp_timeout ?? 3,
+    snmp_retries:p.snmp_retries ?? 1,
+    max_parallel_hosts:p.max_parallel_hosts ?? 8,
+  }); setErr(""); };
 
   const submit = async (e) => {
     e.preventDefault(); setErr("");
@@ -159,6 +168,20 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
               </>}
             </div>
           )}
+          <div style={{marginBottom:8,padding:"10px 12px",borderRadius:8,backgroundColor:"#0c0f18",border:"1px solid #1e293b"}}>
+            <div style={{fontSize:10,color:"#475569",marginBottom:6}}>Scan Policy</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+              <label style={{fontSize:10,color:"#475569",display:"block"}}>Timeout (s)
+                <input type="number" min={1} max={30} value={F.snmp_timeout} onChange={e=>set("snmp_timeout", +e.target.value)} style={{...inp,marginTop:3}}/>
+              </label>
+              <label style={{fontSize:10,color:"#475569",display:"block"}}>Retries
+                <input type="number" min={0} max={10} value={F.snmp_retries} onChange={e=>set("snmp_retries", +e.target.value)} style={{...inp,marginTop:3}}/>
+              </label>
+              <label style={{fontSize:10,color:"#475569",display:"block"}}>Parallel Hosts
+                <input type="number" min={1} max={64} value={F.max_parallel_hosts} onChange={e=>set("max_parallel_hosts", +e.target.value)} style={{...inp,marginTop:3}}/>
+              </label>
+            </div>
+          </div>
           {err && <div style={{color:"#f87171",fontSize:11,marginBottom:8}}>{err}</div>}
           <div style={{display:"flex",gap:6}}>
             <button type="submit" style={{flex:1,backgroundColor:"#083344",border:"1px solid #164e63",color:"#22d3ee",borderRadius:6,padding:"6px",cursor:"pointer",fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:600}}>{editId?"Save":"Create profile"}</button>
@@ -173,6 +196,9 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
               <div style={{color:"#e2e8f0",fontWeight:600,fontSize:12}}>{p.label}</div>
               <div style={{color:"#475569",fontSize:10,marginTop:2}}>
                 {p.snmp_version === "v3" ? `v3 - ${p.v3_security_level} - ${p.v3_username || "-"}` : `v2c - ${p.community}`}
+              </div>
+              <div style={{color:"#334155",fontSize:9,marginTop:2}}>
+                timeout {p.snmp_timeout ?? 3}s - retries {p.snmp_retries ?? 1} - hosts {p.max_parallel_hosts ?? 8}
               </div>
             </div>
             <button onClick={()=>startEdit(p)} style={{background:"none",border:"1px solid #1e293b",color:"#475569",borderRadius:5,padding:"2px 8px",cursor:"pointer",fontSize:10,fontFamily:"'JetBrains Mono',monospace"}}>Edit</button>
@@ -769,9 +795,13 @@ function EngineTabContent() {
   const [scanning, setScanning]     = useState(false);
   const [scanResult, setScanResult] = useState(null);
   const [history, setHistory]       = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [scanWorkers, setScanWorkers] = useState(4);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
+  const [activeJobId, setActiveJobId] = useState(null);
+
+  const pollRef = useRef(null);
 
   useEffect(() => {
     api.get("/api/scan-settings")
@@ -779,6 +809,20 @@ function EngineTabContent() {
         if (s?.max_workers != null) setScanWorkers(Number(s.max_workers));
       })
       .finally(() => setSettingsLoading(false));
+  }, []);
+
+  const loadHistory = () => {
+    setHistoryLoading(true);
+    api.get("/api/scan-runs?limit=20")
+      .then(runs => setHistory(Array.isArray(runs) ? runs : []))
+      .finally(() => setHistoryLoading(false));
+  };
+
+  useEffect(() => {
+    loadHistory();
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, []);
 
   const saveScanSettings = async () => {
@@ -798,20 +842,56 @@ function EngineTabContent() {
     return `${(value / 1000).toFixed(2)} s`;
   };
 
+  const fmtTs = (ts) => {
+    if (!ts) return "-";
+    const d = new Date(ts);
+    return Number.isNaN(d.getTime()) ? "-" : d.toLocaleTimeString();
+  };
+
+  const stopPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  const startPolling = (jobId) => {
+    stopPolling();
+    pollRef.current = setInterval(async () => {
+      try {
+        const st = await api.get(`/api/scan/jobs/${jobId}`);
+        if (st?.result) {
+          setScanResult(st.result);
+        }
+        if (st?.status && st.status !== "running") {
+          setScanning(false);
+          setActiveJobId(null);
+          stopPolling();
+          loadHistory();
+        }
+      } catch (_) {
+        // keep polling on transient UI/API glitches
+      }
+    }, 1500);
+  };
+
   const runScan = async () => {
     setScanning(true);
     setScanResult(null);
     try {
-      const r = await api.post("/api/scan", {});
-      setScanResult(r);
-      setHistory(prev => [{ ...r, ts: new Date().toLocaleTimeString() }, ...prev].slice(0, 10));
+      const job = await api.post("/api/scan/jobs", {});
+      if (!job?.job_id) throw new Error("Scan job could not be created");
+      setActiveJobId(job.job_id);
+      startPolling(job.job_id);
     } catch (e) {
-      const err = { scanned: 0, found: 0, links: 0, errors: [String(e)], ts: new Date().toLocaleTimeString() };
-      setScanResult(err);
-      setHistory(prev => [err, ...prev].slice(0, 10));
-    } finally {
       setScanning(false);
+      setScanResult({ scanned: 0, found: 0, links: 0, errors: [String(e)], status: "failed" });
     }
+  };
+
+  const cancelScan = async () => {
+    if (!activeJobId) return;
+    await api.post(`/api/scan/jobs/${activeJobId}/cancel`, {});
   };
 
   const btnStyle = {
@@ -873,8 +953,20 @@ function EngineTabContent() {
               cursor: scanning ? "wait" : "pointer",
             }}
           >{scanning ? "Scanning..." : "Run Scan"}</button>
+          {scanning && activeJobId && (
+            <button
+              onClick={cancelScan}
+              style={{
+                border:"1px solid #7f1d1d", background:"#1c1917", color:"#f87171",
+                borderRadius:6, padding:"10px 18px", cursor:"pointer",
+                fontFamily:"'JetBrains Mono',monospace", fontSize:11, fontWeight:600,
+              }}
+            >Cancel</button>
+          )}
           {scanning && (
-            <span style={{ color: "#475569", fontSize: 10 }}>This may take a moment...</span>
+            <span style={{ color: "#475569", fontSize: 10 }}>
+              Job {activeJobId ? activeJobId.slice(0, 8) : "-"} is running...
+            </span>
           )}
         </div>
       </div>
@@ -947,7 +1039,39 @@ function EngineTabContent() {
       )}
 
       {/* Session history */}
-      {history.length > 0 && (
+      <div style={{
+        backgroundColor: "#0a0e18", border: "1px solid #1e293b", borderRadius: 10,
+        padding: 14,
+      }}>
+        <div style={{ color: "#94a3b8", fontSize: 10, fontWeight: 700, letterSpacing: 2, marginBottom: 10 }}>
+          SCAN HISTORY (persisted)
+        </div>
+        {historyLoading ? (
+          <div style={{ color: "#334155", fontSize: 10 }}>Loading...</div>
+        ) : history.length === 0 ? (
+          <div style={{ color: "#334155", fontSize: 10 }}>No scan runs yet</div>
+        ) : history.map((h) => (
+          <div key={h.id} style={{
+            display: "flex", alignItems: "center", gap: 12,
+            padding: "6px 0", borderBottom: "1px solid #0f172a",
+            fontSize: 10,
+          }}>
+            <span style={{ color: "#334155", minWidth: 70 }}>{fmtTs(h.created_at)}</span>
+            <span style={{ color: h.status === "finished" ? "#4ade80" : h.status === "cancelled" ? "#f59e0b" : "#f87171", minWidth: 22 }}>
+              {h.status === "finished" ? "OK" : h.status === "cancelled" ? "CAN" : "ERR"}
+            </span>
+            <span style={{ color: "#94a3b8" }}>
+              {h.found} switches, {h.links} links
+              <span style={{ color: "#64748b" }}> - {fmtDuration(h.total_duration_ms)}</span>
+              <span style={{ color: "#475569" }}> - w:{h.max_workers}</span>
+              {h.error_count > 0 && <span style={{ color: "#f87171" }}> ({h.error_count} errors)</span>}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Legacy local history hidden when persistent history is active */}
+      {false && history.length > 0 && (
         <div style={{
           backgroundColor: "#0a0e18", border: "1px solid #1e293b", borderRadius: 10,
           padding: 14,

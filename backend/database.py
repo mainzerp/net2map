@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 from sqlalchemy import (
     create_engine, Column, Integer, String, Boolean,
-    DateTime, Float, ForeignKey, Text,
+    DateTime, Float, ForeignKey, Text, text,
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
@@ -66,6 +66,9 @@ class SnmpProfile(Base):
     v3_auth_password   = Column(String, default="")
     v3_priv_protocol   = Column(String, default="AES-128")
     v3_priv_password   = Column(String, default="")
+    snmp_timeout       = Column(Integer, default=3)          # seconds per request
+    snmp_retries       = Column(Integer, default=1)          # retry count per request
+    max_parallel_hosts = Column(Integer, default=8)          # per-profile host concurrency
     created_at         = Column(DateTime, default=datetime.utcnow)
     updated_at         = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -163,5 +166,61 @@ class TopologyLink(Base):
     discovered_at  = Column(DateTime, default=datetime.utcnow)
 
 
+class ScanRun(Base):
+    """Historical summary for one scan execution."""
+    __tablename__ = "scan_runs"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    status            = Column(String, default="finished")          # finished|cancelled|failed
+    scanned           = Column(Integer, default=0)
+    found             = Column(Integer, default=0)
+    links             = Column(Integer, default=0)
+    max_workers       = Column(Integer, default=1)
+    total_duration_ms = Column(Integer, default=0)
+    error_count       = Column(Integer, default=0)
+    created_at        = Column(DateTime, default=datetime.utcnow)
+
+    switch_metrics = relationship(
+        "ScanRunSwitchMetric",
+        back_populates="scan_run",
+        cascade="all, delete-orphan",
+    )
+
+
+class ScanRunSwitchMetric(Base):
+    """Historical per-switch metrics belonging to a scan run."""
+    __tablename__ = "scan_run_switch_metrics"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    scan_run_id  = Column(Integer, ForeignKey("scan_runs.id"), nullable=False, index=True)
+    ip           = Column(String, default="")
+    label        = Column(String, default="")
+    duration_ms  = Column(Integer, default=0)
+    success      = Column(Boolean, default=False)
+    error        = Column(Text, default="")
+
+    scan_run = relationship("ScanRun", back_populates="switch_metrics")
+
+
+def _ensure_snmp_profile_policy_columns():
+    """Add new scan policy columns for existing SQLite databases without migrations."""
+    with engine.begin() as conn:
+        if conn.dialect.name != "sqlite":
+            return
+
+        rows = conn.execute(text("PRAGMA table_info(snmp_profiles)")).fetchall()
+        existing = {str(r[1]) for r in rows}
+
+        additions = [
+            ("snmp_timeout", "INTEGER DEFAULT 3"),
+            ("snmp_retries", "INTEGER DEFAULT 1"),
+            ("max_parallel_hosts", "INTEGER DEFAULT 8"),
+        ]
+        for col_name, col_def in additions:
+            if col_name not in existing:
+                conn.execute(text(f"ALTER TABLE snmp_profiles ADD COLUMN {col_name} {col_def}"))
+
+
 def create_tables():
     Base.metadata.create_all(bind=engine)
+    _ensure_snmp_profile_policy_columns()
