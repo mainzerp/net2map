@@ -76,6 +76,7 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
   const [editId, setEditId]     = useState(null);
   const [form, setForm]         = useState({ ...EMPTY_PROFILE_FORM });
   const [err, setErr]           = useState("");
+  const formRef = useRef(null);
 
   const resetForm = () => { setForm({ ...EMPTY_PROFILE_FORM }); setEditId(null); setErr(""); };
   const startEdit = (p) => { setEditId(p.id); setForm({
@@ -86,7 +87,7 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
     snmp_timeout:p.snmp_timeout ?? 3,
     snmp_retries:p.snmp_retries ?? 1,
     max_parallel_hosts:p.max_parallel_hosts ?? 8,
-  }); setErr(""); };
+  }); setErr(""); setTimeout(() => formRef.current?.scrollIntoView({ behavior:"smooth", block:"start" }), 0); };
 
   const submit = async (e) => {
     e.preventDefault(); setErr("");
@@ -116,7 +117,7 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
 
   return (
     <div style={{flex:1,overflowY:"auto",padding:"14px 20px"}}>
-        <form onSubmit={submit} style={{marginBottom:18,padding:"14px",backgroundColor:"#0a0e18",border:"1px solid #1e293b",borderRadius:10}}>
+        <form ref={formRef} onSubmit={submit} style={{marginBottom:18,padding:"14px",backgroundColor:"#0a0e18",border:"1px solid #1e293b",borderRadius:10}}>
           <div style={{color:"#475569",fontSize:10,letterSpacing:1,marginBottom:12}}>{editId?"EDIT":"NEW PROFILE"}</div>
           <div style={{marginBottom:8}}>
             <label style={{fontSize:10,color:"#475569",display:"block"}}>Profile name *
@@ -227,6 +228,7 @@ function CredentialsTabContent({ profiles }) {
   const [editId, setEditId]     = useState(null);
   const [form, setForm]         = useState({ ...EMPTY_FORM });
   const [err, setErr]           = useState("");
+  const formRef = useRef(null);
 
   const refresh = () => {
     setLoading(true);
@@ -249,6 +251,7 @@ function CredentialsTabContent({ profiles }) {
       v3_priv_protocol:c.v3_priv_protocol,   v3_priv_password:c.v3_priv_password,
     });
     setErr("");
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior:"smooth", block:"start" }), 0);
   };
 
   const submit = async (e) => {
@@ -284,7 +287,7 @@ function CredentialsTabContent({ profiles }) {
 
   return (
     <div style={{flex:1,overflowY:"auto",padding:"14px 20px"}}>
-        <form onSubmit={submit} style={{marginBottom:18,padding:"14px",backgroundColor:"#0a0e18",border:"1px solid #1e293b",borderRadius:10}}>
+        <form ref={formRef} onSubmit={submit} style={{marginBottom:18,padding:"14px",backgroundColor:"#0a0e18",border:"1px solid #1e293b",borderRadius:10}}>
           <div style={{color:"#475569",fontSize:10,letterSpacing:1,marginBottom:12}}>
             {editId ? "EDIT" : "NEW ENTRY"}
           </div>

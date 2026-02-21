@@ -110,6 +110,19 @@ def update_snmp_profile(profile_id: int, body: SnmpProfileUpdate, db: Session = 
 
     for k, v in payload.items():
         setattr(profile, k, v)
+
+    # Keep linked credential fields aligned with profile settings so edits are immediately reflected.
+    db.query(Credential).filter(Credential.profile_id == profile_id).update({
+        "snmp_version": profile.snmp_version,
+        "community": profile.community,
+        "v3_security_level": profile.v3_security_level,
+        "v3_username": profile.v3_username,
+        "v3_auth_protocol": profile.v3_auth_protocol,
+        "v3_auth_password": profile.v3_auth_password,
+        "v3_priv_protocol": profile.v3_priv_protocol,
+        "v3_priv_password": profile.v3_priv_password,
+    })
+
     db.commit()
     db.refresh(profile)
     return profile
@@ -964,17 +977,23 @@ async def update_dns_settings(request: Request):
 
 
 @app.get("/api/logs")
-def get_logs(limit: int = 200, level: str = "", event_prefix: str = ""):
+def get_logs(limit: int = 200, level: str = "", event_prefix: str = "", q: str = ""):
     """Return recent structured backend logs."""
     clamped = max(1, min(2000, int(limit)))
     level_filter = level.strip().upper()
     event_filter = event_prefix.strip()
+    query = q.strip().lower()
     with LOG_BUFFER_LOCK:
         rows = list(LOG_BUFFER)
     if level_filter:
         rows = [r for r in rows if str(r.get("level", "")).upper() == level_filter]
     if event_filter:
         rows = [r for r in rows if str(r.get("event", "")).startswith(event_filter)]
+    if query:
+        rows = [
+            r for r in rows
+            if query in json.dumps(r, ensure_ascii=False).lower()
+        ]
     return rows[-clamped:]
 
 
