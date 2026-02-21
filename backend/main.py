@@ -962,14 +962,17 @@ async def update_dns_settings(request: Request):
 
 
 @app.get("/api/logs")
-def get_logs(limit: int = 200, level: str = ""):
+def get_logs(limit: int = 200, level: str = "", event_prefix: str = ""):
     """Return recent structured backend logs."""
     clamped = max(1, min(2000, int(limit)))
     level_filter = level.strip().upper()
+    event_filter = event_prefix.strip()
     with LOG_BUFFER_LOCK:
         rows = list(LOG_BUFFER)
     if level_filter:
         rows = [r for r in rows if str(r.get("level", "")).upper() == level_filter]
+    if event_filter:
+        rows = [r for r in rows if str(r.get("event", "")).startswith(event_filter)]
     return rows[-clamped:]
 
 

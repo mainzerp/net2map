@@ -6,10 +6,11 @@ export default function LogsPage() {
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [levelFilter, setLevelFilter] = useState("");
+  const [eventFilter, setEventFilter] = useState("");
   const [limit, setLimit] = useState(300);
 
   const loadLogs = () => {
-    const query = `/api/logs?limit=${Math.max(1, Math.min(2000, Number(limit) || 300))}${levelFilter ? `&level=${levelFilter}` : ""}`;
+    const query = `/api/logs?limit=${Math.max(1, Math.min(2000, Number(limit) || 300))}${levelFilter ? `&level=${levelFilter}` : ""}${eventFilter ? `&event_prefix=${encodeURIComponent(eventFilter)}` : ""}`;
     api.get(query)
       .then(d => setLogs(Array.isArray(d) ? d : []))
       .finally(() => setLoading(false));
@@ -17,13 +18,13 @@ export default function LogsPage() {
 
   useEffect(() => {
     loadLogs();
-  }, [levelFilter, limit]);
+  }, [levelFilter, eventFilter, limit]);
 
   useEffect(() => {
     if (!autoRefresh) return;
     const t = setInterval(loadLogs, 2000);
     return () => clearInterval(t);
-  }, [autoRefresh, levelFilter, limit]);
+  }, [autoRefresh, levelFilter, eventFilter, limit]);
 
   const rows = useMemo(() => [...logs].reverse(), [logs]);
 
@@ -69,6 +70,15 @@ export default function LogsPage() {
             onChange={e => setLimit(e.target.value)}
             style={{
               width:90,backgroundColor:"#0c0f18",border:"1px solid #1e293b",borderRadius:6,
+              color:"#e2e8f0",padding:"6px 8px",fontFamily:"inherit",fontSize:11,
+            }}
+          />
+          <input
+            value={eventFilter}
+            onChange={e => setEventFilter(e.target.value)}
+            placeholder="event prefix, e.g. scan."
+            style={{
+              width:220,backgroundColor:"#0c0f18",border:"1px solid #1e293b",borderRadius:6,
               color:"#e2e8f0",padding:"6px 8px",fontFamily:"inherit",fontSize:11,
             }}
           />
