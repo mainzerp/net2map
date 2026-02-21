@@ -230,6 +230,7 @@ function CredentialsTabContent({ profiles }) {
   const [err, setErr]           = useState("");
   const formRef = useRef(null);
   const [editPanelTop, setEditPanelTop] = useState(80);
+  const [editPanelLeft, setEditPanelLeft] = useState(540);
 
   const refresh = () => {
     setLoading(true);
@@ -252,8 +253,18 @@ function CredentialsTabContent({ profiles }) {
       v3_priv_protocol:c.v3_priv_protocol,   v3_priv_password:c.v3_priv_password,
     });
     setErr("");
-    const top = e?.currentTarget?.getBoundingClientRect?.().top;
-    if (typeof top === "number") setEditPanelTop(Math.max(64, Math.floor(top - 24)));
+    const rect = e?.currentTarget?.closest("div")?.getBoundingClientRect?.() || e?.currentTarget?.getBoundingClientRect?.();
+    if (rect) {
+      setEditPanelTop(Math.max(64, Math.floor(rect.top - 20)));
+      const panelWidth = 470;
+      const gap = 10;
+      let left = Math.floor(rect.right + gap);
+      if (left + panelWidth > window.innerWidth - 8) {
+        left = Math.floor(rect.left - panelWidth - gap);
+      }
+      if (left < 8) left = 8;
+      setEditPanelLeft(left);
+    }
   };
 
   const submit = async (e) => {
@@ -292,7 +303,7 @@ function CredentialsTabContent({ profiles }) {
         <form ref={formRef} onSubmit={submit} style={{
           marginBottom:18,padding:"14px",backgroundColor:"#0a0e18",border:"1px solid #1e293b",borderRadius:10,
           ...(editId ? {
-            position:"fixed", right:20, top:editPanelTop, width:470, zIndex:80,
+            position:"fixed", left:editPanelLeft, top:editPanelTop, width:470, zIndex:80,
             maxHeight:"calc(100vh - 80px)", overflowY:"auto",
             boxShadow:"0 12px 30px rgba(0,0,0,0.45)",
           } : {}),
