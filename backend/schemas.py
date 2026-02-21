@@ -237,8 +237,19 @@ class TopologyOut(BaseModel):
 
 # ─── Scan ─────────────────────────────────────────────────────────────────────
 
+class ScanSwitchMetric(BaseModel):
+    ip:          str
+    label:       str = ""
+    duration_ms: int
+    success:     bool = False
+    error:       str = ""
+
+
 class ScanResult(BaseModel):
-    scanned:  int
-    found:    int
-    links:    int
-    errors:   List[str] = []
+    scanned:            int
+    found:              int
+    links:              int
+    errors:             List[str] = []
+    max_workers:        int = 1
+    total_duration_ms:  int = 0
+    switch_metrics:     List[ScanSwitchMetric] = []

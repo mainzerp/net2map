@@ -769,6 +769,34 @@ function EngineTabContent() {
   const [scanning, setScanning]     = useState(false);
   const [scanResult, setScanResult] = useState(null);
   const [history, setHistory]       = useState([]);
+  const [scanWorkers, setScanWorkers] = useState(4);
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+
+  useEffect(() => {
+    api.get("/api/scan-settings")
+      .then(s => {
+        if (s?.max_workers != null) setScanWorkers(Number(s.max_workers));
+      })
+      .finally(() => setSettingsLoading(false));
+  }, []);
+
+  const saveScanSettings = async () => {
+    setSettingsSaving(true);
+    try {
+      const payload = { max_workers: Math.max(1, Math.min(128, Number(scanWorkers) || 1)) };
+      const result = await api.put("/api/scan-settings", payload);
+      if (result?.max_workers != null) setScanWorkers(Number(result.max_workers));
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const fmtDuration = (ms) => {
+    const value = Number(ms || 0);
+    if (value < 1000) return `${value} ms`;
+    return `${(value / 1000).toFixed(2)} s`;
+  };
 
   const runScan = async () => {
     setScanning(true);
@@ -803,6 +831,37 @@ function EngineTabContent() {
         <div style={{ color: "#94a3b8", fontSize: 10, fontWeight: 700, letterSpacing: 2 }}>NETWORK SCAN</div>
         <div style={{ color: "#475569", fontSize: 11, lineHeight: 1.6 }}>
           Scans all enabled switch credentials via SNMP, discovers devices, ports and LLDP neighbor links.
+        </div>
+        <div style={{
+          display:"flex", alignItems:"center", gap:8, flexWrap:"wrap",
+          padding:"10px 12px", border:"1px solid #1e293b", borderRadius:8, backgroundColor:"#020817",
+        }}>
+          <span style={{ color:"#64748b", fontSize:10 }}>Parallel workers</span>
+          <input
+            type="number"
+            min={1}
+            max={128}
+            value={scanWorkers}
+            onChange={e => setScanWorkers(e.target.value)}
+            disabled={settingsLoading || settingsSaving || scanning}
+            style={{
+              width:90, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
+              color:"#e2e8f0", padding:"5px 8px", fontFamily:"'JetBrains Mono',monospace", fontSize:11,
+            }}
+          />
+          <button
+            onClick={saveScanSettings}
+            disabled={settingsLoading || settingsSaving || scanning}
+            style={{
+              border:"1px solid #1e293b", background:"#0f172a", color:"#94a3b8",
+              borderRadius:6, padding:"5px 10px", cursor:(settingsLoading || settingsSaving || scanning)?"default":"pointer",
+              fontFamily:"'JetBrains Mono',monospace", fontSize:10,
+              opacity:(settingsLoading || settingsSaving || scanning)?0.6:1,
+            }}
+          >{settingsSaving ? "Saving..." : "Save"}</button>
+          <span style={{ color:"#334155", fontSize:10 }}>
+            {settingsLoading ? "Loading settings..." : "1-128 workers"}
+          </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button
@@ -846,7 +905,36 @@ function EngineTabContent() {
               <span style={{ color: "#475569", fontSize: 9, letterSpacing: 1 }}>LINKS</span>
               <span style={{ color: "#a78bfa", fontSize: 16, fontWeight: 700 }}>{scanResult.links ?? 0}</span>
             </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ color: "#475569", fontSize: 9, letterSpacing: 1 }}>TOTAL TIME</span>
+              <span style={{ color: "#7dd3fc", fontSize: 16, fontWeight: 700 }}>{fmtDuration(scanResult.total_duration_ms)}</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ color: "#475569", fontSize: 9, letterSpacing: 1 }}>WORKERS</span>
+              <span style={{ color: "#94a3b8", fontSize: 16, fontWeight: 700 }}>{scanResult.max_workers ?? 1}</span>
+            </div>
           </div>
+          {scanResult.switch_metrics?.length > 0 && (
+            <div style={{ marginTop: 10, borderTop: "1px solid #1e293b", paddingTop: 8 }}>
+              <div style={{ color: "#94a3b8", fontSize: 9, letterSpacing: 1, marginBottom: 6 }}>
+                SWITCH DURATIONS
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", gap:4, maxHeight:180, overflowY:"auto" }}>
+                {scanResult.switch_metrics.map((m, i) => (
+                  <div key={`${m.ip}-${i}`} style={{
+                    display:"grid", gridTemplateColumns:"1fr 90px 60px", gap:8,
+                    fontSize:10, padding:"4px 0", borderBottom:i < scanResult.switch_metrics.length - 1 ? "1px solid #0f172a" : "none",
+                  }}>
+                    <span style={{ color:m.success ? "#94a3b8" : "#fda4af", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                      {(m.label ? `${m.label} ` : "") + `(${m.ip})`}
+                    </span>
+                    <span style={{ color:"#7dd3fc", textAlign:"right" }}>{fmtDuration(m.duration_ms)}</span>
+                    <span style={{ color:m.success ? "#4ade80" : "#f87171", textAlign:"right" }}>{m.success ? "OK" : "FAIL"}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {scanResult.errors?.length > 0 && (
             <div style={{ marginTop: 10, borderTop: "1px solid #7f1d1d33", paddingTop: 8 }}>
               <div style={{ color: "#f87171", fontSize: 9, letterSpacing: 1, marginBottom: 4 }}>ERRORS</div>
@@ -879,12 +967,107 @@ function EngineTabContent() {
               </span>
               <span style={{ color: "#94a3b8" }}>
                 {h.found} switches, {h.links} links
+                {h.total_duration_ms != null && <span style={{ color: "#64748b" }}> - {fmtDuration(h.total_duration_ms)}</span>}
                 {h.errors?.length > 0 && <span style={{ color: "#f87171" }}> ({h.errors.length} errors)</span>}
               </span>
             </div>
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+
+// ── DnsSettingsTabContent ───────────────────────────────────────────────────
+function DnsSettingsTabContent() {
+  const [serversText, setServersText] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  const [ok, setOk] = useState("");
+
+  useEffect(() => {
+    api.get("/api/dns-settings")
+      .then(data => {
+        const servers = Array.isArray(data?.servers) ? data.servers : [];
+        setServersText(servers.join("\n"));
+      })
+      .catch(() => setErr("Failed to load DNS settings"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    setErr("");
+    setOk("");
+    try {
+      const servers = serversText
+        .split(/[\n,;]/)
+        .map(v => v.trim())
+        .filter(Boolean);
+
+      const result = await api.put("/api/dns-settings", { servers });
+      const normalized = Array.isArray(result?.servers) ? result.servers : servers;
+      setServersText(normalized.join("\n"));
+      setOk("DNS settings saved");
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const boxStyle = {
+    backgroundColor: "#0a0e18", border: "1px solid #1e293b", borderRadius: 10,
+    padding: 20, display: "flex", flexDirection: "column", gap: 12,
+  };
+
+  const textareaStyle = {
+    backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:6,
+    color:"#e2e8f0", padding:"8px 10px", minHeight:140, resize:"vertical",
+    fontFamily:"'JetBrains Mono',monospace", fontSize:11, width:"100%",
+  };
+
+  return (
+    <div style={{ flex: 1, overflowY: "auto", paddingTop: 20, display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={boxStyle}>
+        <div style={{ color: "#94a3b8", fontSize: 10, fontWeight: 700, letterSpacing: 2 }}>DNS RESOLVER</div>
+        <div style={{ color: "#475569", fontSize: 11, lineHeight: 1.6 }}>
+          Configure DNS servers for reverse lookup of peer hostnames during scans.
+          Leave empty to use system/default DNS resolver.
+        </div>
+
+        {loading ? (
+          <div style={{ color:"#334155", fontSize:11 }}>Loading...</div>
+        ) : (
+          <>
+            <textarea
+              value={serversText}
+              onChange={e => setServersText(e.target.value)}
+              placeholder={"One DNS server IP per line, e.g.\n10.0.0.10\n1.1.1.1"}
+              style={textareaStyle}
+            />
+            <div style={{ color:"#334155", fontSize:10 }}>
+              Accepted formats: IPv4 and IPv6. You can also separate values by comma.
+            </div>
+            {err && <div style={{ color:"#f87171", fontSize:11 }}>{err}</div>}
+            {ok && <div style={{ color:"#4ade80", fontSize:11 }}>{ok}</div>}
+            <div style={{ display:"flex", gap:8 }}>
+              <button
+                onClick={save}
+                disabled={saving}
+                style={{
+                  border:"1px solid #164e63", background:"#083344", color:"#22d3ee",
+                  borderRadius:6, padding:"8px 16px", cursor:saving ? "wait" : "pointer",
+                  fontFamily:"'JetBrains Mono',monospace", fontSize:11, fontWeight:600,
+                  opacity:saving ? 0.7 : 1,
+                }}
+              >{saving ? "Saving..." : "Save DNS Settings"}</button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -960,6 +1143,7 @@ export default function SettingsPage() {
       group: "ENGINE",
       items: [
         { tab:"scan",     icon:"SC", label:"Scan",      desc:"Network discovery" },
+        { tab:"dns",      icon:"DN", label:"DNS",       desc:"Reverse lookup servers" },
       ],
     },
     {
@@ -1047,6 +1231,7 @@ export default function SettingsPage() {
           {activeTab === "racks"    && <RacksTabContent />}
           {activeTab === "classes"  && <ClassesTabContent />}
           {activeTab === "scan"     && <EngineTabContent />}
+          {activeTab === "dns"      && <DnsSettingsTabContent />}
           {activeTab === "map"      && (
             <MapSettingsTabContent
               url={mapBgUrl}
