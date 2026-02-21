@@ -8,6 +8,7 @@ import ipaddress
 import time
 import threading
 import uuid
+import subprocess
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -315,6 +316,7 @@ def _execute_scan(
 
     errors: List[str] = []
     switch_data: Dict[str, SwitchData] = {}
+    ping_by_ip: Dict[str, tuple[bool, int]] = {}
     switch_metrics: List[ScanSwitchMetric] = []
 
     scan_targets = []
@@ -351,16 +353,17 @@ def _execute_scan(
         started = time.perf_counter()
         ip = target["ip"]
         label = target["label"]
+        ping_ok, ping_rtt = _ping_host(ip)
 
         if cancel_event and cancel_event.is_set():
             duration_ms = int((time.perf_counter() - started) * 1000)
-            return ip, label, None, "cancelled", duration_ms
+            return ip, label, None, "cancelled", duration_ms, ping_ok, ping_rtt
 
         sem = profile_semaphores[target["profile_key"]]
         with sem:
             if cancel_event and cancel_event.is_set():
                 duration_ms = int((time.perf_counter() - started) * 1000)
-                return ip, label, None, "cancelled", duration_ms
+                return ip, label, None, "cancelled", duration_ms, ping_ok, ping_rtt
             try:
                 data = scan_switch(
                     ip=ip,
@@ -378,11 +381,11 @@ def _execute_scan(
                 )
                 duration_ms = int((time.perf_counter() - started) * 1000)
                 if data:
-                    return ip, label, data, "", duration_ms
-                return ip, label, None, "no SNMP response", duration_ms
+                    return ip, label, data, "", duration_ms, ping_ok, ping_rtt
+                return ip, label, None, "no SNMP response", duration_ms, ping_ok, ping_rtt
             except Exception as exc:
                 duration_ms = int((time.perf_counter() - started) * 1000)
-                return ip, label, None, str(exc), duration_ms
+                return ip, label, None, str(exc), duration_ms, ping_ok, ping_rtt
 
     scan_started = time.perf_counter()
     workers = max(1, min(int(configured_max_workers), len(scan_targets)))
@@ -390,7 +393,8 @@ def _execute_scan(
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(_scan_target, target) for target in scan_targets]
         for fut in as_completed(futures):
-            ip, label, data, error_msg, duration_ms = fut.result()
+            ip, label, data, error_msg, duration_ms, ping_ok, ping_rtt = fut.result()
+            ping_by_ip[ip] = (ping_ok, ping_rtt)
             if data:
                 switch_data[ip] = data
                 _log_event(
@@ -400,6 +404,8 @@ def _execute_scan(
                     ip=ip,
                     label=label,
                     success=True,
+                    ping_ok=ping_ok,
+                    ping_rtt_ms=ping_rtt,
                     duration_ms=duration_ms,
                 )
                 switch_metrics.append(ScanSwitchMetric(
@@ -407,7 +413,10 @@ def _execute_scan(
                 ))
             else:
                 if error_msg and error_msg != "cancelled":
-                    errors.append(f"{ip}: {error_msg}")
+                    if ping_ok:
+                        errors.append(f"{ip}: {error_msg} (ping ok)")
+                    else:
+                        errors.append(f"{ip}: {error_msg}")
                 _log_event(
                     logging.WARNING if error_msg and error_msg != "cancelled" else logging.INFO,
                     "scan.switch.result",
@@ -415,6 +424,8 @@ def _execute_scan(
                     ip=ip,
                     label=label,
                     success=False,
+                    ping_ok=ping_ok,
+                    ping_rtt_ms=ping_rtt,
                     duration_ms=duration_ms,
                     error=error_msg,
                 )
@@ -427,55 +438,46 @@ def _execute_scan(
     switch_metrics.sort(key=lambda m: m.duration_ms, reverse=True)
     status = "cancelled" if (cancel_event and cancel_event.is_set()) else "finished"
 
-    if not switch_data:
-        result = ScanResult(
-            scanned=len(credentials),
-            found=0,
-            links=0,
-            errors=errors,
-            max_workers=workers,
-            total_duration_ms=total_duration_ms,
-            switch_metrics=switch_metrics,
-            status=status,
-        )
-        _log_event(
-            logging.INFO,
-            "scan.end",
-            correlation_id=corr,
-            status=result.status,
-            scanned=result.scanned,
-            found=result.found,
-            links=result.links,
-            total_duration_ms=result.total_duration_ms,
-            errors=len(result.errors),
-        )
-        return result
-
+    discovered_ips = set(switch_data.keys()) | {ip for ip, (ok, _) in ping_by_ip.items() if ok}
     existing_ips = {d.ip for d in db.query(Device.ip).all()}
-    new_ips = [ip for ip in switch_data if ip not in existing_ips]
+    new_ips = [ip for ip in discovered_ips if ip not in existing_ips]
     all_ips_ordered = list(existing_ips) + new_ips
     layout = auto_layout(all_ips_ordered)
 
-    for ip, sw in switch_data.items():
-        model = extract_model(sw.sys_descr, sw.vendor)
+    for ip in discovered_ips:
+        sw = switch_data.get(ip)
+        ping_ok, ping_rtt = ping_by_ip.get(ip, (False, 0))
+        ping_status = "online" if ping_ok else "offline"
+        model = extract_model(sw.sys_descr, sw.vendor) if sw else ""
 
         device = db.query(Device).filter(Device.ip == ip).first()
         if device:
-            device.sys_name  = sw.sys_name  or device.sys_name
-            device.sys_descr = sw.sys_descr or device.sys_descr
-            device.location  = sw.location  or device.location
-            device.model     = model        or device.model
-            device.vendor    = sw.vendor
-            device.last_seen = datetime.utcnow()
+            if sw:
+                device.sys_name  = sw.sys_name  or device.sys_name
+                device.sys_descr = sw.sys_descr or device.sys_descr
+                device.location  = sw.location  or device.location
+                device.model     = model        or device.model
+                device.vendor    = sw.vendor
+                device.last_seen = datetime.utcnow()
+            elif ping_ok:
+                device.sys_name = device.sys_name or ip
+                device.sys_descr = device.sys_descr or "Discovered by ping (SNMP unavailable)"
+                device.vendor = device.vendor or "generic"
+            device.ping_status = ping_status
+            device.ping_rtt_ms = ping_rtt if ping_ok else 0
+            device.last_ping = datetime.utcnow()
         else:
             x, y = layout.get(ip, (100.0, 100.0))
             db.add(Device(
                 ip=ip,
-                sys_name=sw.sys_name,
-                sys_descr=sw.sys_descr,
+                sys_name=sw.sys_name if sw else ip,
+                sys_descr=sw.sys_descr if sw else "Discovered by ping (SNMP unavailable)",
                 model=model,
-                vendor=sw.vendor,
-                location=sw.location,
+                vendor=sw.vendor if sw else "generic",
+                location=sw.location if sw else "",
+                ping_status=ping_status,
+                ping_rtt_ms=ping_rtt if ping_ok else 0,
+                last_ping=datetime.utcnow(),
                 map_x=x,
                 map_y=y,
             ))
@@ -548,7 +550,7 @@ def _execute_scan(
 
     result = ScanResult(
         scanned=len(credentials),
-        found=len(switch_data),
+        found=len(discovered_ips),
         links=link_count,
         errors=errors,
         max_workers=workers,
@@ -977,6 +979,50 @@ def get_logs(limit: int = 200, level: str = "", event_prefix: str = ""):
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+
+def _ping_host(ip: str, timeout_sec: int = 1) -> tuple[bool, int]:
+    """Best-effort ICMP ping via system command. Returns (reachable, rtt_ms)."""
+    if not ip:
+        return False, 0
+
+    # Linux container default (Docker image), fallback command shape for Windows.
+    cmds = [
+        ["ping", "-c", "1", "-W", str(timeout_sec), ip],
+        ["ping", "-n", "1", "-w", str(timeout_sec * 1000), ip],
+    ]
+
+    for cmd in cmds:
+        try:
+            completed = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=max(1, timeout_sec + 1),
+            )
+        except Exception:
+            continue
+
+        out = f"{completed.stdout}\n{completed.stderr}".lower()
+        if completed.returncode != 0:
+            continue
+
+        # Parse common rtt formats: time=1.23 ms / time<1ms / durchschnitt = 2ms
+        import re
+        patterns = [
+            r"time[=<]\s*([0-9]+(?:\.[0-9]+)?)\s*ms",
+            r"average\s*=\s*([0-9]+)ms",
+            r"durchschnitt\s*=\s*([0-9]+)ms",
+        ]
+        for pattern in patterns:
+            m = re.search(pattern, out)
+            if m:
+                try:
+                    return True, int(float(m.group(1)))
+                except ValueError:
+                    pass
+        return True, 1
+
+    return False, 0
 
 def _resolve_ip(sys_name: str, switch_data: dict) -> str:
     """Try to find the management IP of a device by sysName in the scan batch."""

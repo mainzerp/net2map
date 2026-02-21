@@ -11,6 +11,8 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
   const [modelInput, setModelInput] = useState(device.model || "");
   const [savingMeta, setSavingMeta] = useState(false);
   const activePorts = device.ports.filter(p => p.oper_status === 1);
+  const pingStatus = device.ping_status || "unknown";
+  const statusColor = pingStatus === "online" ? "#22c55e" : pingStatus === "offline" ? "#f87171" : "#64748b";
 
   useEffect(() => {
     setVendorInput(device.vendor || "generic");
@@ -41,7 +43,11 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
         padding:"10px 14px", cursor:"pointer", userSelect:"none",
       }}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <div style={{width:8,height:8,borderRadius:"50%",backgroundColor:"#22c55e",boxShadow:"0 0 6px #22c55e"}}/>
+          <div
+            title={pingStatus === "online"
+              ? `ping online${device.ping_rtt_ms ? ` (${device.ping_rtt_ms} ms)` : ""}`
+              : pingStatus === "offline" ? "ping offline" : "ping unknown"}
+            style={{width:8,height:8,borderRadius:"50%",backgroundColor:statusColor,boxShadow:`0 0 6px ${statusColor}`}}/>
           <div>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
               <span style={{color:"#e2e8f0",fontWeight:600,fontSize:14}}>{device.model || device.sys_name}</span>
@@ -54,7 +60,10 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
                 }}>{switchClass.label}</span>
               )}
             </div>
-            <div style={{color:"#475569",fontSize:12}}>{device.ip} - {activePorts.length}/{device.ports.length} ports active</div>
+            <div style={{color:"#475569",fontSize:12}}>
+              {device.ip} - {activePorts.length}/{device.ports.length} ports active - {pingStatus}
+              {pingStatus === "online" && device.ping_rtt_ms ? ` ${device.ping_rtt_ms}ms` : ""}
+            </div>
           </div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:6}}>

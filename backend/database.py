@@ -119,6 +119,9 @@ class Device(Base):
     model        = Column(String, default="")
     vendor       = Column(String, default="")             # "aruba_cx" | "fs" | "generic"
     location     = Column(String, default="")             # sysLocation
+    ping_status  = Column(String, default="unknown")      # online|offline|unknown
+    ping_rtt_ms  = Column(Integer, default=0)
+    last_ping    = Column(DateTime, nullable=True)
     map_x        = Column(Float, default=100.0)
     map_y        = Column(Float, default=100.0)
     last_seen    = Column(DateTime, default=datetime.utcnow)
@@ -221,6 +224,26 @@ def _ensure_snmp_profile_policy_columns():
                 conn.execute(text(f"ALTER TABLE snmp_profiles ADD COLUMN {col_name} {col_def}"))
 
 
+def _ensure_device_ping_columns():
+    """Add ping-related columns for existing SQLite databases without migrations."""
+    with engine.begin() as conn:
+        if conn.dialect.name != "sqlite":
+            return
+
+        rows = conn.execute(text("PRAGMA table_info(devices)")).fetchall()
+        existing = {str(r[1]) for r in rows}
+
+        additions = [
+            ("ping_status", "VARCHAR DEFAULT 'unknown'"),
+            ("ping_rtt_ms", "INTEGER DEFAULT 0"),
+            ("last_ping", "DATETIME"),
+        ]
+        for col_name, col_def in additions:
+            if col_name not in existing:
+                conn.execute(text(f"ALTER TABLE devices ADD COLUMN {col_name} {col_def}"))
+
+
 def create_tables():
     Base.metadata.create_all(bind=engine)
     _ensure_snmp_profile_policy_columns()
+    _ensure_device_ping_columns()

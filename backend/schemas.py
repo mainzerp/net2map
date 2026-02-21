@@ -187,6 +187,8 @@ class DeviceBase(BaseModel):
     model:     str = ""
     vendor:    str = ""
     location:  str = ""
+    ping_status: str = "unknown"
+    ping_rtt_ms: int = 0
     map_x:     float = 100.0
     map_y:     float = 100.0
 
