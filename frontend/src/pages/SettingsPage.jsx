@@ -229,6 +229,7 @@ function CredentialsTabContent({ profiles }) {
   const [form, setForm]         = useState({ ...EMPTY_FORM });
   const [err, setErr]           = useState("");
   const formRef = useRef(null);
+  const [editPanelTop, setEditPanelTop] = useState(80);
 
   const refresh = () => {
     setLoading(true);
@@ -240,7 +241,7 @@ function CredentialsTabContent({ profiles }) {
 
   const resetForm = () => { setForm({ ...EMPTY_FORM }); setEditId(null); setErr(""); };
 
-  const startEdit = (c) => {
+  const startEdit = (c, e) => {
     setEditId(c.id);
     setForm({
       label:c.label, ip:c.ip, snmp_port:c.snmp_port, location:c.location, enabled:c.enabled,
@@ -251,7 +252,8 @@ function CredentialsTabContent({ profiles }) {
       v3_priv_protocol:c.v3_priv_protocol,   v3_priv_password:c.v3_priv_password,
     });
     setErr("");
-    setTimeout(() => formRef.current?.scrollIntoView({ behavior:"smooth", block:"start" }), 0);
+    const top = e?.currentTarget?.getBoundingClientRect?.().top;
+    if (typeof top === "number") setEditPanelTop(Math.max(64, Math.floor(top - 24)));
   };
 
   const submit = async (e) => {
@@ -287,7 +289,14 @@ function CredentialsTabContent({ profiles }) {
 
   return (
     <div style={{flex:1,overflowY:"auto",padding:"14px 20px"}}>
-        <form ref={formRef} onSubmit={submit} style={{marginBottom:18,padding:"14px",backgroundColor:"#0a0e18",border:"1px solid #1e293b",borderRadius:10}}>
+        <form ref={formRef} onSubmit={submit} style={{
+          marginBottom:18,padding:"14px",backgroundColor:"#0a0e18",border:"1px solid #1e293b",borderRadius:10,
+          ...(editId ? {
+            position:"fixed", right:20, top:editPanelTop, width:470, zIndex:80,
+            maxHeight:"calc(100vh - 80px)", overflowY:"auto",
+            boxShadow:"0 12px 30px rgba(0,0,0,0.45)",
+          } : {}),
+        }}>
           <div style={{color:"#475569",fontSize:10,letterSpacing:1,marginBottom:12}}>
             {editId ? "EDIT" : "NEW ENTRY"}
           </div>
@@ -418,8 +427,10 @@ function CredentialsTabContent({ profiles }) {
               <div key={c.id} style={{
                 display:"flex", alignItems:"center", justifyContent:"space-between",
                 padding:"10px 12px", marginBottom:6,
-                backgroundColor:"#0a0e18", border:`1px solid ${c.enabled ? "#1e293b" : "#0f172a"}`,
+                backgroundColor: editId === c.id ? "#0c1220" : "#0a0e18",
+                border:`1px solid ${editId === c.id ? "#164e63" : (c.enabled ? "#1e293b" : "#0f172a")}`,
                 borderRadius:8, opacity: c.enabled ? 1 : 0.5,
+                boxShadow: editId === c.id ? "0 0 0 1px #083344" : "none",
               }}>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{display:"flex",alignItems:"center",gap:6}}>
@@ -450,7 +461,7 @@ function CredentialsTabContent({ profiles }) {
                   </div>
                 </div>
                 <div style={{display:"flex",gap:6,flexShrink:0,marginLeft:8}}>
-                  <button onClick={() => startEdit(c)} style={{background:"none",border:"1px solid #1e293b",color:"#64748b",borderRadius:4,padding:"2px 8px",cursor:"pointer",fontSize:10}}>Edit</button>
+                  <button onClick={(e) => startEdit(c, e)} style={{background:"none",border:"1px solid #1e293b",color:"#64748b",borderRadius:4,padding:"2px 8px",cursor:"pointer",fontSize:10}}>Edit</button>
                   <button onClick={() => remove(c.id)} style={{background:"none",border:"1px solid #7f1d1d",color:"#f87171",borderRadius:4,padding:"2px 8px",cursor:"pointer",fontSize:10}}>X</button>
                 </div>
               </div>
