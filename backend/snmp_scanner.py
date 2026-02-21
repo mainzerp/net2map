@@ -65,6 +65,10 @@ OID_LLDP_REM_PORT_DESC = "1.0.8802.1.1.2.1.4.1.1.8"
 OID_ARP_MAC = "1.3.6.1.2.1.4.22.1.2"
 OID_ARP_IP  = "1.3.6.1.2.1.4.22.1.3"
 
+# BRIDGE-MIB forwarding database (MAC -> bridge port -> ifIndex)
+OID_DOT1D_TP_FDB_PORT        = "1.3.6.1.2.1.17.4.3.1.2"
+OID_DOT1D_BASE_PORT_IF_INDEX = "1.3.6.1.2.1.17.1.4.1.2"
+
 # â”€â”€â”€ Vendor enterprise OIDs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Used to hard-identify vendor when sysDescr is ambiguous
 VENDOR_OIDS: Dict[str, str] = {
@@ -111,6 +115,7 @@ class SwitchData:
     interfaces:     Dict[int, IfInfo]       = field(default_factory=dict)
     lldp_neighbors: List[LldpNeighbor]      = field(default_factory=list)
     arp_table:      Dict[str, str]          = field(default_factory=dict)  # macâ†’ip
+    mac_ifindex:    Dict[str, int]          = field(default_factory=dict)  # macâ†’ifIndex
 
 
 # â”€â”€â”€ Credentials builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -290,6 +295,18 @@ def _hex_to_mac(hex_str: str) -> str:
         return hex_str
 
 
+def _oid_to_mac(oid_str: str) -> str:
+    """Extract MAC from last 6 OID components (decimal bytes)."""
+    try:
+        parts = oid_str.rstrip(".").split(".")
+        octets = [int(x) for x in parts[-6:]]
+        if len(octets) != 6 or any(o < 0 or o > 255 for o in octets):
+            return ""
+        return ":".join(f"{o:02x}" for o in octets)
+    except Exception:
+        return ""
+
+
 # â”€â”€â”€ Main scan function â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def scan_switch(
@@ -428,6 +445,30 @@ def scan_switch(
         mac = _hex_to_mac(mac_val)
         if mac and arp_ip:
             sw.arp_table[mac] = arp_ip
+
+    # â”€â”€ 6. BRIDGE-MIB FDB: map learned MACs to ifIndex (best-effort) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    base_port_rows = snmp_bulk_walk(ip, snmp_port, auth, OID_DOT1D_BASE_PORT_IF_INDEX)
+    fdb_rows = snmp_bulk_walk(ip, snmp_port, auth, OID_DOT1D_TP_FDB_PORT)
+
+    bridge_to_ifindex: Dict[int, int] = {}
+    for oid_s, ifindex_val in base_port_rows:
+        try:
+            bridge_port = int(_last_n(oid_s, 1)[0])
+            bridge_to_ifindex[bridge_port] = int(ifindex_val)
+        except ValueError:
+            continue
+
+    for oid_s, bridge_port_val in fdb_rows:
+        mac = _oid_to_mac(oid_s)
+        if not mac:
+            continue
+        try:
+            bridge_port = int(bridge_port_val)
+        except ValueError:
+            continue
+        ifindex = bridge_to_ifindex.get(bridge_port)
+        if ifindex is not None:
+            sw.mac_ifindex[mac] = ifindex
 
     log.info("Scanned %s (%s) vendor=%s: %d ifaces, %d LLDP nbrs",
              ip, sw.sys_name, sw.vendor, len(sw.interfaces), len(sw.lldp_neighbors))
