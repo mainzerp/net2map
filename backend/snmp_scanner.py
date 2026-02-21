@@ -76,12 +76,14 @@ VENDOR_OIDS: Dict[str, str] = {
     "1.3.6.1.4.1.11":    "aruba_cx",  # Hewlett-Packard (legacy Aruba/HPE)
     "1.3.6.1.4.1.25506": "aruba_cx",  # H3C (some HPE rebrand)
     "1.3.6.1.4.1.52642": "fs",        # FS.COM (FSOS)
+    "1.3.6.1.4.1.41112": "unifi",     # Ubiquiti / UniFi
 }
 
 # sysDescr keywords per vendor (case-insensitive)
 VENDOR_KEYWORDS: Dict[str, List[str]] = {
     "aruba_cx": ["arubaos-cx", "aruba cx", "arubacx"],
     "fs":       ["fsos", "fs s", "fs.com", " fss"],
+    "unifi":    ["unifi", "ubiquiti", "usw-", "u7", "udm", "uxg"],
 }
 
 
@@ -235,6 +237,10 @@ _MODEL_FS = re.compile(
     r"(FS\s+[A-Z]\d+[\w\-]*)",
     re.IGNORECASE,
 )
+_MODEL_UNIFI = re.compile(
+    r"((?:UniFi|Ubiquiti)\s+[\w\- ]+|USW\-[\w\-]+)",
+    re.IGNORECASE,
+)
 _MODEL_GENERIC = re.compile(
     r"(Aruba\s+CX\s+[\w\-]+|HPE?\s+[\w\-]+|Cisco\s+[\w\-]+|FS\s+[\w\-]+|FSOS\s+[\w\-]+)",
     re.IGNORECASE,
@@ -247,6 +253,9 @@ def extract_model(sys_descr: str, vendor: str) -> str:
         return m.group(1) if m else ""
     if vendor == "fs":
         m = _MODEL_FS.search(sys_descr)
+        return m.group(1) if m else ""
+    if vendor == "unifi":
+        m = _MODEL_UNIFI.search(sys_descr)
         return m.group(1) if m else ""
     m = _MODEL_GENERIC.search(sys_descr or "")
     return m.group(1) if m else ""
@@ -262,6 +271,7 @@ _VIRTUAL_ARUBA = ("loopback", "vlan", "tunnel", "mgmt", "oobm")
 
 # FS.com (FSOS): keep Ethernet / GigabitEthernet / 10Ge / 25Ge / 100Ge
 _VIRTUAL_FS = ("loopback", "vlan", "mgmt", "null", "stack")
+_VIRTUAL_UNIFI = ("loopback", "vlan", "bridge", "cpu", "mgmt")
 
 
 def is_virtual(if_descr: str, vendor: str) -> bool:
@@ -269,6 +279,7 @@ def is_virtual(if_descr: str, vendor: str) -> bool:
     patterns = {
         "aruba_cx": _VIRTUAL_ARUBA,
         "fs":       _VIRTUAL_FS,
+        "unifi":    _VIRTUAL_UNIFI,
     }.get(vendor, _VIRTUAL_GENERIC)
     return any(p in d for p in patterns)
 
