@@ -77,6 +77,19 @@ Optional kann die Backend-URL über `VITE_API_URL` gesetzt werden.
 3. Geräte, Links und Racks in der Map prüfen
 4. Bei Bedarf Vendor/Modell pro Gerät manuell korrigieren
 
+## Scan-Settings und Metriken
+
+- Die Anzahl paralleler SNMP-Abfragen ist in der UI unter `Settings -> Scan` konfigurierbar.
+- Backend-API für Scan-Worker: `GET/PUT /api/scan-settings` mit `max_workers`.
+- DNS-Resolver für PTR-Lookups sind in der UI unter `Settings -> DNS` konfigurierbar.
+- Backend-API für DNS-Server: `GET/PUT /api/dns-settings` mit `servers` (IP-Liste).
+
+Das Scan-Ergebnis (`POST /api/scan`) enthält zusätzliche Laufzeitdaten:
+
+- `max_workers`: effektiv verwendete Worker-Anzahl
+- `total_duration_ms`: Gesamtdauer für den Scanlauf
+- `switch_metrics[]`: Dauer und Status pro Switch (`ip`, `label`, `duration_ms`, `success`, `error`)
+
 ## Tech Stack
 
 - Backend: FastAPI, SQLAlchemy, Pydantic, PySNMP
