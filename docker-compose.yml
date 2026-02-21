@@ -1,0 +1,39 @@
+services:
+
+  # ─── FastAPI Backend ─────────────────────────────────────────────────────────
+  backend:
+    build: ./backend
+    container_name: netmap-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "sqlite:////data/netmap.db"
+    volumes:
+      - netmap-data:/data          # persistent SQLite file
+    # SNMP requires access to your LAN – use host network or expose nothing
+    # (SNMP queries originate FROM this container, no inbound ports needed)
+    networks:
+      - netmap
+
+  # ─── React/Nginx Frontend ────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Inside Docker the nginx proxy rewrites /api → backend:8000
+        # so we leave VITE_API_URL empty (relative path)
+        VITE_API_URL: ""
+    container_name: netmap-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - netmap
+
+volumes:
+  netmap-data:
+
+networks:
+  netmap:
+    driver: bridge
