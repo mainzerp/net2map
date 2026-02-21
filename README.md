@@ -1,1 +1,84 @@
-# netmap
+# NetMap
+
+NetMap ist eine Web-Anwendung zur Erkennung und Visualisierung von Switch-Topologien via SNMP.
+Das Projekt besteht aus einem FastAPI-Backend (Scan, Persistenz, API) und einem React/Vite-Frontend (Map, Rack-Ansicht, Settings).
+
+## Features
+
+- SNMP-Scan für Geräte via SNMPv2c und SNMPv3
+- Automatische Vendor-Erkennung (Aruba CX, FS.com, Generic)
+- Topologie über LLDP-Links inkl. Port-/Speed-Infos
+- Rack-Ansicht mit Geräte-Zuordnung und Sortierung
+- Manuelle Metadaten-Anpassung pro Gerät (z. B. Vendor/Modell)
+
+## Architektur
+
+- `backend/` – FastAPI + SQLAlchemy + SNMP Scanner
+- `frontend/` – React + Vite, ausgeliefert über Nginx im Docker-Setup
+- `docker-compose.yml` – Startet Frontend und Backend gemeinsam
+
+## Schnellstart mit Docker
+
+Voraussetzung: Docker + Docker Compose
+
+```bash
+docker compose up --build -d
+```
+
+Danach ist die UI erreichbar unter:
+
+- http://localhost:3000
+
+Der Backend-Container speichert SQLite-Daten persistent im Docker-Volume `netmap-data`.
+
+Stoppen:
+
+```bash
+docker compose down
+```
+
+Mit Löschen des DB-Volumes:
+
+```bash
+docker compose down -v
+```
+
+## Lokale Entwicklung (ohne Docker)
+
+### Backend
+
+```bash
+cd backend
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+# Linux/macOS
+# source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Vite läuft standardmäßig unter http://localhost:5173.
+
+Optional kann die Backend-URL über `VITE_API_URL` gesetzt werden.
+
+## Typischer Ablauf
+
+1. In den Settings SNMP-Credentials/Profile anlegen
+2. Scan starten
+3. Geräte, Links und Racks in der Map prüfen
+4. Bei Bedarf Vendor/Modell pro Gerät manuell korrigieren
+
+## Tech Stack
+
+- Backend: FastAPI, SQLAlchemy, Pydantic, PySNMP
+- Frontend: React, React Router, Vite
+- Deployment: Docker, Nginx
