@@ -8,6 +8,7 @@ import ipaddress
 import time
 import threading
 import uuid
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -52,6 +53,21 @@ app.add_middleware(
 
 SCAN_JOBS: Dict[str, dict] = {}
 SCAN_JOBS_LOCK = threading.Lock()
+LOG_BUFFER = deque(maxlen=5000)
+LOG_BUFFER_LOCK = threading.Lock()
+
+
+def _log_event(level: int, event: str, **fields):
+    payload = {
+        "ts": datetime.utcnow().isoformat() + "Z",
+        "level": logging.getLevelName(level),
+        "event": event,
+        **fields,
+    }
+    line = json.dumps(payload, ensure_ascii=False)
+    with LOG_BUFFER_LOCK:
+        LOG_BUFFER.append(payload)
+    log.log(level, line)
 
 
 @app.on_event("startup")
@@ -265,13 +281,26 @@ def _persist_scan_run(db: Session, result: ScanResult) -> int:
     return run.id
 
 
-def _execute_scan(db: Session, cancel_event: Optional[threading.Event] = None) -> ScanResult:
+def _execute_scan(
+    db: Session,
+    cancel_event: Optional[threading.Event] = None,
+    correlation_id: Optional[str] = None,
+) -> ScanResult:
+    corr = correlation_id or str(uuid.uuid4())
     credentials = db.query(Credential).filter(Credential.enabled == True).all()
     scan_settings = _read_scan_settings()
     configured_max_workers = scan_settings.get("max_workers", 4)
 
+    _log_event(
+        logging.INFO,
+        "scan.start",
+        correlation_id=corr,
+        enabled_credentials=len(credentials),
+        configured_max_workers=configured_max_workers,
+    )
+
     if not credentials:
-        return ScanResult(
+        result = ScanResult(
             scanned=0,
             found=0,
             links=0,
@@ -281,6 +310,8 @@ def _execute_scan(db: Session, cancel_event: Optional[threading.Event] = None) -
             switch_metrics=[],
             status="finished",
         )
+        _log_event(logging.INFO, "scan.end", correlation_id=corr, status=result.status, scanned=0, found=0, links=0, total_duration_ms=0)
+        return result
 
     errors: List[str] = []
     switch_data: Dict[str, SwitchData] = {}
@@ -362,12 +393,31 @@ def _execute_scan(db: Session, cancel_event: Optional[threading.Event] = None) -
             ip, label, data, error_msg, duration_ms = fut.result()
             if data:
                 switch_data[ip] = data
+                _log_event(
+                    logging.INFO,
+                    "scan.switch.result",
+                    correlation_id=corr,
+                    ip=ip,
+                    label=label,
+                    success=True,
+                    duration_ms=duration_ms,
+                )
                 switch_metrics.append(ScanSwitchMetric(
                     ip=ip, label=label, duration_ms=duration_ms, success=True, error=""
                 ))
             else:
                 if error_msg and error_msg != "cancelled":
                     errors.append(f"{ip}: {error_msg}")
+                _log_event(
+                    logging.WARNING if error_msg and error_msg != "cancelled" else logging.INFO,
+                    "scan.switch.result",
+                    correlation_id=corr,
+                    ip=ip,
+                    label=label,
+                    success=False,
+                    duration_ms=duration_ms,
+                    error=error_msg,
+                )
                 switch_metrics.append(ScanSwitchMetric(
                     ip=ip, label=label, duration_ms=duration_ms,
                     success=False, error=error_msg or "no SNMP response"
@@ -378,7 +428,7 @@ def _execute_scan(db: Session, cancel_event: Optional[threading.Event] = None) -
     status = "cancelled" if (cancel_event and cancel_event.is_set()) else "finished"
 
     if not switch_data:
-        return ScanResult(
+        result = ScanResult(
             scanned=len(credentials),
             found=0,
             links=0,
@@ -388,6 +438,18 @@ def _execute_scan(db: Session, cancel_event: Optional[threading.Event] = None) -
             switch_metrics=switch_metrics,
             status=status,
         )
+        _log_event(
+            logging.INFO,
+            "scan.end",
+            correlation_id=corr,
+            status=result.status,
+            scanned=result.scanned,
+            found=result.found,
+            links=result.links,
+            total_duration_ms=result.total_duration_ms,
+            errors=len(result.errors),
+        )
+        return result
 
     existing_ips = {d.ip for d in db.query(Device.ip).all()}
     new_ips = [ip for ip in switch_data if ip not in existing_ips]
@@ -433,7 +495,7 @@ def _execute_scan(db: Session, cancel_event: Optional[threading.Event] = None) -
             ifindex = sw.mac_ifindex.get(mac)
             if ifindex is None or not peer_ip:
                 continue
-            peer_host = _resolve_host(peer_ip, dns_cache, dns_servers)
+            peer_host = _resolve_host(peer_ip, dns_cache, dns_servers, correlation_id=corr)
             peers_by_ifindex.setdefault(ifindex, []).append((mac, peer_ip, peer_host))
 
         db.query(Port).filter(Port.device_id == device.id).delete()
@@ -495,13 +557,25 @@ def _execute_scan(db: Session, cancel_event: Optional[threading.Event] = None) -
         status=status,
     )
     result.run_id = _persist_scan_run(db, result)
+    _log_event(
+        logging.INFO,
+        "scan.end",
+        correlation_id=corr,
+        status=result.status,
+        scanned=result.scanned,
+        found=result.found,
+        links=result.links,
+        total_duration_ms=result.total_duration_ms,
+        errors=len(result.errors),
+        run_id=result.run_id,
+    )
     return result
 
 
 def _run_scan_job(job_id: str, cancel_event: threading.Event):
     db = SessionLocal()
     try:
-        result = _execute_scan(db, cancel_event)
+        result = _execute_scan(db, cancel_event, correlation_id=job_id)
     except Exception as exc:
         result = ScanResult(
             scanned=0,
@@ -528,7 +602,7 @@ def _run_scan_job(job_id: str, cancel_event: threading.Event):
 @app.post("/api/scan", response_model=ScanResult)
 def run_scan(db: Session = Depends(get_db)):
     """Synchronous scan execution (compatibility endpoint)."""
-    return _execute_scan(db, None)
+    return _execute_scan(db, None, correlation_id=f"sync-{uuid.uuid4()}")
 
 
 @app.post("/api/scan/jobs")
@@ -553,6 +627,7 @@ def start_scan_job():
     with SCAN_JOBS_LOCK:
         SCAN_JOBS[job_id]["thread"] = t
     t.start()
+    _log_event(logging.INFO, "scan.job.start", correlation_id=job_id, job_id=job_id)
 
     return {"job_id": job_id, "status": "running"}
 
@@ -583,6 +658,7 @@ def cancel_scan_job(job_id: str):
             return {"id": job_id, "status": state["status"], "cancel_requested": state["cancel_requested"]}
         state["cancel_requested"] = True
         state["cancel_event"].set()
+        _log_event(logging.WARNING, "scan.job.cancel_requested", correlation_id=job_id, job_id=job_id)
         return {"id": job_id, "status": state["status"], "cancel_requested": True}
 
 
@@ -885,6 +961,18 @@ async def update_dns_settings(request: Request):
     return _write_dns_settings(body.get("servers", []))
 
 
+@app.get("/api/logs")
+def get_logs(limit: int = 200, level: str = ""):
+    """Return recent structured backend logs."""
+    clamped = max(1, min(2000, int(limit)))
+    level_filter = level.strip().upper()
+    with LOG_BUFFER_LOCK:
+        rows = list(LOG_BUFFER)
+    if level_filter:
+        rows = [r for r in rows if str(r.get("level", "")).upper() == level_filter]
+    return rows[-clamped:]
+
+
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def _resolve_ip(sys_name: str, switch_data: dict) -> str:
@@ -898,11 +986,23 @@ def _resolve_ip(sys_name: str, switch_data: dict) -> str:
         return ""
 
 
-def _resolve_host(ip: str, cache: dict[str, str], dns_servers: list[str] | None = None) -> str:
+def _resolve_host(
+    ip: str,
+    cache: dict[str, str],
+    dns_servers: list[str] | None = None,
+    correlation_id: str = "",
+) -> str:
     """Best-effort reverse DNS lookup with per-scan cache."""
     if not ip:
         return ""
     if ip in cache:
+        _log_event(
+            logging.INFO,
+            "dns.lookup.cache",
+            correlation_id=correlation_id,
+            ip=ip,
+            host=cache[ip],
+        )
         return cache[ip]
 
     if dns_servers:
@@ -918,14 +1018,42 @@ def _resolve_host(ip: str, cache: dict[str, str], dns_servers: list[str] | None 
             answers = resolver.resolve(query_name, "PTR")
             host = str(answers[0]).rstrip(".") if answers else ""
             cache[ip] = host
+            _log_event(
+                logging.INFO,
+                "dns.lookup",
+                correlation_id=correlation_id,
+                ip=ip,
+                host=host,
+                resolver="custom",
+                nameservers=dns_servers,
+                success=bool(host),
+            )
             return host
         except Exception:
             pass
 
     try:
         cache[ip] = socket.gethostbyaddr(ip)[0]
+        _log_event(
+            logging.INFO,
+            "dns.lookup",
+            correlation_id=correlation_id,
+            ip=ip,
+            host=cache[ip],
+            resolver="system",
+            success=bool(cache[ip]),
+        )
     except Exception:
         cache[ip] = ""
+        _log_event(
+            logging.WARNING,
+            "dns.lookup",
+            correlation_id=correlation_id,
+            ip=ip,
+            host="",
+            resolver="system",
+            success=False,
+        )
     return cache[ip]
 
 

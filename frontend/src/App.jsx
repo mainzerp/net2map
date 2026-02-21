@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 const NAV = [
   { to: "/",         label: "Dashboard" },
   { to: "/map",      label: "Topology" },
+  { to: "/logs",     label: "Logs" },
   { to: "/settings", label: "Settings" },
 ];
 
