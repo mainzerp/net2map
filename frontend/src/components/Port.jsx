@@ -69,7 +69,7 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
             }}/>
           )}
           <span style={{
-            fontSize:9, fontWeight:700,
+            fontSize:10, fontWeight:700,
             color: hl ? "rgba(255,255,255,0.95)"
                  : (isLinked && !hl) ? "#e2e8f0"
                  : active ? "rgba(0,0,0,0.75)"
@@ -97,7 +97,7 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
               <div style={{color:"#94a3b8"}}>
                 {linkEntry.link.local_ip} {linkEntry.link.local_port} {"<->"} {linkEntry.link.remote_port} {linkEntry.link.remote_ip}
               </div>
-              <div style={{color:"#475569", marginTop:2, fontSize:9}}>
+              <div style={{color:"#475569", marginTop:2, fontSize:10}}>
                 Click to {selectedLink?"deselect":"highlight"}
               </div>
             </div>

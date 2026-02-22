@@ -381,7 +381,7 @@ function CredentialsTabContent({ profiles }) {
                   </label>
                 </div>
               )}
-              <div style={{fontSize:9,color:"#334155",lineHeight:1.6}}>
+              <div style={{fontSize:10,color:"#334155",lineHeight:1.6}}>
                 {F.v3_security_level === "noAuthNoPriv" && "Warning: No auth / no encryption - for testing only"}
                 {F.v3_security_level === "authNoPriv"   && "Warning: Authentication without encryption"}
                 {F.v3_security_level === "authPriv"     && "OK: Authentication + encryption (recommended)"}
@@ -427,14 +427,14 @@ function CredentialsTabContent({ profiles }) {
                     <div style={{width:6,height:6,borderRadius:"50%",backgroundColor:c.enabled?"#22c55e":"#475569",flexShrink:0}}/>
                     <span style={{color:"#e2e8f0",fontWeight:600,fontSize:12}}>{c.label}</span>
                     <span style={{
-                      fontSize:9,padding:"1px 5px",borderRadius:3,
+                      fontSize:10,padding:"1px 5px",borderRadius:3,
                       backgroundColor:v3?"#1e0b3a":"#0a0e18",
                       border:`1px solid ${v3?"#6d28d9":"#1e293b"}`,
                       color:v3?"#a78bfa":"#64748b",
                     }}>{c.snmp_version}</span>
-                    {v3 && <span style={{fontSize:9,color:"#475569"}}>{c.v3_security_level}</span>}
+                    {v3 && <span style={{fontSize:10,color:"#475569"}}>{c.v3_security_level}</span>}
                     {matchedDevice && <span style={{
-                      fontSize:8,padding:"1px 5px",borderRadius:3,
+                      fontSize:10,padding:"1px 5px",borderRadius:3,
                       backgroundColor:"#052e16",border:"1px solid #166534",color:"#4ade80",
                     }}>discovered</span>}
                   </div>
@@ -464,7 +464,7 @@ function CredentialsTabContent({ profiles }) {
           if (unassigned.length === 0) return null;
           return (
             <div style={{marginTop:20}}>
-              <div style={{color:"#475569",fontSize:9,letterSpacing:2,marginBottom:10}}>
+              <div style={{color:"#475569",fontSize:10,letterSpacing:2,marginBottom:10}}>
                 DISCOVERED WITHOUT CREDENTIALS ({unassigned.length})
               </div>
               {unassigned.map(d => (
@@ -479,7 +479,7 @@ function CredentialsTabContent({ profiles }) {
                       <div style={{width:6,height:6,borderRadius:"50%",backgroundColor:"#eab308",flexShrink:0}}/>
                       <span style={{color:"#e2e8f0",fontWeight:600,fontSize:12}}>{d.sys_name || d.ip}</span>
                       <span style={{
-                        fontSize:8,padding:"1px 5px",borderRadius:3,
+                        fontSize:10,padding:"1px 5px",borderRadius:3,
                         backgroundColor:"#422006",border:"1px solid #854d0e",color:"#fbbf24",
                       }}>unassigned</span>
                     </div>
@@ -615,7 +615,7 @@ function RacksTabContent() {
               </div>
             </div>
             <div style={{ marginTop:10, borderTop:"1px solid #0f172a", paddingTop:8 }}>
-              <div style={{ color:"#475569", fontSize:9, letterSpacing:1, marginBottom:6 }}>
+              <div style={{ color:"#475569", fontSize:10, letterSpacing:1, marginBottom:6 }}>
                 ASSIGNED SWITCHES ({assigned.length})
               </div>
               {assigned.length > 0 && (
@@ -623,7 +623,7 @@ function RacksTabContent() {
                   {assigned.map(d => (
                     <div key={d.id} style={{ backgroundColor:"#0c1a2e", border:"1px solid #1e3a5f", borderRadius:4, padding:"2px 6px 2px 8px", display:"flex", alignItems:"center", gap:4, fontSize:10 }}>
                       <span style={{ color:"#7dd3fc" }}>{d.sys_name || d.ip}</span>
-                      <span style={{ color:"#334155", fontSize:9 }}>{d.ip}</span>
+                      <span style={{ color:"#334155", fontSize:10 }}>{d.ip}</span>
                       <button onClick={() => unassignDevice(d.id)} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", padding:"0 2px", fontSize:11, lineHeight:1 }} title="Unassign">x</button>
                     </div>
                   ))}
@@ -759,7 +759,7 @@ function ClassesTabContent() {
                 </div>
               </div>
               <div style={{ marginTop:10, borderTop:"1px solid #0f172a", paddingTop:8 }}>
-                <div style={{ color:"#475569", fontSize:9, letterSpacing:1, marginBottom:6 }}>
+                <div style={{ color:"#475569", fontSize:10, letterSpacing:1, marginBottom:6 }}>
                   ASSIGNED SWITCHES ({assigned.length})
                 </div>
                 {assigned.length > 0 && (
@@ -767,7 +767,7 @@ function ClassesTabContent() {
                     {assigned.map(d => (
                       <div key={d.id} style={{ backgroundColor:"#0c1a2e", border:"1px solid #1e3a5f", borderRadius:4, padding:"2px 6px 2px 8px", display:"flex", alignItems:"center", gap:4, fontSize:10 }}>
                         <span style={{ color:"#7dd3fc" }}>{d.sys_name || d.ip}</span>
-                        <span style={{ color:"#334155", fontSize:9 }}>{d.ip}</span>
+                        <span style={{ color:"#334155", fontSize:10 }}>{d.ip}</span>
                         <button onClick={() => unassignDevice(d.id)} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", padding:"0 2px", fontSize:11, lineHeight:1 }} title="Unassign">x</button>
                       </div>
                     ))}
@@ -1400,7 +1400,7 @@ export default function SettingsPage() {
         {NAV_GROUPS.map(({ group, items }, gi) => (
           <div key={group}>
             {gi > 0 && <div style={{height:1,backgroundColor:"#0f172a",margin:"8px 8px"}}/>}
-            <div style={{color:"#334155",fontSize:9,letterSpacing:2,padding:"6px 8px 4px",userSelect:"none"}}>
+            <div style={{color:"#334155",fontSize:10,letterSpacing:2,padding:"6px 8px 4px",userSelect:"none"}}>
               {group}
             </div>
             {items.map(({ tab, icon, label, desc }) => (

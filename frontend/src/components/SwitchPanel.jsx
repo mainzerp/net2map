@@ -66,7 +66,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
               <span style={{color:"#e2e8f0",fontWeight:600,fontSize:14}}>{device.model || device.sys_name}</span>
               {switchClass && (
                 <span style={{
-                  fontSize:9, padding:"1px 6px", borderRadius:3,
+                  fontSize:10, padding:"1px 6px", borderRadius:3,
                   backgroundColor:`${switchClass.color}18`,
                   border:`1px solid ${switchClass.color}44`,
                   color: switchClass.color,

@@ -20,7 +20,7 @@ function ActiveLinkBar({ link, color, onClear }) {
         <span style={{color:"#94a3b8"}}>{"<->"}</span>
         <span style={{color:"#64748b"}}>{link.remote_port}</span>
         <span style={{color}}>{link.remote_ip}</span>
-        <span style={{padding:"1px 5px",backgroundColor:`${color}18`,border:`1px solid ${color}33`,borderRadius:4,color,fontSize:9}}>{link.speed_label}</span>
+        <span style={{padding:"1px 5px",backgroundColor:`${color}18`,border:`1px solid ${color}33`,borderRadius:4,color,fontSize:10}}>{link.speed_label}</span>
       </div>
       <button onClick={onClear} style={{background:"none",border:`1px solid ${color}44`,color,borderRadius:5,padding:"2px 8px",cursor:"pointer",fontSize:11,flexShrink:0}}>X</button>
     </div>
@@ -541,7 +541,7 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
             color: idx === 0 ? "#1e293b" : "#475569",
             borderRadius:3, width:18, height:18,
             cursor: idx === 0 ? "default" : "pointer",
-            fontSize:9, lineHeight:1, padding:0, display:"flex",
+            fontSize:10, lineHeight:1, padding:0, display:"flex",
             alignItems:"center", justifyContent:"center",
           }}>^</button>
         <button
@@ -552,7 +552,7 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
             color: idx === devices.length - 1 ? "#1e293b" : "#475569",
             borderRadius:3, width:18, height:18,
             cursor: idx === devices.length - 1 ? "default" : "pointer",
-            fontSize:9, lineHeight:1, padding:0, display:"flex",
+            fontSize:10, lineHeight:1, padding:0, display:"flex",
             alignItems:"center", justifyContent:"center",
           }}>v</button>
       </div>
@@ -590,7 +590,7 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
             color: isSel ? accentColor : (VENDOR_COLOR[a?.vendor]||"#94a3b8"),
             fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
           }}>{VENDOR_ICON[a?.vendor]||"[--]"} {a?.sys_name || l.local_ip}</div>
-          <div style={{color:"#334155",fontSize:9,marginTop:1}}>{l.local_port}</div>
+          <div style={{color:"#334155",fontSize:10,marginTop:1}}>{l.local_port}</div>
         </div>
         <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
           <div style={{
@@ -599,7 +599,7 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
             boxShadow: isSel ? `0 0 10px ${accentColor}` : `0 0 6px ${accentColor}88`,
           }}/>
           <span style={{
-            fontSize:8, color:accentColor, fontWeight:700,
+            fontSize:10, color:accentColor, fontWeight:700,
             letterSpacing:"0.05em",
           }}>{l.speed_label}</span>
         </div>
@@ -608,7 +608,7 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
             color: isSel ? accentColor : (VENDOR_COLOR[b?.vendor]||"#94a3b8"),
             fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
           }}>{b?.sys_name || l.remote_ip} {VENDOR_ICON[b?.vendor]||"[--]"}</div>
-          <div style={{color:"#334155",fontSize:9,marginTop:1}}>{l.remote_port}</div>
+          <div style={{color:"#334155",fontSize:10,marginTop:1}}>{l.remote_port}</div>
         </div>
       </div>
     );
@@ -772,17 +772,17 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
                       <div style={{color:VENDOR_COLOR[localDev?.vendor]||"#94a3b8",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                         {VENDOR_ICON[localDev?.vendor]||"[--]"} {localDev?.sys_name || l.local_ip}
                       </div>
-                      <div style={{color:"#334155",fontSize:9,marginTop:1}}>{l.local_port}</div>
+                      <div style={{color:"#334155",fontSize:10,marginTop:1}}>{l.local_port}</div>
                     </div>
                     <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
                       <div style={{width:"100%",height:3,borderRadius:2,background:`linear-gradient(90deg,${c}99,${c})`,boxShadow:`0 0 5px ${c}66`}}/>
-                      <span style={{fontSize:8,color:c,fontWeight:700,letterSpacing:"0.05em"}}>{l.speed_label}</span>
+                      <span style={{fontSize:10,color:c,fontWeight:700,letterSpacing:"0.05em"}}>{l.speed_label}</span>
                     </div>
                     <div style={{minWidth:0,paddingLeft:6,textAlign:"right"}}>
                       <div style={{color:"#818cf8",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                         {remoteLabel}
                       </div>
-                      <div style={{color:"#334155",fontSize:9,marginTop:1}}>{l.remote_port}</div>
+                      <div style={{color:"#334155",fontSize:10,marginTop:1}}>{l.remote_port}</div>
                     </div>
                   </div>
                 );
@@ -812,7 +812,7 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
                     {devByIp[l.local_ip]?.sys_name||l.local_ip} {l.local_port} {"<->"} {l.remote_port} {devByIp[l.remote_ip]?.sys_name||l.remote_ip}
                   </span>
                   <span style={{
-                    padding:"1px 5px", fontSize:9,
+                    padding:"1px 5px", fontSize:10,
                     backgroundColor:`${c}18`, border:`1px solid ${c}33`,
                     borderRadius:3, color:c, flexShrink:0,
                   }}>{l.speed_label}</span>
