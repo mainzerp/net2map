@@ -17,7 +17,11 @@ export default function App() {
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         html, body, #root { height: 100%; margin: 0; overflow: hidden; }
-        body { background: #020817; font-family: 'Inter', system-ui, sans-serif; }
+        body { background: #020817; font-family: 'Inter', system-ui, sans-serif; font-size: 12px; }
+        [style*="font-size: 8px"],
+        [style*="font-size: 9px"],
+        [style*="font-size: 10px"],
+        [style*="font-size: 11px"] { font-size: 12px !important; }
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
