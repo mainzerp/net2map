@@ -33,12 +33,21 @@
 
 ## Product Improvements
 
-- [ ] **Topology diff view between scans** -- Show newly discovered/removed devices and links after each run
-- [ ] **Bulk import/export for credentials/profiles** -- CSV/JSON import with validation and dry-run mode
-- [ ] **Per-port endpoint count + multi-host tooltip** -- Show number of learned MAC/IP per switch port and optional expanded list in detail view
+- [x] **Topology diff view between scans** -- Show newly discovered/removed devices and links after each run
+- [x] **Bulk import/export for credentials/profiles** -- CSV/JSON import with validation and dry-run mode
+- [x] **Per-port endpoint count + multi-host tooltip** -- Show number of learned MAC/IP per switch port and optional expanded list in detail view
 
 ## DevOps / Reliability
 
 - [ ] **Health endpoints for compose/k8s** -- Add explicit liveness/readiness endpoints for backend and wire them into deployment probes
 - [ ] **Environment-based configuration matrix** -- Centralize runtime config via env vars (worker defaults, DNS fallback behavior, logging level, feature flags)
 - [ ] **CI pipeline for lint/test/build** -- Run backend + frontend checks automatically before merge/release
+
+## Network Map & Access Control (Future)
+
+- [ ] **802.1X / MAC Authentication Bypass (MAB) status** -- Show authentication state per port (authorized, unauthorized, guest VLAN)
+- [ ] **Dynamic VLAN assignment visualization** -- Highlight ports where VLANs were dynamically assigned via RADIUS/NAC
+- [ ] **Rogue device detection** -- Alert on unknown MAC addresses appearing on access ports that are not in the allowed endpoints list
+- [ ] **Interactive port shutdown/bounce** -- Allow admins to administratively down or bounce a port directly from the map UI (requires write credentials)
+- [ ] **Logical topology overlays** -- Toggle map views to show Spanning Tree (STP) root paths, blocked ports, or specific VLAN topologies
+- [ ] **Endpoint search & locate** -- Global search bar to find a specific IP/MAC and highlight the exact switch and port it is connected to
