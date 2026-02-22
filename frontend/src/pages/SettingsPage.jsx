@@ -114,51 +114,51 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
   return (
     <div style={{flex:1,overflowY:"auto",paddingTop:20}}>
         <form ref={formRef} onSubmit={submit} style={{marginBottom:18,padding:"14px",backgroundColor:"#0a0e18",border:"1px solid #1e293b",borderRadius:10}}>
-          <div style={{color:"#64748b",fontSize:10,letterSpacing:1,marginBottom:12}}>{editId?"EDIT":"NEW PROFILE"}</div>
+          <div style={{color:"#e2e8f0",fontSize:10,letterSpacing:1,marginBottom:12}}>{editId?"EDIT":"NEW PROFILE"}</div>
           <div style={{marginBottom:8}}>
-            <label style={{fontSize:10,color:"#64748b",display:"block"}}>Profile name *
+            <label style={{fontSize:10,color:"#e2e8f0",display:"block"}}>Profile name *
               <input required value={F.label} onChange={e=>set("label",e.target.value)} placeholder="SNMPv3 Aruba Core" style={{...inp,marginTop:3}}/>
             </label>
           </div>
           <div style={{marginBottom:10}}>
-            <div style={{fontSize:10,color:"#64748b",marginBottom:4}}>SNMP Version</div>
+            <div style={{fontSize:10,color:"#e2e8f0",marginBottom:4}}>SNMP Version</div>
             <div style={{display:"flex",gap:6}}>
               {["v2c","v3"].map(v=>(
                 <button key={v} type="button" onClick={()=>set("snmp_version",v)} style={{padding:"4px 14px",borderRadius:5,fontSize:11,cursor:"pointer",fontFamily:"'Inter', system-ui, sans-serif",fontWeight:F.snmp_version===v?600:400,backgroundColor:F.snmp_version===v?"#083344":"transparent",border:`1px solid ${F.snmp_version===v?"#164e63":"#1e293b"}`,color:F.snmp_version===v?"#22d3ee":"#475569"}}>{v}</button>
               ))}
             </div>
           </div>
-          {!isV3 && <div style={{marginBottom:8}}><label style={{fontSize:10,color:"#64748b",display:"block"}}>Community String *<input required value={F.community} onChange={e=>set("community",e.target.value)} placeholder="public" style={{...inp,marginTop:3}}/></label></div>}
+          {!isV3 && <div style={{marginBottom:8}}><label style={{fontSize:10,color:"#e2e8f0",display:"block"}}>Community String *<input required value={F.community} onChange={e=>set("community",e.target.value)} placeholder="public" style={{...inp,marginTop:3}}/></label></div>}
           {isV3 && (
             <div style={{padding:"10px 12px",borderRadius:8,backgroundColor:"#0c1220",border:"1px solid #1e3a52",marginBottom:8,display:"flex",flexDirection:"column",gap:8}}>
-              <label style={{fontSize:10,color:"#64748b",display:"block"}}>Security Level
+              <label style={{fontSize:10,color:"#e2e8f0",display:"block"}}>Security Level
                 <select value={F.v3_security_level} onChange={e=>set("v3_security_level",e.target.value)} style={{...sel,marginTop:3}}>
                   {SEC_LEVELS.map(l=><option key={l}>{l}</option>)}
                 </select>
               </label>
-              <label style={{fontSize:10,color:"#64748b",display:"block"}}>Username
+              <label style={{fontSize:10,color:"#e2e8f0",display:"block"}}>Username
                 <input value={F.v3_username} onChange={e=>set("v3_username",e.target.value)} style={{...inp,marginTop:3}}/>
               </label>
               {needAuth && <>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                  <label style={{fontSize:10,color:"#64748b",display:"block"}}>Auth Protocol
+                  <label style={{fontSize:10,color:"#e2e8f0",display:"block"}}>Auth Protocol
                     <select value={F.v3_auth_protocol} onChange={e=>set("v3_auth_protocol",e.target.value)} style={{...sel,marginTop:3}}>
                       {AUTH_PROTOCOLS.map(p=><option key={p}>{p}</option>)}
                     </select>
                   </label>
-                  <label style={{fontSize:10,color:"#64748b",display:"block"}}>Auth Password
+                  <label style={{fontSize:10,color:"#e2e8f0",display:"block"}}>Auth Password
                     <input type="password" value={F.v3_auth_password} onChange={e=>set("v3_auth_password",e.target.value)} style={{...inp,marginTop:3}}/>
                   </label>
                 </div>
               </>}
               {needPriv && <>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                  <label style={{fontSize:10,color:"#64748b",display:"block"}}>Priv Protocol
+                  <label style={{fontSize:10,color:"#e2e8f0",display:"block"}}>Priv Protocol
                     <select value={F.v3_priv_protocol} onChange={e=>set("v3_priv_protocol",e.target.value)} style={{...sel,marginTop:3}}>
                       {PRIV_PROTOCOLS.map(p=><option key={p}>{p}</option>)}
                     </select>
                   </label>
-                  <label style={{fontSize:10,color:"#64748b",display:"block"}}>Priv Password
+                  <label style={{fontSize:10,color:"#e2e8f0",display:"block"}}>Priv Password
                     <input type="password" value={F.v3_priv_password} onChange={e=>set("v3_priv_password",e.target.value)} style={{...inp,marginTop:3}}/>
                   </label>
                 </div>
@@ -171,17 +171,17 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
             {editId && <button type="button" onClick={resetForm} style={{backgroundColor:"transparent",border:"1px solid #1e293b",color:"#64748b",borderRadius:6,padding:"6px 12px",cursor:"pointer",fontFamily:"'Inter', system-ui, sans-serif",fontSize:11}}>Cancel</button>}
           </div>
         </form>
-        {loading ? <div style={{color:"#475569",fontSize:11}}>Loading...</div> : profiles.length === 0 ? (
-          <div style={{color:"#475569",fontSize:11,textAlign:"center",marginTop:20}}>No profiles defined yet</div>
+        {loading ? <div style={{color:"#e2e8f0",fontSize:11}}>Loading...</div> : profiles.length === 0 ? (
+          <div style={{color:"#e2e8f0",fontSize:11,textAlign:"center",marginTop:20}}>No profiles defined yet</div>
         ) : profiles.map(p => (
           <div key={p.id} style={{backgroundColor:"#0a0e18",border:"1px solid #1e293b",borderRadius:8,padding:"10px 14px",marginBottom:8,display:"flex",alignItems:"flex-start",gap:10}}>
             <div style={{flex:1,minWidth:0}}>
               <div style={{color:"#e2e8f0",fontWeight:600,fontSize:12}}>{p.label}</div>
-              <div style={{color:"#64748b",fontSize:10,marginTop:2}}>
+              <div style={{color:"#e2e8f0",fontSize:10,marginTop:2}}>
                 {p.snmp_version === "v3" ? `v3 - ${p.v3_security_level} - ${p.v3_username || "-"}` : `v2c - ${p.community}`}
               </div>
             </div>
-            <button onClick={()=>startEdit(p)} style={{background:"none",border:"1px solid #1e293b",color:"#475569",borderRadius:5,padding:"2px 8px",cursor:"pointer",fontSize:10,fontFamily:"'Inter', system-ui, sans-serif"}}>Edit</button>
+            <button onClick={()=>startEdit(p)} style={{background:"none",border:"1px solid #1e293b",color:"#e2e8f0",borderRadius:5,padding:"2px 8px",cursor:"pointer",fontSize:10,fontFamily:"'Inter', system-ui, sans-serif"}}>Edit</button>
             <button onClick={()=>remove(p.id)} style={{background:"none",border:"1px solid #450a0a",color:"#7f1d1d",borderRadius:5,padding:"2px 8px",cursor:"pointer",fontSize:10,fontFamily:"'Inter', system-ui, sans-serif"}}>X</button>
           </div>
         ))}
@@ -275,7 +275,7 @@ function CredentialsTabContent({ profiles }) {
     fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, lineHeight:1.3, boxSizing:"border-box", width:"100%",
   };
   const sel = { ...inp, cursor:"pointer" };
-  const lbl = () => ({ fontSize:10, color:"#64748b", display:"block", userSelect:"none" });
+  const lbl = () => ({ fontSize:10, color:"#e2e8f0", display:"block", userSelect:"none" });
 
   return (
     <div style={{flex:1,overflowY:"auto",paddingTop:20}}>
@@ -287,7 +287,7 @@ function CredentialsTabContent({ profiles }) {
             boxShadow:"0 12px 30px rgba(0,0,0,0.45)",
           } : {}),
         }}>
-          <div style={{color:"#475569",fontSize:10,letterSpacing:1,marginBottom:12}}>
+          <div style={{color:"#e2e8f0",fontSize:10,letterSpacing:1,marginBottom:12}}>
             {editId ? "EDIT" : "NEW ENTRY"}
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
@@ -305,7 +305,7 @@ function CredentialsTabContent({ profiles }) {
             </label>
           </div>
           <div style={{marginBottom:10}}>
-            <div style={{fontSize:10,color:"#475569",marginBottom:4}}>Credential profile (optional)</div>
+            <div style={{fontSize:10,color:"#e2e8f0",marginBottom:4}}>Credential profile (optional)</div>
             <select
               value={F.profile_id ?? ""}
               onChange={e => set("profile_id", e.target.value ? +e.target.value : null)}
@@ -321,7 +321,7 @@ function CredentialsTabContent({ profiles }) {
           </div>
           {F.profile_id == null && <>
           <div style={{marginBottom:10}}>
-            <div style={{fontSize:10,color:"#475569",marginBottom:4}}>SNMP Version</div>
+            <div style={{fontSize:10,color:"#e2e8f0",marginBottom:4}}>SNMP Version</div>
             <div style={{display:"flex",gap:6}}>
               {["v2c","v3"].map(v => (
                 <button key={v} type="button" onClick={()=>set("snmp_version",v)} style={{
@@ -432,7 +432,7 @@ function CredentialsTabContent({ profiles }) {
                       border:`1px solid ${v3?"#6d28d9":"#1e293b"}`,
                       color:v3?"#a78bfa":"#64748b",
                     }}>{c.snmp_version}</span>
-                    {v3 && <span style={{fontSize:10,color:"#475569"}}>{c.v3_security_level}</span>}
+                    {v3 && <span style={{fontSize:10,color:"#e2e8f0"}}>{c.v3_security_level}</span>}
                     {matchedDevice && <span style={{
                       fontSize:10,padding:"1px 5px",borderRadius:3,
                       backgroundColor:"#052e16",border:"1px solid #166534",color:"#4ade80",
@@ -464,7 +464,7 @@ function CredentialsTabContent({ profiles }) {
           if (unassigned.length === 0) return null;
           return (
             <div style={{marginTop:20}}>
-              <div style={{color:"#475569",fontSize:10,letterSpacing:2,marginBottom:10}}>
+              <div style={{color:"#e2e8f0",fontSize:10,letterSpacing:2,marginBottom:10}}>
                 DISCOVERED WITHOUT CREDENTIALS ({unassigned.length})
               </div>
               {unassigned.map(d => (
@@ -483,7 +483,7 @@ function CredentialsTabContent({ profiles }) {
                         backgroundColor:"#422006",border:"1px solid #854d0e",color:"#fbbf24",
                       }}>unassigned</span>
                     </div>
-                    <div style={{color:"#475569",fontSize:10,marginTop:3,paddingLeft:14}}>
+                    <div style={{color:"#e2e8f0",fontSize:10,marginTop:3,paddingLeft:14}}>
                       {d.ip}
                       {d.vendor && <> - {d.vendor}</>}
                       {d.model && <> - {d.model}</>}
