@@ -982,7 +982,7 @@ function EngineTabContent() {
               color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
             }}
           />
-          <span style={{ color:"#64748b", fontSize:10, marginLeft:8 }}>Parallel Hosts</span>
+          <span style={{ color:"#64748b", fontSize:10, marginLeft:8 }}>Parallel Workers (Hosts)</span>
           <input
             type="number"
             min={1}
@@ -1004,7 +1004,7 @@ function EngineTabContent() {
               fontFamily:"'Inter', system-ui, sans-serif", fontSize:10,
               opacity:(settingsLoading || settingsSaving || scanning)?0.6:1,
             }}
-          >{settingsSaving ? "Saving..." : "Save Policy"}</button>
+          >{settingsSaving ? "Saving..." : "Save Scan Settings"}</button>
           <span style={{ color:"#334155", fontSize:10 }}>
             {settingsLoading ? "Loading settings..." : "1-128 workers"}
           </span>
@@ -1013,7 +1013,7 @@ function EngineTabContent() {
           display:"flex", alignItems:"center", gap:8, flexWrap:"wrap",
           padding:"10px 12px", border:"1px solid #1e293b", borderRadius:8, backgroundColor:"#020817",
         }}>
-          <span style={{ color:"#64748b", fontSize:10 }}>Auto Discovery (sec)</span>
+          <span style={{ color:"#64748b", fontSize:10 }}>Discovery Full Scan Interval (sec)</span>
           <input
             type="number"
             min={0}
@@ -1026,7 +1026,7 @@ function EngineTabContent() {
               color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
             }}
           />
-          <span style={{ color:"#64748b", fontSize:10, marginLeft:8 }}>Port Update (sec)</span>
+          <span style={{ color:"#64748b", fontSize:10, marginLeft:8 }}>Port Poll Interval (sec)</span>
           <input
             type="number"
             min={0}
@@ -1043,7 +1043,7 @@ function EngineTabContent() {
             0 disables schedule
           </span>
           <span style={{ color:"#334155", fontSize:10 }}>
-            now: discovery {discoveryLabel} - ports {portsLabel}
+            active schedule: discovery {discoveryLabel} - ports {portsLabel}
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
