@@ -194,6 +194,7 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
 const EMPTY_FORM = {
   label:"", ip:"", snmp_port:161, location:"", enabled:true,
   profile_id: null,
+  vendor:"generic", model:"",
   snmp_version:"v2c", community:"public",
   v3_security_level:"authPriv", v3_username:"",
   v3_auth_protocol:"SHA-256", v3_auth_password:"",
@@ -238,6 +239,7 @@ function CredentialsTabContent({ profiles }) {
     setForm({
       label:c.label, ip:c.ip, snmp_port:c.snmp_port, location:c.location, enabled:c.enabled,
       profile_id: c.profile_id ?? null,
+      vendor: c.vendor ?? "generic", model: c.model ?? "",
       snmp_version:c.snmp_version, community:c.community,
       v3_security_level:c.v3_security_level, v3_username:c.v3_username,
       v3_auth_protocol:c.v3_auth_protocol,   v3_auth_password:c.v3_auth_password,
@@ -352,6 +354,17 @@ function CredentialsTabContent({ profiles }) {
             </label>
             <label style={lbl()}>Location (optional)
               <input value={F.location} onChange={e=>set("location",e.target.value)} placeholder="Rack A / RZ-01" style={{...inp,marginTop:3}}/>
+            </label>
+            <label style={lbl()}>Vendor
+              <select value={F.vendor || "generic"} onChange={e=>set("vendor", e.target.value)} style={{...sel,marginTop:3}}>
+                <option value="aruba_cx">Aruba CX</option>
+                <option value="fs">FS</option>
+                <option value="unifi">UniFi</option>
+                <option value="generic">Generic</option>
+              </select>
+            </label>
+            <label style={lbl()}>Model
+              <input value={F.model || ""} onChange={e=>set("model",e.target.value)} placeholder="e.g. UniFi USW-24" style={{...inp,marginTop:3}}/>
             </label>
           </div>
           <div style={{marginBottom:10}}>
@@ -542,7 +555,7 @@ function CredentialsTabContent({ profiles }) {
                   </div>
                   <button
                     onClick={() => {
-                      setForm(f => ({ ...f, label: d.sys_name || d.ip, ip: d.ip, location: d.location || "" }));
+                      setForm(f => ({ ...f, label: d.sys_name || d.ip, ip: d.ip, location: d.location || "", vendor: d.vendor || "generic", model: d.model || "" }));
                       setEditState(s => ({ ...s, id: null }));
                       setErr("");
                       window.scrollTo({ top: 0, behavior: "smooth" });
