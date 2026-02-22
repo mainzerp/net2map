@@ -803,6 +803,8 @@ function EngineTabContent() {
   const [scanWorkers, setScanWorkers] = useState(4);
   const [snmpTimeout, setSnmpTimeout] = useState(3);
   const [snmpRetries, setSnmpRetries] = useState(1);
+  const [discoveryIntervalSec, setDiscoveryIntervalSec] = useState(1800);
+  const [portUpdateIntervalSec, setPortUpdateIntervalSec] = useState(30);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [activeJobId, setActiveJobId] = useState(null);
@@ -810,11 +812,17 @@ function EngineTabContent() {
   const pollRef = useRef(null);
 
   useEffect(() => {
-    api.get("/api/scan-settings")
-      .then(s => {
-        if (s?.max_workers != null) setScanWorkers(Number(s.max_workers));
-        if (s?.snmp_timeout != null) setSnmpTimeout(Number(s.snmp_timeout));
-        if (s?.snmp_retries != null) setSnmpRetries(Number(s.snmp_retries));
+    Promise.all([api.get("/api/scan-settings"), api.get("/api/settings")])
+      .then(([scanSettings, appSettings]) => {
+        if (scanSettings?.max_workers != null) setScanWorkers(Number(scanSettings.max_workers));
+        if (scanSettings?.snmp_timeout != null) setSnmpTimeout(Number(scanSettings.snmp_timeout));
+        if (scanSettings?.snmp_retries != null) setSnmpRetries(Number(scanSettings.snmp_retries));
+
+        const settingsList = Array.isArray(appSettings) ? appSettings : [];
+        const discovery = settingsList.find(s => s.key === "discovery_interval_sec");
+        const ports = settingsList.find(s => s.key === "port_update_interval_sec");
+        if (discovery?.value != null) setDiscoveryIntervalSec(Number(discovery.value));
+        if (ports?.value != null) setPortUpdateIntervalSec(Number(ports.value));
       })
       .finally(() => setSettingsLoading(false));
   }, []);
@@ -841,10 +849,19 @@ function EngineTabContent() {
         snmp_timeout: Math.max(1, Math.min(30, Number(snmpTimeout) || 3)),
         snmp_retries: Math.max(0, Math.min(10, Number(snmpRetries) || 1))
       };
+
+      const nextDiscoveryInterval = Math.max(0, Math.min(86400, Number(discoveryIntervalSec) || 0));
+      const nextPortsInterval = Math.max(0, Math.min(3600, Number(portUpdateIntervalSec) || 0));
+
       const result = await api.put("/api/scan-settings", payload);
+      await api.put("/api/settings/discovery_interval_sec", { value: String(nextDiscoveryInterval) });
+      await api.put("/api/settings/port_update_interval_sec", { value: String(nextPortsInterval) });
+
       if (result?.max_workers != null) setScanWorkers(Number(result.max_workers));
       if (result?.snmp_timeout != null) setSnmpTimeout(Number(result.snmp_timeout));
       if (result?.snmp_retries != null) setSnmpRetries(Number(result.snmp_retries));
+      setDiscoveryIntervalSec(nextDiscoveryInterval);
+      setPortUpdateIntervalSec(nextPortsInterval);
     } finally {
       setSettingsSaving(false);
     }
@@ -981,6 +998,40 @@ function EngineTabContent() {
           >{settingsSaving ? "Saving..." : "Save"}</button>
           <span style={{ color:"#334155", fontSize:10 }}>
             {settingsLoading ? "Loading settings..." : "1-128 workers"}
+          </span>
+        </div>
+        <div style={{
+          display:"flex", alignItems:"center", gap:8, flexWrap:"wrap",
+          padding:"10px 12px", border:"1px solid #1e293b", borderRadius:8, backgroundColor:"#020817",
+        }}>
+          <span style={{ color:"#64748b", fontSize:10 }}>Auto Discovery (sec)</span>
+          <input
+            type="number"
+            min={0}
+            max={86400}
+            value={discoveryIntervalSec}
+            onChange={e => setDiscoveryIntervalSec(e.target.value)}
+            disabled={settingsLoading || settingsSaving || scanning}
+            style={{
+              width:84, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
+              color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
+            }}
+          />
+          <span style={{ color:"#64748b", fontSize:10, marginLeft:8 }}>Port Update (sec)</span>
+          <input
+            type="number"
+            min={0}
+            max={3600}
+            value={portUpdateIntervalSec}
+            onChange={e => setPortUpdateIntervalSec(e.target.value)}
+            disabled={settingsLoading || settingsSaving || scanning}
+            style={{
+              width:84, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
+              color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
+            }}
+          />
+          <span style={{ color:"#334155", fontSize:10 }}>
+            0 disables schedule
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>

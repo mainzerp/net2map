@@ -293,7 +293,7 @@ def _ensure_app_settings_table():
         
         # Insert default values if they don't exist
         defaults = [
-            ("discovery_interval_sec", "3600"),
+            ("discovery_interval_sec", "1800"),
             ("port_update_interval_sec", "30")
         ]
         for key, value in defaults:

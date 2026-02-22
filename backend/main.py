@@ -93,7 +93,7 @@ def _background_scheduler():
             discovery_setting = db.query(AppSetting).filter(AppSetting.key == "discovery_interval_sec").first()
             ports_setting = db.query(AppSetting).filter(AppSetting.key == "port_update_interval_sec").first()
             
-            discovery_interval = int(discovery_setting.value) if discovery_setting else 3600
+            discovery_interval = int(discovery_setting.value) if discovery_setting else 1800
             ports_interval = int(ports_setting.value) if ports_setting else 30
             
             now = time.time()
