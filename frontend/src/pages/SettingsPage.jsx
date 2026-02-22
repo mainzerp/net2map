@@ -1016,98 +1016,115 @@ function EngineTabContent() {
           Discovers switches, ports, and LLDP neighbor links from enabled SNMP credentials.
         </div>
         <div style={{
-          display:"flex", alignItems:"center", gap:8, flexWrap:"wrap",
+          display:"flex", flexDirection:"column", gap:6,
           padding:"10px 12px", border:"1px solid #1e293b", borderRadius:8, backgroundColor:"#020817",
         }}>
-          <span style={{ color:"#64748b", fontSize:10 }}>Timeout (s)</span>
-          <input
-            type="number"
-            min={1}
-            max={30}
-            value={snmpTimeout}
-            onChange={e => setSnmpTimeout(e.target.value)}
-            disabled={settingsLoading || settingsSaving || scanning}
-            style={{
-              width:60, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
-              color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
-            }}
-          />
-          <span style={{ color:"#64748b", fontSize:10, marginLeft:8 }}>Retries</span>
-          <input
-            type="number"
-            min={0}
-            max={10}
-            value={snmpRetries}
-            onChange={e => setSnmpRetries(e.target.value)}
-            disabled={settingsLoading || settingsSaving || scanning}
-            style={{
-              width:60, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
-              color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
-            }}
-          />
-          <span style={{ color:"#64748b", fontSize:10, marginLeft:8 }}>Parallel Workers (Hosts)</span>
-          <input
-            type="number"
-            min={1}
-            max={128}
-            value={scanWorkers}
-            onChange={e => setScanWorkers(e.target.value)}
-            disabled={settingsLoading || settingsSaving || scanning}
-            style={{
-              width:60, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
-              color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
-            }}
-          />
-          <button
-            onClick={saveScanSettings}
-            disabled={settingsLoading || settingsSaving || scanning}
-            style={{
-              border:"1px solid #1e293b", background:"#0f172a", color:"#94a3b8",
-              borderRadius:6, padding:"5px 10px", cursor:(settingsLoading || settingsSaving || scanning)?"default":"pointer",
-              fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
-              opacity:(settingsLoading || settingsSaving || scanning)?0.6:1,
-            }}
-          >{settingsSaving ? "Saving..." : "Save Scan Settings"}</button>
-          <span style={{ color:"#334155", fontSize:10 }}>
-            {settingsLoading ? "Loading settings..." : "1-128 workers"}
-          </span>
+          <div style={{ color:"#94a3b8", fontSize:10, fontWeight:700, letterSpacing:1.2 }}>GENERAL ENGINE SETTINGS</div>
+          <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+            <span style={{ color:"#64748b", fontSize:10 }}>Parallel Workers (Hosts)</span>
+            <input
+              type="number"
+              min={1}
+              max={128}
+              value={scanWorkers}
+              onChange={e => setScanWorkers(e.target.value)}
+              disabled={settingsLoading || settingsSaving || scanning}
+              style={{
+                width:60, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
+                color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
+              }}
+            />
+            <span style={{ color:"#64748b", fontSize:10, marginLeft:8 }}>Timeout (s)</span>
+            <input
+              type="number"
+              min={1}
+              max={30}
+              value={snmpTimeout}
+              onChange={e => setSnmpTimeout(e.target.value)}
+              disabled={settingsLoading || settingsSaving || scanning}
+              style={{
+                width:60, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
+                color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
+              }}
+            />
+            <span style={{ color:"#64748b", fontSize:10, marginLeft:8 }}>Retries</span>
+            <input
+              type="number"
+              min={0}
+              max={10}
+              value={snmpRetries}
+              onChange={e => setSnmpRetries(e.target.value)}
+              disabled={settingsLoading || settingsSaving || scanning}
+              style={{
+                width:60, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
+                color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
+              }}
+            />
+            <button
+              onClick={saveScanSettings}
+              disabled={settingsLoading || settingsSaving || scanning}
+              style={{
+                border:"1px solid #1e293b", background:"#0f172a", color:"#94a3b8",
+                borderRadius:6, padding:"5px 10px", cursor:(settingsLoading || settingsSaving || scanning)?"default":"pointer",
+                fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
+                opacity:(settingsLoading || settingsSaving || scanning)?0.6:1,
+              }}
+            >{settingsSaving ? "Saving..." : "Save Scan Settings"}</button>
+            <span style={{ color:"#334155", fontSize:10 }}>
+              {settingsLoading ? "Loading settings..." : "1-128 workers"}
+            </span>
+          </div>
         </div>
         <div style={{
-          display:"flex", alignItems:"center", gap:8, flexWrap:"wrap",
+          display:"flex", flexDirection:"column", gap:6,
           padding:"10px 12px", border:"1px solid #1e293b", borderRadius:8, backgroundColor:"#020817",
         }}>
-          <span style={{ color:"#64748b", fontSize:10 }}>Discovery Full Scan Interval (sec)</span>
-          <input
-            type="number"
-            min={0}
-            max={86400}
-            value={discoveryIntervalSec}
-            onChange={e => setDiscoveryIntervalSec(e.target.value)}
-            disabled={settingsLoading || settingsSaving || scanning}
-            style={{
-              width:84, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
-              color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
-            }}
-          />
-          <span style={{ color:"#64748b", fontSize:10, marginLeft:8 }}>Port Poll Interval (sec)</span>
-          <input
-            type="number"
-            min={0}
-            max={3600}
-            value={portUpdateIntervalSec}
-            onChange={e => setPortUpdateIntervalSec(e.target.value)}
-            disabled={settingsLoading || settingsSaving || scanning}
-            style={{
-              width:84, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
-              color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
-            }}
-          />
-          <span style={{ color:"#334155", fontSize:10 }}>
-            Set 0 to disable
-          </span>
-          <span style={{ color:"#334155", fontSize:10 }}>
-            current schedule: discovery {discoveryLabel} - ports {portsLabel}
-          </span>
+          <div style={{ color:"#94a3b8", fontSize:10, fontWeight:700, letterSpacing:1.2 }}>DISCOVERY SETTINGS</div>
+          <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+            <span style={{ color:"#64748b", fontSize:10 }}>Discovery Full Scan Interval (sec)</span>
+            <input
+              type="number"
+              min={0}
+              max={86400}
+              value={discoveryIntervalSec}
+              onChange={e => setDiscoveryIntervalSec(e.target.value)}
+              disabled={settingsLoading || settingsSaving || scanning}
+              style={{
+                width:84, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
+                color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
+              }}
+            />
+            <span style={{ color:"#334155", fontSize:10 }}>
+              current discovery schedule: {discoveryLabel}
+            </span>
+          </div>
+        </div>
+        <div style={{
+          display:"flex", flexDirection:"column", gap:6,
+          padding:"10px 12px", border:"1px solid #1e293b", borderRadius:8, backgroundColor:"#020817",
+        }}>
+          <div style={{ color:"#94a3b8", fontSize:10, fontWeight:700, letterSpacing:1.2 }}>PORT UPDATE SETTINGS</div>
+          <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+            <span style={{ color:"#64748b", fontSize:10 }}>Port Poll Interval (sec)</span>
+            <input
+              type="number"
+              min={0}
+              max={3600}
+              value={portUpdateIntervalSec}
+              onChange={e => setPortUpdateIntervalSec(e.target.value)}
+              disabled={settingsLoading || settingsSaving || scanning}
+              style={{
+                width:84, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
+                color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
+              }}
+            />
+            <span style={{ color:"#334155", fontSize:10 }}>
+              Set 0 to disable
+            </span>
+            <span style={{ color:"#334155", fontSize:10 }}>
+              current port schedule: {portsLabel}
+            </span>
+          </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button
