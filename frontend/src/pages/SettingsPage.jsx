@@ -1235,20 +1235,40 @@ function EngineTabContent() {
           <div style={{ color: "#334155", fontSize: 10 }}>No scan runs yet</div>
         ) : history.map((h) => (
           <div key={h.id} style={{
-            display: "flex", alignItems: "center", gap: 12,
+            display: "flex", flexDirection:"column", alignItems: "stretch", gap: 4,
             padding: "6px 0", borderBottom: "1px solid #0f172a",
             fontSize: 10,
           }}>
-            <span style={{ color: "#334155", minWidth: 70 }}>{fmtTs(h.created_at)}</span>
-            <span style={{ color: h.status === "finished" ? "#4ade80" : h.status === "cancelled" ? "#f59e0b" : "#f87171", minWidth: 22 }}>
-              {h.status === "finished" ? "OK" : h.status === "cancelled" ? "CAN" : "ERR"}
-            </span>
-            <span style={{ color: "#94a3b8" }}>
-              {h.found} switches, {h.links} links
-              <span style={{ color: "#64748b" }}> - {fmtDuration(h.total_duration_ms)}</span>
-              <span style={{ color: "#475569" }}> - w:{h.max_workers}</span>
-              {h.error_count > 0 && <span style={{ color: "#f87171" }}> ({h.error_count} errors)</span>}
-            </span>
+            <div style={{display:"flex", alignItems:"center", gap: 12}}>
+              <span style={{ color: "#334155", minWidth: 70 }}>{fmtTs(h.created_at)}</span>
+              <span style={{ color: h.status === "finished" ? "#4ade80" : h.status === "cancelled" ? "#f59e0b" : "#f87171", minWidth: 22 }}>
+                {h.status === "finished" ? "OK" : h.status === "cancelled" ? "CAN" : "ERR"}
+              </span>
+              <span style={{ color: "#94a3b8" }}>
+                {h.found} switches, {h.links} links
+                <span style={{ color: "#64748b" }}> - {fmtDuration(h.total_duration_ms)}</span>
+                <span style={{ color: "#475569" }}> - w:{h.max_workers}</span>
+                {h.error_count > 0 && <span style={{ color: "#f87171" }}> ({h.error_count} errors)</span>}
+              </span>
+            </div>
+            <div style={{display:"flex", gap:10, flexWrap:"wrap", paddingLeft:82, color:"#64748b"}}>
+              <span style={{color:(h.new_devices?.length||0)>0?"#4ade80":"#64748b"}}>+dev {h.new_devices?.length || 0}</span>
+              <span style={{color:(h.removed_devices?.length||0)>0?"#f87171":"#64748b"}}>-dev {h.removed_devices?.length || 0}</span>
+              <span style={{color:(h.new_links?.length||0)>0?"#22d3ee":"#64748b"}}>+link {h.new_links?.length || 0}</span>
+              <span style={{color:(h.removed_links?.length||0)>0?"#f59e0b":"#64748b"}}>-link {h.removed_links?.length || 0}</span>
+            </div>
+            {((h.new_devices?.length || 0) > 0 || (h.removed_devices?.length || 0) > 0) && (
+              <div style={{paddingLeft:82, color:"#64748b", display:"flex", flexDirection:"column", gap:2}}>
+                {h.new_devices?.length > 0 && <div>new devices: {h.new_devices.join(", ")}</div>}
+                {h.removed_devices?.length > 0 && <div>removed devices: {h.removed_devices.join(", ")}</div>}
+              </div>
+            )}
+            {((h.new_links?.length || 0) > 0 || (h.removed_links?.length || 0) > 0) && (
+              <div style={{paddingLeft:82, color:"#64748b", display:"flex", flexDirection:"column", gap:2}}>
+                {h.new_links?.length > 0 && <div>new links: {h.new_links.slice(0, 3).join(" | ")}{h.new_links.length > 3 ? " ..." : ""}</div>}
+                {h.removed_links?.length > 0 && <div>removed links: {h.removed_links.slice(0, 3).join(" | ")}{h.removed_links.length > 3 ? " ..." : ""}</div>}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -1380,6 +1400,73 @@ function DnsSettingsTabContent() {
 }
 
 
+function DataImportExportTabContent({ onProfilesChanged }) {
+  const [configDryRun, setConfigDryRun] = useState(true);
+  const [configData, setConfigData] = useState("");
+  const [configBusy, setConfigBusy] = useState(false);
+  const [configMsg, setConfigMsg] = useState("");
+
+  const exportConfig = async () => {
+    setConfigBusy(true);
+    setConfigMsg("");
+    try {
+      const res = await api.get("/api/config/export");
+      setConfigData(res?.data || "");
+      setConfigMsg("Global config exported");
+    } catch (ex) {
+      setConfigMsg(String(ex));
+    } finally {
+      setConfigBusy(false);
+    }
+  };
+
+  const importConfig = async () => {
+    setConfigBusy(true);
+    setConfigMsg("");
+    try {
+      const res = await api.post("/api/config/import", {
+        data: configData,
+        dry_run: configDryRun,
+      });
+      const errorCount = Array.isArray(res?.errors) ? res.errors.length : 0;
+      setConfigMsg(`${configDryRun ? "Dry-run" : "Restore"}: settings ${res?.totals?.settings ?? 0}, profiles ${res?.totals?.profiles ?? 0}, credentials ${res?.totals?.credentials ?? 0}, errors ${errorCount}`);
+      if (!configDryRun) onProfilesChanged?.();
+      if (errorCount > 0) {
+        const details = res.errors.map(e => `${e.section} row ${e.row}: ${e.message}`).join("\n");
+        setConfigData(prev => `${prev}\n\n# Validation Errors\n${details}`);
+      }
+    } catch (ex) {
+      setConfigMsg(String(ex));
+    } finally {
+      setConfigBusy(false);
+    }
+  };
+
+
+  return (
+    <div style={{flex:1,overflowY:"auto",paddingTop:20,display:"flex",flexDirection:"column",gap:14}}>
+      <div style={{backgroundColor:"#0a0e18",border:"1px solid #1e293b",borderRadius:10,padding:"12px"}}>
+        <div style={{color:"#94a3b8",fontSize:10,letterSpacing:1,marginBottom:8}}>GLOBAL BACKUP & RESTORE</div>
+        <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8,flexWrap:"wrap"}}>
+          <label style={{display:"flex",alignItems:"center",gap:6,color:"#94a3b8",fontSize:11}}>
+            <input type="checkbox" checked={configDryRun} onChange={e=>setConfigDryRun(e.target.checked)} /> Dry-run restore
+          </label>
+          <button type="button" onClick={exportConfig} disabled={configBusy} style={{background:"none",border:"1px solid #1e293b",color:"#94a3b8",borderRadius:5,padding:"5px 10px",cursor:"pointer",fontSize:11}}>Export Config</button>
+          <button type="button" onClick={importConfig} disabled={configBusy || !configData.trim()} style={{background:"none",border:"1px solid #1e293b",color:"#94a3b8",borderRadius:5,padding:"5px 10px",cursor:"pointer",fontSize:11}}>Import Config</button>
+          {configMsg && <span style={{color:"#64748b",fontSize:10}}>{configMsg}</span>}
+        </div>
+        <textarea
+          value={configData}
+          onChange={e=>setConfigData(e.target.value)}
+          placeholder='{"version":1,"settings":[...],"profiles":[...],"credentials":[...]}'
+          style={{width:"100%",minHeight:140,backgroundColor:"#020817",border:"1px solid #1e293b",borderRadius:6,color:"#e2e8f0",padding:"8px",fontFamily:"'Inter', system-ui, sans-serif",fontSize:11,boxSizing:"border-box"}}
+        />
+      </div>
+    </div>
+  );
+}
+
+
 // ── SettingsPage (main export) ──────────────────────────────────────────────
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState("switches");
@@ -1435,28 +1522,34 @@ export default function SettingsPage() {
     {
       group: "CREDENTIALS",
       items: [
-        { tab:"profiles", icon:"PR", label:"Profiles",  desc:"Global SNMP profiles" },
+        { tab:"profiles", label:"Profiles",  desc:"Global SNMP profiles" },
       ],
     },
     {
       group: "INFRASTRUCTURE",
       items: [
-        { tab:"switches", icon:"SK", label:"Switches",  desc:"Credentials" },
-        { tab:"racks",    icon:"RK", label:"Racks",     desc:"Rack definitions" },
-        { tab:"classes",  icon:"CL", label:"Classes",   desc:"Device roles / classes" },
+        { tab:"switches", label:"Switches",  desc:"Credentials" },
+        { tab:"racks",    label:"Racks",     desc:"Rack definitions" },
+        { tab:"classes",  label:"Classes",   desc:"Device roles / classes" },
       ],
     },
     {
       group: "ENGINE",
       items: [
-        { tab:"scan",     icon:"SC", label:"Scan",      desc:"Network discovery" },
-        { tab:"dns",      icon:"DN", label:"DNS",       desc:"Reverse lookup servers" },
+        { tab:"scan",     label:"Scan",      desc:"Network discovery" },
+        { tab:"dns",      label:"DNS",       desc:"Reverse lookup servers" },
       ],
     },
     {
       group: "APPEARANCE",
       items: [
-        { tab:"map",      icon:"MP", label:"Map",       desc:"Background image settings" },
+        { tab:"map",      label:"Map",       desc:"Background image settings" },
+      ],
+    },
+    {
+      group: "BACKUP",
+      items: [
+        { tab:"data",     label:"Backup & Restore", desc:"Global config export/import" },
       ],
     },
   ];
@@ -1484,7 +1577,7 @@ export default function SettingsPage() {
             <div style={{color:"#64748b",fontSize:10,letterSpacing:2,padding:"6px 8px 4px",userSelect:"none"}}>
               {group}
             </div>
-            {items.map(({ tab, icon, label, desc }) => (
+            {items.map(({ tab, label, desc }) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -1497,13 +1590,6 @@ export default function SettingsPage() {
               transition:"all 0.15s",
             }}
           >
-              <span style={{
-              fontSize:10, fontWeight:700, color: activeTab===tab ? "#22d3ee" : "#94a3b8",
-              backgroundColor: activeTab===tab ? "#0c2a3a" : "#0a0e18",
-              border:`1px solid ${activeTab===tab ? "#164e63" : "#1e293b"}`,
-              borderRadius:4, padding:"2px 5px", flexShrink:0, letterSpacing:0.5,
-              fontFamily:"inherit",
-            }}>{icon}</span>
             <div>
               <div style={{fontSize:12, fontWeight:600, color: activeTab===tab ? "#22d3ee" : "#94a3b8", fontFamily:"inherit"}}>
                 {label}
@@ -1536,6 +1622,7 @@ export default function SettingsPage() {
         <div style={{flex:1, overflow:"hidden", display:"flex", maxWidth:900, width:"100%", padding:"0 32px 20px"}}>
           {activeTab === "switches" && <CredentialsTabContent profiles={profiles} />}
           {activeTab === "profiles" && <SnmpProfilesTabContent profiles={profiles} loading={profLoading} onChanged={refreshProfiles} />}
+          {activeTab === "data"     && <DataImportExportTabContent onProfilesChanged={refreshProfiles} />}
           {activeTab === "racks"    && <RacksTabContent />}
           {activeTab === "classes"  && <ClassesTabContent />}
           {activeTab === "scan"     && <EngineTabContent />}

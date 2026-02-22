@@ -1,5 +1,7 @@
 """FastAPI application – NetMap backend."""
 import json
+import csv
+import io
 import logging
 import os
 import socket
@@ -34,6 +36,8 @@ from schemas import (
     RackCreate, RackUpdate, RackOut,
     SwitchClassCreate, SwitchClassUpdate, SwitchClassOut,
     AppSettingOut, AppSettingUpdate,
+    BulkImportRequest, BulkImportResult, BulkImportError, BulkExportOut,
+    GlobalConfigExportOut, GlobalConfigImportRequest,
 )
 from snmp_scanner import (
     LldpNeighbor, SwitchData, auto_layout, scan_switch,
@@ -132,6 +136,342 @@ def update_setting(key: str, body: AppSettingUpdate, db: Session = Depends(get_d
     db.commit()
     db.refresh(setting)
     return setting
+
+
+PROFILE_BULK_FIELDS = [
+    "label", "snmp_version", "community",
+    "v3_security_level", "v3_username",
+    "v3_auth_protocol", "v3_auth_password",
+    "v3_priv_protocol", "v3_priv_password",
+]
+
+CREDENTIAL_BULK_FIELDS = [
+    "label", "ip", "snmp_port", "location", "enabled",
+    "snmp_version", "community",
+    "v3_security_level", "v3_username",
+    "v3_auth_protocol", "v3_auth_password",
+    "v3_priv_protocol", "v3_priv_password",
+    "profile_id", "rack_id", "class_id", "vendor", "model",
+]
+
+
+def _normalize_bool(value):
+    if isinstance(value, bool):
+        return value
+    txt = str(value or "").strip().lower()
+    return txt in {"1", "true", "yes", "y", "on"}
+
+
+def _normalize_optional_int(value):
+    if value is None:
+        return None
+    txt = str(value).strip()
+    if txt == "":
+        return None
+    return int(txt)
+
+
+def _parse_bulk_rows(kind: str, body: BulkImportRequest) -> List[dict]:
+    if body.format == "json":
+        parsed = json.loads(body.data or "[]")
+        if isinstance(parsed, dict) and isinstance(parsed.get("items"), list):
+            parsed = parsed.get("items")
+        if not isinstance(parsed, list):
+            raise HTTPException(400, "JSON import requires an array or {items:[...]} payload")
+        rows = parsed
+    else:
+        reader = csv.DictReader(io.StringIO(body.data or ""))
+        rows = list(reader)
+
+    normalized: List[dict] = []
+    for src in rows:
+        row = {k: v for k, v in (src or {}).items()}
+
+        if kind == "credentials":
+            for key in ["profile_id", "rack_id", "class_id", "snmp_port"]:
+                if key in row:
+                    row[key] = _normalize_optional_int(row.get(key))
+            if "enabled" in row:
+                row["enabled"] = _normalize_bool(row.get("enabled"))
+        normalized.append(row)
+
+    return normalized
+
+
+def _validate_bulk_rows(kind: str, rows: List[dict]) -> tuple[List[dict], List[BulkImportError]]:
+    valid: List[dict] = []
+    errors: List[BulkImportError] = []
+    schema_cls = CredentialCreate if kind == "credentials" else SnmpProfileCreate
+
+    for idx, row in enumerate(rows, start=1):
+        try:
+            payload = schema_cls(**row).model_dump()
+            valid.append(payload)
+        except Exception as exc:
+            errors.append(BulkImportError(row=idx, message=str(exc)))
+
+    return valid, errors
+
+
+def _serialize_bulk_rows(kind: str, rows: List[dict], fmt: str) -> str:
+    if fmt == "json":
+        return json.dumps(rows, ensure_ascii=False, indent=2)
+
+    fieldnames = CREDENTIAL_BULK_FIELDS if kind == "credentials" else PROFILE_BULK_FIELDS
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fieldnames)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({k: row.get(k, "") for k in fieldnames})
+    return buf.getvalue()
+
+
+@app.get("/api/bulk-export/{kind}", response_model=BulkExportOut)
+def bulk_export(kind: str, format: str = "json", db: Session = Depends(get_db)):
+    if kind not in {"credentials", "profiles"}:
+        raise HTTPException(400, "kind must be 'credentials' or 'profiles'")
+    fmt = (format or "json").lower()
+    if fmt not in {"json", "csv"}:
+        raise HTTPException(400, "format must be 'json' or 'csv'")
+
+    if kind == "credentials":
+        rows = []
+        for c in db.query(Credential).order_by(Credential.id).all():
+            rows.append({
+                "label": c.label,
+                "ip": c.ip,
+                "snmp_port": c.snmp_port,
+                "location": c.location,
+                "enabled": bool(c.enabled),
+                "snmp_version": c.snmp_version,
+                "community": c.community,
+                "v3_security_level": c.v3_security_level,
+                "v3_username": c.v3_username,
+                "v3_auth_protocol": c.v3_auth_protocol,
+                "v3_auth_password": c.v3_auth_password,
+                "v3_priv_protocol": c.v3_priv_protocol,
+                "v3_priv_password": c.v3_priv_password,
+                "profile_id": c.profile_id,
+                "rack_id": c.rack_id,
+                "class_id": c.class_id,
+                "vendor": c.vendor,
+                "model": c.model,
+            })
+    else:
+        rows = []
+        for p in db.query(SnmpProfile).order_by(SnmpProfile.id).all():
+            rows.append({
+                "label": p.label,
+                "snmp_version": p.snmp_version,
+                "community": p.community,
+                "v3_security_level": p.v3_security_level,
+                "v3_username": p.v3_username,
+                "v3_auth_protocol": p.v3_auth_protocol,
+                "v3_auth_password": p.v3_auth_password,
+                "v3_priv_protocol": p.v3_priv_protocol,
+                "v3_priv_password": p.v3_priv_password,
+            })
+
+    return BulkExportOut(type=kind, format=fmt, data=_serialize_bulk_rows(kind, rows, fmt))
+
+
+@app.post("/api/bulk-import/{kind}", response_model=BulkImportResult)
+def bulk_import(kind: str, body: BulkImportRequest, db: Session = Depends(get_db)):
+    if kind not in {"credentials", "profiles"}:
+        raise HTTPException(400, "kind must be 'credentials' or 'profiles'")
+
+    try:
+        parsed_rows = _parse_bulk_rows(kind, body)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(400, f"Invalid import payload: {exc}")
+
+    valid_rows, errors = _validate_bulk_rows(kind, parsed_rows)
+    inserted = 0
+    updated = 0
+
+    if not body.dry_run:
+        if kind == "credentials":
+            for payload in valid_rows:
+                existing = db.query(Credential).filter(Credential.ip == payload["ip"]).first()
+                if existing:
+                    for key, value in payload.items():
+                        setattr(existing, key, value)
+                    updated += 1
+                else:
+                    db.add(Credential(**payload))
+                    inserted += 1
+        else:
+            for payload in valid_rows:
+                existing = db.query(SnmpProfile).filter(SnmpProfile.label == payload["label"]).first()
+                if existing:
+                    for key, value in payload.items():
+                        setattr(existing, key, value)
+                    updated += 1
+                else:
+                    db.add(SnmpProfile(**payload))
+                    inserted += 1
+        db.commit()
+
+    return BulkImportResult(
+        type=kind,
+        format=body.format,
+        dry_run=bool(body.dry_run),
+        total_rows=len(parsed_rows),
+        valid_rows=len(valid_rows),
+        inserted=inserted,
+        updated=updated,
+        errors=errors,
+    )
+
+
+@app.get("/api/config/export", response_model=GlobalConfigExportOut)
+def export_global_config(db: Session = Depends(get_db)):
+    payload = {
+        "version": 1,
+        "exported_at": datetime.utcnow().isoformat() + "Z",
+        "settings": [
+            {"key": s.key, "value": s.value}
+            for s in db.query(AppSetting).order_by(AppSetting.key).all()
+        ],
+        "profiles": [
+            {
+                "label": p.label,
+                "snmp_version": p.snmp_version,
+                "community": p.community,
+                "v3_security_level": p.v3_security_level,
+                "v3_username": p.v3_username,
+                "v3_auth_protocol": p.v3_auth_protocol,
+                "v3_auth_password": p.v3_auth_password,
+                "v3_priv_protocol": p.v3_priv_protocol,
+                "v3_priv_password": p.v3_priv_password,
+            }
+            for p in db.query(SnmpProfile).order_by(SnmpProfile.id).all()
+        ],
+        "credentials": [
+            {
+                "label": c.label,
+                "ip": c.ip,
+                "snmp_port": c.snmp_port,
+                "location": c.location,
+                "enabled": bool(c.enabled),
+                "snmp_version": c.snmp_version,
+                "community": c.community,
+                "v3_security_level": c.v3_security_level,
+                "v3_username": c.v3_username,
+                "v3_auth_protocol": c.v3_auth_protocol,
+                "v3_auth_password": c.v3_auth_password,
+                "v3_priv_protocol": c.v3_priv_protocol,
+                "v3_priv_password": c.v3_priv_password,
+                "profile_id": c.profile_id,
+                "rack_id": c.rack_id,
+                "class_id": c.class_id,
+                "vendor": c.vendor,
+                "model": c.model,
+            }
+            for c in db.query(Credential).order_by(Credential.id).all()
+        ],
+    }
+    return GlobalConfigExportOut(data=json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+@app.post("/api/config/import")
+def import_global_config(body: GlobalConfigImportRequest, db: Session = Depends(get_db)):
+    try:
+        payload = json.loads(body.data or "{}")
+    except Exception as exc:
+        raise HTTPException(400, f"Invalid JSON payload: {exc}")
+
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "Config payload must be a JSON object")
+
+    settings_rows = payload.get("settings") or []
+    profile_rows = payload.get("profiles") or []
+    credential_rows = payload.get("credentials") or []
+
+    if not isinstance(settings_rows, list) or not isinstance(profile_rows, list) or not isinstance(credential_rows, list):
+        raise HTTPException(400, "settings/profiles/credentials must be arrays")
+
+    errors = []
+    valid_settings = []
+    valid_profiles = []
+    valid_credentials = []
+
+    for i, row in enumerate(settings_rows, start=1):
+        try:
+            key = str(row.get("key", "")).strip()
+            value = str(row.get("value", ""))
+            if not key:
+                raise ValueError("missing key")
+            valid_settings.append({"key": key, "value": value})
+        except Exception as exc:
+            errors.append({"section": "settings", "row": i, "message": str(exc)})
+
+    for i, row in enumerate(profile_rows, start=1):
+        try:
+            valid_profiles.append(SnmpProfileCreate(**row).model_dump())
+        except Exception as exc:
+            errors.append({"section": "profiles", "row": i, "message": str(exc)})
+
+    for i, row in enumerate(credential_rows, start=1):
+        try:
+            normalized = dict(row)
+            for key in ["profile_id", "rack_id", "class_id", "snmp_port"]:
+                if key in normalized:
+                    normalized[key] = _normalize_optional_int(normalized.get(key))
+            if "enabled" in normalized:
+                normalized["enabled"] = _normalize_bool(normalized.get("enabled"))
+            valid_credentials.append(CredentialCreate(**normalized).model_dump())
+        except Exception as exc:
+            errors.append({"section": "credentials", "row": i, "message": str(exc)})
+
+    inserted = {"settings": 0, "profiles": 0, "credentials": 0}
+    updated = {"settings": 0, "profiles": 0, "credentials": 0}
+
+    if not body.dry_run and not errors:
+        for row in valid_settings:
+            existing = db.query(AppSetting).filter(AppSetting.key == row["key"]).first()
+            if existing:
+                existing.value = row["value"]
+                updated["settings"] += 1
+            else:
+                db.add(AppSetting(**row))
+                inserted["settings"] += 1
+
+        for row in valid_profiles:
+            existing = db.query(SnmpProfile).filter(SnmpProfile.label == row["label"]).first()
+            if existing:
+                for key, value in row.items():
+                    setattr(existing, key, value)
+                updated["profiles"] += 1
+            else:
+                db.add(SnmpProfile(**row))
+                inserted["profiles"] += 1
+
+        for row in valid_credentials:
+            existing = db.query(Credential).filter(Credential.ip == row["ip"]).first()
+            if existing:
+                for key, value in row.items():
+                    setattr(existing, key, value)
+                updated["credentials"] += 1
+            else:
+                db.add(Credential(**row))
+                inserted["credentials"] += 1
+
+        db.commit()
+
+    return {
+        "dry_run": bool(body.dry_run),
+        "totals": {
+            "settings": len(valid_settings),
+            "profiles": len(valid_profiles),
+            "credentials": len(valid_credentials),
+        },
+        "inserted": inserted,
+        "updated": updated,
+        "errors": errors,
+    }
 
 # ─── SNMP Profiles ───────────────────────────────────────────────────────────────
 
@@ -326,7 +666,23 @@ def delete_credential(cred_id: int, db: Session = Depends(get_db)):
 
 # ─── SNMP Scan ────────────────────────────────────────────────────────────────
 
-def _persist_scan_run(db: Session, result: ScanResult) -> int:
+def _safe_json_list(raw: Optional[str]) -> List[str]:
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+        if isinstance(value, list):
+            return [str(v) for v in value]
+    except Exception:
+        pass
+    return []
+
+
+def _canonical_link_key(local_ip: str, local_port: str, remote_ip: str, remote_port: str) -> str:
+    return f"{local_ip}|{local_port}|{remote_ip}|{remote_port}"
+
+
+def _persist_scan_run(db: Session, result: ScanResult, devices_snapshot: List[str], links_snapshot: List[str]) -> int:
     run = ScanRun(
         status=result.status,
         scanned=result.scanned,
@@ -335,6 +691,8 @@ def _persist_scan_run(db: Session, result: ScanResult) -> int:
         max_workers=result.max_workers,
         total_duration_ms=result.total_duration_ms,
         error_count=len(result.errors or []),
+        devices_snapshot_json=json.dumps(sorted(set(devices_snapshot))),
+        links_snapshot_json=json.dumps(sorted(set(links_snapshot))),
     )
     db.add(run)
     db.flush()
@@ -594,10 +952,19 @@ def _execute_scan(
                 peer_mac = ""
                 peer_ip = ""
                 peer_host = ""
+                endpoint_entries: List[tuple[str, str, str]] = []
                 if iface.index in peers_by_ifindex and peers_by_ifindex[iface.index]:
-                    peer_mac, peer_ip, peer_host = sorted(
-                        peers_by_ifindex[iface.index], key=lambda x: x[1]
-                    )[0]
+                    endpoint_entries = sorted(peers_by_ifindex[iface.index], key=lambda x: x[1])
+                    peer_mac, peer_ip, peer_host = endpoint_entries[0]
+
+                endpoint_details = [
+                    {
+                        "mac": mac,
+                        "ip": ip_addr,
+                        "host": host,
+                    }
+                    for mac, ip_addr, host in endpoint_entries
+                ]
 
                 db.add(Port(
                     device_id=device.id,
@@ -609,6 +976,8 @@ def _execute_scan(
                     peer_mac=peer_mac,
                     peer_ip=peer_ip,
                     peer_host=peer_host,
+                    endpoint_count=len(endpoint_details),
+                    endpoint_details_json=json.dumps(endpoint_details),
                 ))
 
         scanned_ips = set(switch_data.keys())
@@ -643,7 +1012,21 @@ def _execute_scan(
         switch_metrics=switch_metrics,
         status=status,
     )
-    result.run_id = _persist_scan_run(db, result)
+    snapshot_devices = sorted({str(ip) for ip in discovered_ips if ip})
+    if snapshot_devices:
+        snapshot_link_rows = db.query(TopologyLink).filter(TopologyLink.local_ip.in_(snapshot_devices)).all()
+    else:
+        snapshot_link_rows = []
+    snapshot_links = sorted({
+        _canonical_link_key(
+            str(link.local_ip or ""),
+            str(link.local_port or ""),
+            str(link.remote_ip or ""),
+            str(link.remote_port or ""),
+        )
+        for link in snapshot_link_rows
+    })
+    result.run_id = _persist_scan_run(db, result, snapshot_devices, snapshot_links)
     _log_event(
         logging.INFO,
         "scan.end",
@@ -755,7 +1138,18 @@ def list_scan_runs(limit: int = 20, db: Session = Depends(get_db)):
     runs = db.query(ScanRun).order_by(ScanRun.created_at.desc()).limit(clamped).all()
 
     out: List[ScanRunOut] = []
-    for run in runs:
+    for idx, run in enumerate(runs):
+        prev_run = runs[idx + 1] if idx + 1 < len(runs) else None
+        current_devices = set(_safe_json_list(getattr(run, "devices_snapshot_json", "[]")))
+        current_links = set(_safe_json_list(getattr(run, "links_snapshot_json", "[]")))
+        prev_devices = set(_safe_json_list(getattr(prev_run, "devices_snapshot_json", "[]"))) if prev_run else set()
+        prev_links = set(_safe_json_list(getattr(prev_run, "links_snapshot_json", "[]"))) if prev_run else set()
+
+        new_devices = sorted(current_devices - prev_devices)
+        removed_devices = sorted(prev_devices - current_devices)
+        new_links = sorted(current_links - prev_links)
+        removed_links = sorted(prev_links - current_links)
+
         metrics = [
             ScanSwitchMetric(
                 ip=m.ip,
@@ -775,6 +1169,10 @@ def list_scan_runs(limit: int = 20, db: Session = Depends(get_db)):
             max_workers=run.max_workers,
             total_duration_ms=run.total_duration_ms,
             error_count=run.error_count,
+            new_devices=new_devices,
+            removed_devices=removed_devices,
+            new_links=new_links,
+            removed_links=removed_links,
             created_at=run.created_at,
             switch_metrics=metrics,
         ))

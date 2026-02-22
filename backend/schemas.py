@@ -190,6 +190,8 @@ class PortOut(BaseModel):
     peer_mac:    str
     peer_ip:     str
     peer_host:   str
+    endpoint_count: int = 0
+    endpoint_details_json: str = "[]"
     vlan:        int
 
     class Config:
@@ -284,6 +286,10 @@ class ScanRunOut(BaseModel):
     max_workers:       int
     total_duration_ms: int
     error_count:       int
+    new_devices:       List[str] = []
+    removed_devices:   List[str] = []
+    new_links:         List[str] = []
+    removed_links:     List[str] = []
     created_at:        datetime
     switch_metrics:    List[ScanSwitchMetric] = []
 
@@ -301,3 +307,40 @@ class ScanResult(BaseModel):
     switch_metrics:     List[ScanSwitchMetric] = []
     status:             str = "finished"
     run_id:             Optional[int] = None
+
+
+class BulkImportRequest(BaseModel):
+    format: Literal["json", "csv"] = "json"
+    data: str
+    dry_run: bool = True
+
+
+class BulkImportError(BaseModel):
+    row: int
+    message: str
+
+
+class BulkImportResult(BaseModel):
+    type: Literal["credentials", "profiles"]
+    format: Literal["json", "csv"]
+    dry_run: bool
+    total_rows: int
+    valid_rows: int
+    inserted: int = 0
+    updated: int = 0
+    errors: List[BulkImportError] = []
+
+
+class BulkExportOut(BaseModel):
+    type: Literal["credentials", "profiles"]
+    format: Literal["json", "csv"]
+    data: str
+
+
+class GlobalConfigExportOut(BaseModel):
+    data: str
+
+
+class GlobalConfigImportRequest(BaseModel):
+    data: str
+    dry_run: bool = True
