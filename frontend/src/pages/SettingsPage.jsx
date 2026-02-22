@@ -205,6 +205,7 @@ function CredentialsTabContent({ profiles }) {
   const [devices, setDevices]   = useState([]);
   const [loading, setLoading]   = useState(true);
   const [editState, setEditState] = useState({ id: null, top: 80, left: 540 });
+  const [editFormHeight, setEditFormHeight] = useState(0);
   const [form, setForm]         = useState({ ...EMPTY_FORM });
   const [err, setErr]           = useState("");
   const formRef = useRef(null);
@@ -223,6 +224,7 @@ function CredentialsTabContent({ profiles }) {
   const startEdit = (c, e) => {
     const rect = rowRefs.current[c.id]?.getBoundingClientRect?.() || e?.currentTarget?.getBoundingClientRect?.();
     if (rect) {
+      setEditFormHeight(formRef.current?.offsetHeight || editFormHeight);
       const nextTop = Math.max(64, Math.floor(rect.top));
       const panelWidth = 540;
       const gap = 12;
@@ -279,8 +281,9 @@ function CredentialsTabContent({ profiles }) {
 
   return (
     <div style={{flex:1,overflowY:"auto",paddingTop:20}}>
+        {editState.id && editFormHeight > 0 && <div style={{height:editFormHeight, marginBottom:18}} />}
         <form ref={formRef} onSubmit={submit} style={{
-          marginBottom:18,padding:"14px",backgroundColor:"#0a0e18",border:"1px solid #1e293b",borderRadius:10,
+          marginBottom: editState.id ? 0 : 18,padding:"14px",backgroundColor:"#0a0e18",border:"1px solid #1e293b",borderRadius:10,
           ...(editState.id ? {
             position:"fixed", left:editState.left, top:editState.top, width:540, zIndex:80,
             maxHeight:"calc(100vh - 80px)", overflowY:"auto",
