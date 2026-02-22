@@ -244,7 +244,7 @@ function CredentialsTabContent({ profiles }) {
       v3_priv_protocol:c.v3_priv_protocol,   v3_priv_password:c.v3_priv_password,
     });
     setErr("");
-    setEditId(c.id);
+    window.requestAnimationFrame(() => setEditId(c.id));
   };
 
   const submit = async (e) => {
