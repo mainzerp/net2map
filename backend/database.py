@@ -157,6 +157,8 @@ class Port(Base):
     peer_mac     = Column(String, default="")
     peer_ip      = Column(String, default="")
     peer_host    = Column(String, default="")
+    endpoint_count = Column(Integer, default=0)
+    endpoint_details_json = Column(Text, default="[]")
     vlan         = Column(Integer, default=0)
 
     device = relationship("Device", back_populates="ports")
@@ -196,6 +198,8 @@ class ScanRun(Base):
     max_workers       = Column(Integer, default=1)
     total_duration_ms = Column(Integer, default=0)
     error_count       = Column(Integer, default=0)
+    devices_snapshot_json = Column(Text, default="[]")
+    links_snapshot_json   = Column(Text, default="[]")
     created_at        = Column(DateTime, default=datetime.utcnow)
 
     switch_metrics = relationship(
@@ -277,6 +281,42 @@ def _ensure_rack_map_columns():
                 conn.execute(text(f"ALTER TABLE racks ADD COLUMN {col_name} {col_def}"))
 
 
+def _ensure_scan_run_snapshot_columns():
+    """Add snapshot columns to scan_runs for existing SQLite databases."""
+    with engine.begin() as conn:
+        if conn.dialect.name != "sqlite":
+            return
+
+        rows = conn.execute(text("PRAGMA table_info(scan_runs)")).fetchall()
+        existing = {str(r[1]) for r in rows}
+
+        additions = [
+            ("devices_snapshot_json", "TEXT DEFAULT '[]'"),
+            ("links_snapshot_json", "TEXT DEFAULT '[]'"),
+        ]
+        for col_name, col_def in additions:
+            if col_name not in existing:
+                conn.execute(text(f"ALTER TABLE scan_runs ADD COLUMN {col_name} {col_def}"))
+
+
+def _ensure_port_endpoint_columns():
+    """Add endpoint count/details columns to ports for existing SQLite databases."""
+    with engine.begin() as conn:
+        if conn.dialect.name != "sqlite":
+            return
+
+        rows = conn.execute(text("PRAGMA table_info(ports)")).fetchall()
+        existing = {str(r[1]) for r in rows}
+
+        additions = [
+            ("endpoint_count", "INTEGER DEFAULT 0"),
+            ("endpoint_details_json", "TEXT DEFAULT '[]'"),
+        ]
+        for col_name, col_def in additions:
+            if col_name not in existing:
+                conn.execute(text(f"ALTER TABLE ports ADD COLUMN {col_name} {col_def}"))
+
+
 def _ensure_app_settings_table():
     """Ensure app_settings table exists and has default values."""
     with engine.begin() as conn:
@@ -305,3 +345,5 @@ def create_tables():
     _ensure_device_ping_columns()
     _ensure_credential_rack_class_columns()
     _ensure_rack_map_columns()
+    _ensure_scan_run_snapshot_columns()
+    _ensure_port_endpoint_columns()
