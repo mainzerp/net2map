@@ -286,30 +286,30 @@ function CredentialsTabContent({ profiles }) {
             height:editFormHeight, marginBottom:18,
             backgroundColor:"#0a0e18", border:"1px solid #1e293b", borderRadius:10,
             padding:"14px", boxSizing:"border-box",
-            overflow:"hidden",
+            overflow:"auto",
           }}>
             <div style={{color:"#e2e8f0",fontSize:10,letterSpacing:1,marginBottom:8}}>NEW ENTRY</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
               <div>
                 <div style={{fontSize:10,color:"#e2e8f0",marginBottom:3}}>Label *</div>
-                <div style={{height:30,border:"1px solid #1e293b",borderRadius:5,backgroundColor:"#0c0f18"}} />
+                <div style={{height:30,border:"1px solid #1e293b",borderRadius:5,backgroundColor:"#0c0f18",padding:"6px 8px",color:"#94a3b8",fontSize:11}}>Core Switch RZ-01</div>
               </div>
               <div>
                 <div style={{fontSize:10,color:"#e2e8f0",marginBottom:3}}>IP address *</div>
-                <div style={{height:30,border:"1px solid #1e293b",borderRadius:5,backgroundColor:"#0c0f18"}} />
+                <div style={{height:30,border:"1px solid #1e293b",borderRadius:5,backgroundColor:"#0c0f18",padding:"6px 8px",color:"#94a3b8",fontSize:11}}>192.168.1.1</div>
               </div>
               <div>
                 <div style={{fontSize:10,color:"#e2e8f0",marginBottom:3}}>SNMP Port</div>
-                <div style={{height:30,border:"1px solid #1e293b",borderRadius:5,backgroundColor:"#0c0f18"}} />
+                <div style={{height:30,border:"1px solid #1e293b",borderRadius:5,backgroundColor:"#0c0f18",padding:"6px 8px",color:"#94a3b8",fontSize:11}}>161</div>
               </div>
               <div>
                 <div style={{fontSize:10,color:"#e2e8f0",marginBottom:3}}>Location (optional)</div>
-                <div style={{height:30,border:"1px solid #1e293b",borderRadius:5,backgroundColor:"#0c0f18"}} />
+                <div style={{height:30,border:"1px solid #1e293b",borderRadius:5,backgroundColor:"#0c0f18",padding:"6px 8px",color:"#94a3b8",fontSize:11}}>Rack A / RZ-01</div>
               </div>
             </div>
             <div style={{marginBottom:8}}>
               <div style={{fontSize:10,color:"#e2e8f0",marginBottom:3}}>Credential profile (optional)</div>
-              <div style={{height:30,border:"1px solid #1e293b",borderRadius:5,backgroundColor:"#0c0f18"}} />
+              <div style={{height:30,border:"1px solid #1e293b",borderRadius:5,backgroundColor:"#0c0f18",padding:"6px 8px",color:"#94a3b8",fontSize:11}}>-- No profile (manual settings) --</div>
             </div>
             <div style={{marginBottom:8}}>
               <div style={{fontSize:10,color:"#e2e8f0",marginBottom:4}}>SNMP Version</div>
@@ -320,7 +320,7 @@ function CredentialsTabContent({ profiles }) {
             </div>
             <div style={{marginBottom:8}}>
               <div style={{fontSize:10,color:"#e2e8f0",marginBottom:3}}>Community String *</div>
-              <div style={{height:30,border:"1px solid #1e293b",borderRadius:5,backgroundColor:"#0c0f18"}} />
+              <div style={{height:30,border:"1px solid #1e293b",borderRadius:5,backgroundColor:"#0c0f18",padding:"6px 8px",color:"#94a3b8",fontSize:11}}>public</div>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#64748b",marginBottom:10}}>
               <div style={{width:14,height:14,border:"1px solid #1e293b",borderRadius:3,backgroundColor:"#0c0f18"}} />
