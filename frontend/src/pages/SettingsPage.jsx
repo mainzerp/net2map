@@ -224,7 +224,10 @@ function CredentialsTabContent({ profiles }) {
   const startEdit = (c, e) => {
     const rect = rowRefs.current[c.id]?.getBoundingClientRect?.() || e?.currentTarget?.getBoundingClientRect?.();
     if (rect) {
-      setEditFormHeight(formRef.current?.offsetHeight || editFormHeight);
+      if (!editState.id) {
+        const measuredHeight = formRef.current?.offsetHeight;
+        if (measuredHeight) setEditFormHeight(measuredHeight);
+      }
       const nextTop = Math.max(64, Math.floor(rect.top));
       const panelWidth = 540;
       const gap = 12;
