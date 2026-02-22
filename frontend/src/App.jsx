@@ -43,7 +43,7 @@ export default function App() {
             <line x1="6"  y1="8"  x2="6"  y2="16" />
             <line x1="18" y1="8"  x2="18" y2="16" />
           </svg>
-          <span style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 14, fontFamily: "'Inter', system-ui, sans-serif" }}>
+          <span style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 15, fontFamily: "'Inter', system-ui, sans-serif" }}>
             NetMap
           </span>
         </NavLink>
@@ -62,7 +62,7 @@ export default function App() {
                   textDecoration: "none",
                   padding: "6px 14px",
                   borderRadius: 6,
-                  fontSize: 11,
+                  fontSize: 12,
                   fontWeight: 600,
                   fontFamily: "'Inter', system-ui, sans-serif",
                   color: isActive ? "#22d3ee" : "#475569",

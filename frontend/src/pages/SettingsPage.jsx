@@ -1394,13 +1394,13 @@ export default function SettingsPage() {
         backgroundColor:"#020817", padding:"24px 12px",
         display:"flex", flexDirection:"column", gap:4,
       }}>
-        <div style={{color:"#334155",fontSize:9,letterSpacing:2,marginBottom:12,paddingLeft:8}}>
+        <div style={{color:"#334155",fontSize:10,letterSpacing:2,marginBottom:12,paddingLeft:8}}>
           SETTINGS
         </div>
         {NAV_GROUPS.map(({ group, items }, gi) => (
           <div key={group}>
             {gi > 0 && <div style={{height:1,backgroundColor:"#0f172a",margin:"8px 8px"}}/>}
-            <div style={{color:"#334155",fontSize:8,letterSpacing:2,padding:"6px 8px 4px",userSelect:"none"}}>
+            <div style={{color:"#334155",fontSize:9,letterSpacing:2,padding:"6px 8px 4px",userSelect:"none"}}>
               {group}
             </div>
             {items.map(({ tab, icon, label, desc }) => (
@@ -1416,8 +1416,8 @@ export default function SettingsPage() {
               transition:"all 0.15s",
             }}
           >
-            <span style={{
-              fontSize:9, fontWeight:700, color: activeTab===tab ? "#22d3ee" : "#475569",
+              <span style={{
+              fontSize:10, fontWeight:700, color: activeTab===tab ? "#22d3ee" : "#475569",
               backgroundColor: activeTab===tab ? "#0c2a3a" : "#0a0e18",
               border:`1px solid ${activeTab===tab ? "#164e63" : "#1e293b"}`,
               borderRadius:4, padding:"2px 5px", flexShrink:0, letterSpacing:0.5,
@@ -1427,7 +1427,7 @@ export default function SettingsPage() {
               <div style={{fontSize:12, fontWeight:600, color: activeTab===tab ? "#22d3ee" : "#94a3b8", fontFamily:"inherit"}}>
                 {label}
               </div>
-              <div style={{fontSize:9, color: activeTab===tab ? "#7dd3fc" : "#334155", marginTop:1, fontFamily:"inherit"}}>
+              <div style={{fontSize:10, color: activeTab===tab ? "#7dd3fc" : "#334155", marginTop:1, fontFamily:"inherit"}}>
                 {desc}
               </div>
             </div>
@@ -1446,7 +1446,7 @@ export default function SettingsPage() {
           <div style={{color:"#e2e8f0",fontWeight:700,fontSize:18}}>
             {allNavItems.find(n=>n.tab===activeTab)?.label}
           </div>
-          <div style={{color:"#475569",fontSize:11,marginTop:3}}>
+          <div style={{color:"#475569",fontSize:12,marginTop:3}}>
             {allNavItems.find(n=>n.tab===activeTab)?.desc}
           </div>
           <div style={{height:1,backgroundColor:"#0f172a",marginTop:14}}/>
