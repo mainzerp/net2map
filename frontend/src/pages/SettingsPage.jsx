@@ -210,6 +210,7 @@ function CredentialsTabContent({ profiles }) {
   const formRef = useRef(null);
   const [editPanelTop, setEditPanelTop] = useState(80);
   const [editPanelLeft, setEditPanelLeft] = useState(540);
+  const rowRefs = useRef({});
 
   const refresh = () => {
     setLoading(true);
@@ -222,7 +223,7 @@ function CredentialsTabContent({ profiles }) {
   const resetForm = () => { setForm({ ...EMPTY_FORM }); setEditId(null); setErr(""); };
 
   const startEdit = (c, e) => {
-    const rect = e?.currentTarget?.closest("[data-cred-row]")?.getBoundingClientRect?.() || e?.currentTarget?.getBoundingClientRect?.();
+    const rect = rowRefs.current[c.id]?.getBoundingClientRect?.() || e?.currentTarget?.getBoundingClientRect?.();
     if (rect) {
       setEditPanelTop(Math.max(64, Math.floor(rect.top)));
       const panelWidth = 540;
@@ -414,7 +415,7 @@ function CredentialsTabContent({ profiles }) {
             const assignedProfile = c.profile_id ? profiles.find(p => p.id === c.profile_id) : null;
             const matchedDevice = devices.find(d => d.ip === c.ip);
             return (
-              <div key={c.id} data-cred-row={c.id} style={{
+              <div key={c.id} data-cred-row={c.id} ref={el => { if (el) rowRefs.current[c.id] = el; }} style={{
                 display:"flex", alignItems:"flex-start", justifyContent:"space-between",
                 padding:"10px 12px", marginBottom:6,
                 backgroundColor: editId === c.id ? "#0c1220" : "#0a0e18",
