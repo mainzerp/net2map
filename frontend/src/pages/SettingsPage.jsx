@@ -14,7 +14,7 @@ function MapSettingsTabContent({ url, opacity, scale, fileRef, onUpload, onRemov
 
   return (
     <div style={{paddingTop:20, display:"flex", flexDirection:"column", gap:20, width:"100%"}}>
-      <div>
+      <div style={{backgroundColor:"#0a0e18", border:"1px solid #1e293b", borderRadius:10, padding:16, width:"100%", boxSizing:"border-box"}}>
         <div style={{...labelStyle, fontWeight:700, marginBottom:10}}>Background Image</div>
         <div style={{display:"flex", alignItems:"center", gap:10, flexWrap:"wrap"}}>
           <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}}
@@ -36,7 +36,7 @@ function MapSettingsTabContent({ url, opacity, scale, fileRef, onUpload, onRemov
         )}
       </div>
       {url && (
-        <div>
+        <div style={{marginTop:14}}>
           <div style={{...labelStyle, marginBottom:6}}>Opacity</div>
           <div style={{display:"flex", alignItems:"center", gap:10}}>
             <input type="range" min="0.05" max="1" step="0.05" value={opacity}
@@ -47,7 +47,7 @@ function MapSettingsTabContent({ url, opacity, scale, fileRef, onUpload, onRemov
         </div>
       )}
       {url && (
-        <div>
+        <div style={{marginTop:14}}>
           <div style={{...labelStyle, marginBottom:6}}>Image Zoom</div>
           <div style={{display:"flex", alignItems:"center", gap:10}}>
             <input type="range" min="0.1" max="5" step="0.1" value={scale}
@@ -108,7 +108,7 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
   const needAuth = isV3 && F.v3_security_level !== "noAuthNoPriv";
   const needPriv = isV3 && F.v3_security_level === "authPriv";
 
-  const inp = { backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5, color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, width:"100%" };
+  const inp = { backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5, color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, lineHeight:1.3, boxSizing:"border-box", width:"100%" };
   const sel = { ...inp, cursor:"pointer" };
 
   return (
@@ -174,7 +174,7 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
         {loading ? <div style={{color:"#475569",fontSize:11}}>Loading...</div> : profiles.length === 0 ? (
           <div style={{color:"#475569",fontSize:11,textAlign:"center",marginTop:20}}>No profiles defined yet</div>
         ) : profiles.map(p => (
-          <div key={p.id} style={{backgroundColor:"#0a0e18",border:"1px solid #1e293b",borderRadius:8,padding:"10px 14px",marginBottom:8,display:"flex",alignItems:"center",gap:10}}>
+          <div key={p.id} style={{backgroundColor:"#0a0e18",border:"1px solid #1e293b",borderRadius:8,padding:"10px 14px",marginBottom:8,display:"flex",alignItems:"flex-start",gap:10}}>
             <div style={{flex:1,minWidth:0}}>
               <div style={{color:"#e2e8f0",fontWeight:600,fontSize:12}}>{p.label}</div>
               <div style={{color:"#475569",fontSize:10,marginTop:2}}>
@@ -235,7 +235,7 @@ function CredentialsTabContent({ profiles }) {
     const rect = e?.currentTarget?.closest("div")?.getBoundingClientRect?.() || e?.currentTarget?.getBoundingClientRect?.();
     if (rect) {
       setEditPanelTop(Math.max(64, Math.floor(rect.top - 20)));
-      const panelWidth = 470;
+      const panelWidth = 540;
       const gap = 10;
       let left = Math.floor(rect.right + gap);
       if (left + panelWidth > window.innerWidth - 8) {
@@ -272,7 +272,7 @@ function CredentialsTabContent({ profiles }) {
   const inp = {
     backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
     color:"#e2e8f0", padding:"5px 8px",
-    fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, width:"100%",
+    fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, lineHeight:1.3, boxSizing:"border-box", width:"100%",
   };
   const sel = { ...inp, cursor:"pointer" };
   const lbl = () => ({ fontSize:10, color:"#475569", display:"block", userSelect:"none" });
@@ -282,7 +282,7 @@ function CredentialsTabContent({ profiles }) {
         <form ref={formRef} onSubmit={submit} style={{
           marginBottom:18,padding:"14px",backgroundColor:"#0a0e18",border:"1px solid #1e293b",borderRadius:10,
           ...(editId ? {
-            position:"fixed", left:editPanelLeft, top:editPanelTop, width:470, zIndex:80,
+            position:"fixed", left:editPanelLeft, top:editPanelTop, width:540, zIndex:80,
             maxHeight:"calc(100vh - 80px)", overflowY:"auto",
             boxShadow:"0 12px 30px rgba(0,0,0,0.45)",
           } : {}),
@@ -415,7 +415,7 @@ function CredentialsTabContent({ profiles }) {
             const matchedDevice = devices.find(d => d.ip === c.ip);
             return (
               <div key={c.id} style={{
-                display:"flex", alignItems:"center", justifyContent:"space-between",
+                display:"flex", alignItems:"flex-start", justifyContent:"space-between",
                 padding:"10px 12px", marginBottom:6,
                 backgroundColor: editId === c.id ? "#0c1220" : "#0a0e18",
                 border:`1px solid ${editId === c.id ? "#164e63" : (c.enabled ? "#1e293b" : "#0f172a")}`,
@@ -469,7 +469,7 @@ function CredentialsTabContent({ profiles }) {
               </div>
               {unassigned.map(d => (
                 <div key={d.id} style={{
-                  display:"flex", alignItems:"center", justifyContent:"space-between",
+                  display:"flex", alignItems:"flex-start", justifyContent:"space-between",
                   padding:"10px 12px", marginBottom:6,
                   backgroundColor:"#0a0e18", border:"1px solid #1e293b",
                   borderRadius:8,
