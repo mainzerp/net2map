@@ -204,12 +204,10 @@ function CredentialsTabContent({ profiles }) {
   const [creds, setCreds]       = useState([]);
   const [devices, setDevices]   = useState([]);
   const [loading, setLoading]   = useState(true);
-  const [editId, setEditId]     = useState(null);
+  const [editState, setEditState] = useState({ id: null, top: 80, left: 540 });
   const [form, setForm]         = useState({ ...EMPTY_FORM });
   const [err, setErr]           = useState("");
   const formRef = useRef(null);
-  const [editPanelTop, setEditPanelTop] = useState(80);
-  const [editPanelLeft, setEditPanelLeft] = useState(540);
   const rowRefs = useRef({});
 
   const refresh = () => {
@@ -220,12 +218,12 @@ function CredentialsTabContent({ profiles }) {
   };
   useEffect(() => { refresh(); }, []);
 
-  const resetForm = () => { setForm({ ...EMPTY_FORM }); setEditId(null); setErr(""); };
+  const resetForm = () => { setForm({ ...EMPTY_FORM }); setEditState(s => ({ ...s, id: null })); setErr(""); };
 
   const startEdit = (c, e) => {
     const rect = rowRefs.current[c.id]?.getBoundingClientRect?.() || e?.currentTarget?.getBoundingClientRect?.();
     if (rect) {
-      setEditPanelTop(Math.max(64, Math.floor(rect.top)));
+      const nextTop = Math.max(64, Math.floor(rect.top));
       const panelWidth = 540;
       const gap = 12;
       let left = Math.floor(rect.right + gap);
@@ -233,7 +231,9 @@ function CredentialsTabContent({ profiles }) {
         left = Math.floor(rect.left - panelWidth - gap);
       }
       if (left < 8) left = 8;
-      setEditPanelLeft(left);
+      setEditState({ id: c.id, top: nextTop, left });
+    } else {
+      setEditState(s => ({ ...s, id: c.id }));
     }
     setForm({
       label:c.label, ip:c.ip, snmp_port:c.snmp_port, location:c.location, enabled:c.enabled,
@@ -244,13 +244,12 @@ function CredentialsTabContent({ profiles }) {
       v3_priv_protocol:c.v3_priv_protocol,   v3_priv_password:c.v3_priv_password,
     });
     setErr("");
-    window.requestAnimationFrame(() => setEditId(c.id));
   };
 
   const submit = async (e) => {
     e.preventDefault(); setErr("");
     try {
-      if (editId) { await api.put(`/api/credentials/${editId}`, form); }
+      if (editState.id) { await api.put(`/api/credentials/${editState.id}`, form); }
       else {
         const r = await api.post("/api/credentials", form);
         if (r.detail) { setErr(typeof r.detail === "string" ? r.detail : JSON.stringify(r.detail)); return; }
@@ -282,14 +281,14 @@ function CredentialsTabContent({ profiles }) {
     <div style={{flex:1,overflowY:"auto",paddingTop:20}}>
         <form ref={formRef} onSubmit={submit} style={{
           marginBottom:18,padding:"14px",backgroundColor:"#0a0e18",border:"1px solid #1e293b",borderRadius:10,
-          ...(editId ? {
-            position:"fixed", left:editPanelLeft, top:editPanelTop, width:540, zIndex:80,
+          ...(editState.id ? {
+            position:"fixed", left:editState.left, top:editState.top, width:540, zIndex:80,
             maxHeight:"calc(100vh - 80px)", overflowY:"auto",
             boxShadow:"0 12px 30px rgba(0,0,0,0.45)",
           } : {}),
         }}>
           <div style={{color:"#e2e8f0",fontSize:10,letterSpacing:1,marginBottom:12}}>
-            {editId ? "EDIT" : "NEW ENTRY"}
+            {editState.id ? "EDIT" : "NEW ENTRY"}
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
             <label style={lbl()}>Label *
@@ -396,9 +395,9 @@ function CredentialsTabContent({ profiles }) {
           {err && <div style={{marginBottom:8,color:"#f87171",fontSize:10}}>{err}</div>}
           <div style={{display:"flex",gap:8}}>
             <button type="submit" style={{flex:1,backgroundColor:"#083344",border:"1px solid #164e63",color:"#22d3ee",borderRadius:6,padding:"7px",cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:600}}>
-              {editId ? "Save" : "+ Add"}
+              {editState.id ? "Save" : "+ Add"}
             </button>
-            {editId && (
+            {editState.id && (
               <button type="button" onClick={resetForm} style={{border:"1px solid #1e293b",background:"none",color:"#64748b",borderRadius:6,padding:"7px 14px",cursor:"pointer",fontFamily:"inherit",fontSize:11}}>
                 Cancel
               </button>
@@ -418,10 +417,10 @@ function CredentialsTabContent({ profiles }) {
               <div key={c.id} data-cred-row={c.id} ref={el => { if (el) rowRefs.current[c.id] = el; }} style={{
                 display:"flex", alignItems:"flex-start", justifyContent:"space-between",
                 padding:"10px 12px", marginBottom:6,
-                backgroundColor: editId === c.id ? "#0c1220" : "#0a0e18",
-                border:`1px solid ${editId === c.id ? "#164e63" : (c.enabled ? "#1e293b" : "#0f172a")}`,
+                backgroundColor: editState.id === c.id ? "#0c1220" : "#0a0e18",
+                border:`1px solid ${editState.id === c.id ? "#164e63" : (c.enabled ? "#1e293b" : "#0f172a")}`,
                 borderRadius:8, opacity: c.enabled ? 1 : 0.5,
-                boxShadow: editId === c.id ? "0 0 0 1px #083344" : "none",
+                boxShadow: editState.id === c.id ? "0 0 0 1px #083344" : "none",
               }}>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{display:"flex",alignItems:"center",gap:6}}>
@@ -494,7 +493,7 @@ function CredentialsTabContent({ profiles }) {
                   <button
                     onClick={() => {
                       setForm(f => ({ ...f, label: d.sys_name || d.ip, ip: d.ip, location: d.location || "" }));
-                      setEditId(null);
+                      setEditState(s => ({ ...s, id: null }));
                       setErr("");
                       window.scrollTo({ top: 0, behavior: "smooth" });
                     }}
