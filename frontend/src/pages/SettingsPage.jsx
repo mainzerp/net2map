@@ -281,7 +281,18 @@ function CredentialsTabContent({ profiles }) {
 
   return (
     <div style={{flex:1,overflowY:"auto",paddingTop:20}}>
-        {editState.id && editFormHeight > 0 && <div style={{height:editFormHeight, marginBottom:18}} />}
+        {editState.id && editFormHeight > 0 && (
+          <div style={{
+            height:editFormHeight, marginBottom:18,
+            backgroundColor:"#0a0e18", border:"1px solid #1e293b", borderRadius:10,
+            padding:"14px", boxSizing:"border-box",
+          }}>
+            <div style={{color:"#e2e8f0",fontSize:10,letterSpacing:1,marginBottom:8}}>NEW ENTRY</div>
+            <div style={{color:"#64748b",fontSize:10,lineHeight:1.5}}>
+              New-entry area stays visible while editing a switch on the right.
+            </div>
+          </div>
+        )}
         <form ref={formRef} onSubmit={submit} style={{
           marginBottom: editState.id ? 0 : 18,padding:"14px",backgroundColor:"#0a0e18",border:"1px solid #1e293b",borderRadius:10,
           ...(editState.id ? {
