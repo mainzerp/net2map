@@ -937,7 +937,7 @@ function EngineTabContent() {
   const btnStyle = {
     border: "1px solid #164e63", background: "#083344", color: "#22d3ee",
     borderRadius: 6, padding: "10px 24px", cursor: "pointer",
-    fontFamily: "'Inter', system-ui, sans-serif", fontSize: 12, fontWeight: 600,
+    fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11, fontWeight: 600,
     transition: "all 0.15s",
   };
 
@@ -1001,7 +1001,7 @@ function EngineTabContent() {
             style={{
               border:"1px solid #1e293b", background:"#0f172a", color:"#94a3b8",
               borderRadius:6, padding:"5px 10px", cursor:(settingsLoading || settingsSaving || scanning)?"default":"pointer",
-              fontFamily:"'Inter', system-ui, sans-serif", fontSize:10,
+              fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
               opacity:(settingsLoading || settingsSaving || scanning)?0.6:1,
             }}
           >{settingsSaving ? "Saving..." : "Save Scan Settings"}</button>
