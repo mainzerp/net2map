@@ -69,6 +69,7 @@ const EMPTY_PROFILE_FORM = {
   v3_security_level:"authPriv", v3_username:"",
   v3_auth_protocol:"SHA-256", v3_auth_password:"",
   v3_priv_protocol:"AES-128", v3_priv_password:"",
+  snmp_timeout:3, snmp_retries:1, max_parallel_hosts:8,
 };
 
 function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
@@ -83,6 +84,9 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
     v3_security_level:p.v3_security_level, v3_username:p.v3_username,
     v3_auth_protocol:p.v3_auth_protocol, v3_auth_password:p.v3_auth_password,
     v3_priv_protocol:p.v3_priv_protocol, v3_priv_password:p.v3_priv_password,
+    snmp_timeout:p.snmp_timeout ?? 3,
+    snmp_retries:p.snmp_retries ?? 1,
+    max_parallel_hosts:p.max_parallel_hosts ?? 8,
   }); setErr(""); setTimeout(() => formRef.current?.scrollIntoView({ behavior:"smooth", block:"start" }), 0); };
 
   const submit = async (e) => {
@@ -165,6 +169,20 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
               </>}
             </div>
           )}
+          <div style={{marginBottom:8,padding:"10px 12px",borderRadius:8,backgroundColor:"#0c0f18",border:"1px solid #1e293b"}}>
+            <div style={{fontSize:10,color:"#475569",marginBottom:6}}>Scan Policy</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+              <label style={{fontSize:10,color:"#475569",display:"block"}}>Timeout (s)
+                <input type="number" min={1} max={30} value={F.snmp_timeout} onChange={e=>set("snmp_timeout", +e.target.value)} style={{...inp,marginTop:3}}/>
+              </label>
+              <label style={{fontSize:10,color:"#475569",display:"block"}}>Retries
+                <input type="number" min={0} max={10} value={F.snmp_retries} onChange={e=>set("snmp_retries", +e.target.value)} style={{...inp,marginTop:3}}/>
+              </label>
+              <label style={{fontSize:10,color:"#475569",display:"block"}}>Parallel Hosts
+                <input type="number" min={1} max={64} value={F.max_parallel_hosts} onChange={e=>set("max_parallel_hosts", +e.target.value)} style={{...inp,marginTop:3}}/>
+              </label>
+            </div>
+          </div>
           {err && <div style={{color:"#f87171",fontSize:11,marginBottom:8}}>{err}</div>}
           <div style={{display:"flex",gap:6}}>
             <button type="submit" style={{flex:1,backgroundColor:"#083344",border:"1px solid #164e63",color:"#22d3ee",borderRadius:6,padding:"6px",cursor:"pointer",fontFamily:"'Inter', system-ui, sans-serif",fontSize:11,fontWeight:600}}>{editId?"Save":"Create profile"}</button>
@@ -179,6 +197,9 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
               <div style={{color:"#e2e8f0",fontWeight:600,fontSize:12}}>{p.label}</div>
               <div style={{color:"#475569",fontSize:10,marginTop:2}}>
                 {p.snmp_version === "v3" ? `v3 - ${p.v3_security_level} - ${p.v3_username || "-"}` : `v2c - ${p.community}`}
+              </div>
+              <div style={{color:"#334155",fontSize:9,marginTop:2}}>
+                timeout {p.snmp_timeout ?? 3}s - retries {p.snmp_retries ?? 1} - hosts {p.max_parallel_hosts ?? 8}
               </div>
             </div>
             <button onClick={()=>startEdit(p)} style={{background:"none",border:"1px solid #1e293b",color:"#475569",borderRadius:5,padding:"2px 8px",cursor:"pointer",fontSize:10,fontFamily:"'Inter', system-ui, sans-serif"}}>Edit</button>
@@ -801,12 +822,9 @@ function EngineTabContent() {
   const [history, setHistory]       = useState([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [scanWorkers, setScanWorkers] = useState(4);
-  const [snmpTimeout, setSnmpTimeout] = useState(3);
-  const [snmpRetries, setSnmpRetries] = useState(1);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [activeJobId, setActiveJobId] = useState(null);
-  const [diffRunId, setDiffRunId] = useState(null);
 
   const pollRef = useRef(null);
 
@@ -814,8 +832,6 @@ function EngineTabContent() {
     api.get("/api/scan-settings")
       .then(s => {
         if (s?.max_workers != null) setScanWorkers(Number(s.max_workers));
-        if (s?.snmp_timeout != null) setSnmpTimeout(Number(s.snmp_timeout));
-        if (s?.snmp_retries != null) setSnmpRetries(Number(s.snmp_retries));
       })
       .finally(() => setSettingsLoading(false));
   }, []);
@@ -837,15 +853,9 @@ function EngineTabContent() {
   const saveScanSettings = async () => {
     setSettingsSaving(true);
     try {
-      const payload = { 
-        max_workers: Math.max(1, Math.min(128, Number(scanWorkers) || 1)),
-        snmp_timeout: Math.max(1, Math.min(30, Number(snmpTimeout) || 3)),
-        snmp_retries: Math.max(0, Math.min(10, Number(snmpRetries) || 1))
-      };
+      const payload = { max_workers: Math.max(1, Math.min(128, Number(scanWorkers) || 1)) };
       const result = await api.put("/api/scan-settings", payload);
       if (result?.max_workers != null) setScanWorkers(Number(result.max_workers));
-      if (result?.snmp_timeout != null) setSnmpTimeout(Number(result.snmp_timeout));
-      if (result?.snmp_retries != null) setSnmpRetries(Number(result.snmp_retries));
     } finally {
       setSettingsSaving(false);
     }
@@ -940,33 +950,7 @@ function EngineTabContent() {
             onChange={e => setScanWorkers(e.target.value)}
             disabled={settingsLoading || settingsSaving || scanning}
             style={{
-              width:60, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
-              color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
-            }}
-          />
-          <span style={{ color:"#64748b", fontSize:10, marginLeft: 10 }}>Timeout (s)</span>
-          <input
-            type="number"
-            min={1}
-            max={30}
-            value={snmpTimeout}
-            onChange={e => setSnmpTimeout(e.target.value)}
-            disabled={settingsLoading || settingsSaving || scanning}
-            style={{
-              width:60, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
-              color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
-            }}
-          />
-          <span style={{ color:"#64748b", fontSize:10, marginLeft: 10 }}>Retries</span>
-          <input
-            type="number"
-            min={0}
-            max={10}
-            value={snmpRetries}
-            onChange={e => setSnmpRetries(e.target.value)}
-            disabled={settingsLoading || settingsSaving || scanning}
-            style={{
-              width:60, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
+              width:90, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
               color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
             }}
           />
@@ -976,10 +960,13 @@ function EngineTabContent() {
             style={{
               border:"1px solid #1e293b", background:"#0f172a", color:"#94a3b8",
               borderRadius:6, padding:"5px 10px", cursor:(settingsLoading || settingsSaving || scanning)?"default":"pointer",
-              fontFamily:"'Inter', system-ui, sans-serif", fontSize:10, marginLeft: 10,
+              fontFamily:"'Inter', system-ui, sans-serif", fontSize:10,
               opacity:(settingsLoading || settingsSaving || scanning)?0.6:1,
             }}
           >{settingsSaving ? "Saving..." : "Save"}</button>
+          <span style={{ color:"#334155", fontSize:10 }}>
+            {settingsLoading ? "Loading settings..." : "1-128 workers"}
+          </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button
@@ -1098,29 +1085,15 @@ function EngineTabContent() {
             <span style={{ color: h.status === "finished" ? "#4ade80" : h.status === "cancelled" ? "#f59e0b" : "#f87171", minWidth: 22 }}>
               {h.status === "finished" ? "OK" : h.status === "cancelled" ? "CAN" : "ERR"}
             </span>
-            <span style={{ color: "#94a3b8", flex: 1 }}>
+            <span style={{ color: "#94a3b8" }}>
               {h.found} switches, {h.links} links
               <span style={{ color: "#64748b" }}> - {fmtDuration(h.total_duration_ms)}</span>
               <span style={{ color: "#475569" }}> - w:{h.max_workers}</span>
               {h.error_count > 0 && <span style={{ color: "#f87171" }}> ({h.error_count} errors)</span>}
             </span>
-            {h.status === "finished" && (
-              <button
-                onClick={() => setDiffRunId(h.id)}
-                style={{
-                  background: "transparent", border: "1px solid #1e293b", color: "#94a3b8",
-                  borderRadius: 4, padding: "2px 8px", fontSize: 9, cursor: "pointer",
-                  fontFamily: "'Inter', system-ui, sans-serif"
-                }}
-              >
-                Diff
-              </button>
-            )}
           </div>
         ))}
       </div>
-
-      {diffRunId && <ScanDiffModal runId={diffRunId} onClose={() => setDiffRunId(null)} />}
 
       {/* Legacy local history hidden when persistent history is active */}
       {false && history.length > 0 && (
@@ -1154,314 +1127,6 @@ function EngineTabContent() {
   );
 }
 
-
-// ── ScanDiffModal ─────────────────────────────────────────────────────────────
-function ScanDiffModal({ runId, onClose }) {
-  const [diff, setDiff] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    api.get(`/api/scans/${runId}/diff`)
-      .then(d => setDiff(d))
-      .catch(e => setError(e.message || "Failed to load diff"))
-      .finally(() => setLoading(false));
-  }, [runId]);
-
-  return (
-    <div style={{
-      position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
-      backgroundColor: "rgba(0,0,0,0.7)", zIndex: 9999,
-      display: "flex", alignItems: "center", justifyContent: "center",
-      padding: 20
-    }}>
-      <div style={{
-        backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: 12,
-        width: "100%", maxWidth: 800, maxHeight: "90vh", display: "flex", flexDirection: "column",
-        boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.1)"
-      }}>
-        <div style={{
-          padding: "16px 24px", borderBottom: "1px solid #1e293b",
-          display: "flex", alignItems: "center", justifyContent: "space-between"
-        }}>
-          <div style={{ color: "#e2e8f0", fontSize: 16, fontWeight: 600 }}>
-            Topology Diff (Run #{runId})
-          </div>
-          <button onClick={onClose} style={{
-            background: "transparent", border: "none", color: "#64748b", cursor: "pointer", fontSize: 20
-          }}>×</button>
-        </div>
-        
-        <div style={{ padding: 24, overflowY: "auto", flex: 1 }}>
-          {loading ? (
-            <div style={{ color: "#94a3b8", fontSize: 14, textAlign: "center", padding: 40 }}>Loading diff...</div>
-          ) : error ? (
-            <div style={{ color: "#f87171", fontSize: 14, textAlign: "center", padding: 40 }}>{error}</div>
-          ) : diff ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-              {!diff.previous_run_id && (
-                <div style={{ color: "#fbbf24", fontSize: 13, padding: "12px 16px", backgroundColor: "#fffbeb10", borderRadius: 8, border: "1px solid #fbbf2430" }}>
-                  No previous successful scan found to compare against. Showing all discovered items as new.
-                </div>
-              )}
-              
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-                {/* Nodes */}
-                <div>
-                  <div style={{ color: "#94a3b8", fontSize: 12, fontWeight: 600, letterSpacing: 1, marginBottom: 12, borderBottom: "1px solid #1e293b", paddingBottom: 8 }}>
-                    DEVICES
-                  </div>
-                  
-                  {diff.added_nodes.length === 0 && diff.removed_nodes.length === 0 && (
-                    <div style={{ color: "#475569", fontSize: 13, fontStyle: "italic" }}>No device changes</div>
-                  )}
-                  
-                  {diff.added_nodes.length > 0 && (
-                    <div style={{ marginBottom: 16 }}>
-                      <div style={{ color: "#4ade80", fontSize: 11, fontWeight: 600, marginBottom: 8 }}>+ {diff.added_nodes.length} Added</div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        {diff.added_nodes.map(n => (
-                          <div key={n.ip} style={{ backgroundColor: "#14532d20", border: "1px solid #14532d", borderRadius: 6, padding: "8px 12px", fontSize: 12 }}>
-                            <div style={{ color: "#e2e8f0", fontWeight: 500 }}>{n.sys_name || n.ip}</div>
-                            <div style={{ color: "#94a3b8", fontSize: 11, marginTop: 2 }}>{n.ip} • {n.vendor} {n.model}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  
-                  {diff.removed_nodes.length > 0 && (
-                    <div>
-                      <div style={{ color: "#f87171", fontSize: 11, fontWeight: 600, marginBottom: 8 }}>- {diff.removed_nodes.length} Removed</div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        {diff.removed_nodes.map(n => (
-                          <div key={n.ip} style={{ backgroundColor: "#7f1d1d20", border: "1px solid #7f1d1d", borderRadius: 6, padding: "8px 12px", fontSize: 12 }}>
-                            <div style={{ color: "#e2e8f0", fontWeight: 500, textDecoration: "line-through" }}>{n.sys_name || n.ip}</div>
-                            <div style={{ color: "#94a3b8", fontSize: 11, marginTop: 2 }}>{n.ip} • {n.vendor} {n.model}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-                
-                {/* Links */}
-                <div>
-                  <div style={{ color: "#94a3b8", fontSize: 12, fontWeight: 600, letterSpacing: 1, marginBottom: 12, borderBottom: "1px solid #1e293b", paddingBottom: 8 }}>
-                    LINKS
-                  </div>
-                  
-                  {diff.added_links.length === 0 && diff.removed_links.length === 0 && (
-                    <div style={{ color: "#475569", fontSize: 13, fontStyle: "italic" }}>No link changes</div>
-                  )}
-                  
-                  {diff.added_links.length > 0 && (
-                    <div style={{ marginBottom: 16 }}>
-                      <div style={{ color: "#4ade80", fontSize: 11, fontWeight: 600, marginBottom: 8 }}>+ {diff.added_links.length} Added</div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        {diff.added_links.map((l, i) => (
-                          <div key={i} style={{ backgroundColor: "#14532d20", border: "1px solid #14532d", borderRadius: 6, padding: "8px 12px", fontSize: 12 }}>
-                            <div style={{ color: "#e2e8f0" }}>
-                              <span style={{ color: "#94a3b8" }}>{l.local_ip}</span>:{l.local_port} 
-                              <span style={{ color: "#4ade80", margin: "0 6px" }}>→</span> 
-                              <span style={{ color: "#94a3b8" }}>{l.remote_ip}</span>:{l.remote_port}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  
-                  {diff.removed_links.length > 0 && (
-                    <div>
-                      <div style={{ color: "#f87171", fontSize: 11, fontWeight: 600, marginBottom: 8 }}>- {diff.removed_links.length} Removed</div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        {diff.removed_links.map((l, i) => (
-                          <div key={i} style={{ backgroundColor: "#7f1d1d20", border: "1px solid #7f1d1d", borderRadius: 6, padding: "8px 12px", fontSize: 12 }}>
-                            <div style={{ color: "#e2e8f0", textDecoration: "line-through" }}>
-                              <span style={{ color: "#94a3b8" }}>{l.local_ip}</span>:{l.local_port} 
-                              <span style={{ color: "#f87171", margin: "0 6px" }}>→</span> 
-                              <span style={{ color: "#94a3b8" }}>{l.remote_ip}</span>:{l.remote_port}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── ImportExportTabContent ──────────────────────────────────────────────────
-function ImportExportTabContent({ onChanged }) {
-  const [importData, setImportData] = useState("");
-  const [dryRun, setDryRun] = useState(true);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(false);
-
-  const handleExport = async () => {
-    try {
-      const data = await api.get("/api/export/data");
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `netmap-export-${new Date().toISOString().split("T")[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      setError(e.message || "Export failed");
-    }
-  };
-
-  const handleImport = async () => {
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    try {
-      let parsed;
-      try {
-        parsed = JSON.parse(importData);
-      } catch (e) {
-        throw new Error("Invalid JSON format");
-      }
-      
-      const res = await api.post(`/api/import/data?dry_run=${dryRun}`, parsed);
-      setResult(res);
-      if (!dryRun && res.errors.length === 0) {
-        onChanged();
-      }
-    } catch (e) {
-      setError(e.message || "Import failed");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleFileSelect = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      setImportData(evt.target.result);
-    };
-    reader.readAsText(file);
-  };
-
-  const btnStyle = {
-    border: "1px solid #1e293b", background: "#0f172a", color: "#94a3b8",
-    borderRadius: 6, padding: "8px 16px", cursor: "pointer",
-    fontFamily: "'Inter', system-ui, sans-serif", fontSize: 12, fontWeight: 600,
-  };
-
-  const primaryBtnStyle = {
-    ...btnStyle,
-    border: "1px solid #164e63", background: "#083344", color: "#22d3ee",
-  };
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24, paddingTop: 20 }}>
-      <div style={{ backgroundColor: "#0a0e18", border: "1px solid #1e293b", borderRadius: 10, padding: 20 }}>
-        <div style={{ color: "#94a3b8", fontSize: 10, fontWeight: 700, letterSpacing: 2, marginBottom: 12 }}>EXPORT DATA</div>
-        <div style={{ color: "#475569", fontSize: 12, marginBottom: 16 }}>
-          Download all SNMP profiles and switch credentials as a JSON file.
-        </div>
-        <button onClick={handleExport} style={btnStyle}>Export to JSON</button>
-      </div>
-
-      <div style={{ backgroundColor: "#0a0e18", border: "1px solid #1e293b", borderRadius: 10, padding: 20 }}>
-        <div style={{ color: "#94a3b8", fontSize: 10, fontWeight: 700, letterSpacing: 2, marginBottom: 12 }}>IMPORT DATA</div>
-        <div style={{ color: "#475569", fontSize: 12, marginBottom: 16 }}>
-          Upload a JSON file containing SNMP profiles and switch credentials.
-        </div>
-        
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div>
-            <input type="file" accept=".json" onChange={handleFileSelect} style={{ color: "#94a3b8", fontSize: 12 }} />
-          </div>
-          
-          <textarea
-            value={importData}
-            onChange={e => setImportData(e.target.value)}
-            placeholder="Paste JSON data here..."
-            style={{
-              width: "100%", height: 200, backgroundColor: "#020817", border: "1px solid #1e293b",
-              borderRadius: 6, padding: 12, color: "#e2e8f0", fontFamily: "monospace", fontSize: 11,
-              resize: "vertical"
-            }}
-          />
-          
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, color: "#94a3b8", fontSize: 12, cursor: "pointer" }}>
-              <input type="checkbox" checked={dryRun} onChange={e => setDryRun(e.target.checked)} />
-              Dry Run (validate only, do not save)
-            </label>
-            
-            <button 
-              onClick={handleImport} 
-              disabled={!importData || loading}
-              style={{ ...primaryBtnStyle, opacity: (!importData || loading) ? 0.5 : 1 }}
-            >
-              {loading ? "Processing..." : (dryRun ? "Validate Import" : "Execute Import")}
-            </button>
-          </div>
-          
-          {error && (
-            <div style={{ color: "#f87171", fontSize: 12, padding: 12, backgroundColor: "#7f1d1d20", border: "1px solid #7f1d1d", borderRadius: 6 }}>
-              {error}
-            </div>
-          )}
-          
-          {result && (
-            <div style={{ 
-              padding: 16, borderRadius: 6, 
-              backgroundColor: result.errors.length > 0 ? "#7f1d1d10" : "#14532d10",
-              border: `1px solid ${result.errors.length > 0 ? "#7f1d1d" : "#14532d"}`
-            }}>
-              <div style={{ color: result.errors.length > 0 ? "#f87171" : "#4ade80", fontWeight: 600, fontSize: 13, marginBottom: 12 }}>
-                {dryRun ? "Validation Results" : "Import Results"}
-              </div>
-              
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-                <div>
-                  <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 600, marginBottom: 4 }}>PROFILES</div>
-                  <div style={{ color: "#e2e8f0", fontSize: 12 }}>Added: {result.profiles_added}</div>
-                  <div style={{ color: "#e2e8f0", fontSize: 12 }}>Updated: {result.profiles_updated}</div>
-                </div>
-                <div>
-                  <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 600, marginBottom: 4 }}>CREDENTIALS</div>
-                  <div style={{ color: "#e2e8f0", fontSize: 12 }}>Added: {result.credentials_added}</div>
-                  <div style={{ color: "#e2e8f0", fontSize: 12 }}>Updated: {result.credentials_updated}</div>
-                </div>
-              </div>
-              
-              {result.errors.length > 0 && (
-                <div>
-                  <div style={{ color: "#f87171", fontSize: 11, fontWeight: 600, marginBottom: 4 }}>ERRORS ({result.errors.length})</div>
-                  <div style={{ maxHeight: 150, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
-                    {result.errors.map((err, i) => (
-                      <div key={i} style={{ color: "#fb7185", fontSize: 11 }}>• {err}</div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── DnsSettingsTabContent ───────────────────────────────────────────────────
 function DnsSettingsTabContent() {
@@ -1621,7 +1286,6 @@ export default function SettingsPage() {
         { tab:"switches", icon:"SK", label:"Switches",  desc:"Credentials" },
         { tab:"racks",    icon:"RK", label:"Racks",     desc:"Rack definitions" },
         { tab:"classes",  icon:"CL", label:"Classes",   desc:"Device roles / classes" },
-        { tab:"import",   icon:"IE", label:"Import/Export", desc:"Bulk data transfer" },
       ],
     },
     {
@@ -1715,7 +1379,6 @@ export default function SettingsPage() {
           {activeTab === "profiles" && <SnmpProfilesTabContent profiles={profiles} loading={profLoading} onChanged={refreshProfiles} />}
           {activeTab === "racks"    && <RacksTabContent />}
           {activeTab === "classes"  && <ClassesTabContent />}
-          {activeTab === "import"   && <ImportExportTabContent onChanged={refreshProfiles} />}
           {activeTab === "scan"     && <EngineTabContent />}
           {activeTab === "dns"      && <DnsSettingsTabContent />}
           {activeTab === "map"      && (

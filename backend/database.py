@@ -157,7 +157,6 @@ class Port(Base):
     peer_mac     = Column(String, default="")
     peer_ip      = Column(String, default="")
     peer_host    = Column(String, default="")
-    endpoints    = Column(Text, default="[]")             # JSON array of {mac, ip, host}
     vlan         = Column(Integer, default=0)
 
     device = relationship("Device", back_populates="ports")
@@ -197,7 +196,6 @@ class ScanRun(Base):
     max_workers       = Column(Integer, default=1)
     total_duration_ms = Column(Integer, default=0)
     error_count       = Column(Integer, default=0)
-    topology_snapshot = Column(Text, default="{}")
     created_at        = Column(DateTime, default=datetime.utcnow)
 
     switch_metrics = relationship(
@@ -301,37 +299,9 @@ def _ensure_app_settings_table():
         for key, value in defaults:
             conn.execute(text(f"INSERT OR IGNORE INTO app_settings (key, value) VALUES ('{key}', '{value}')"))
 
-def _ensure_scan_run_topology_snapshot():
-    """Add topology_snapshot column to scan_runs for existing SQLite databases."""
-    with engine.begin() as conn:
-        if conn.dialect.name != "sqlite":
-            return
-
-        rows = conn.execute(text("PRAGMA table_info(scan_runs)")).fetchall()
-        existing = {str(r[1]) for r in rows}
-
-        if "topology_snapshot" not in existing:
-            conn.execute(text("ALTER TABLE scan_runs ADD COLUMN topology_snapshot TEXT DEFAULT '{}'"))
-
-
-def _ensure_port_endpoints_column():
-    """Add endpoints column to ports for existing SQLite databases."""
-    with engine.begin() as conn:
-        if conn.dialect.name != "sqlite":
-            return
-
-        rows = conn.execute(text("PRAGMA table_info(ports)")).fetchall()
-        existing = {str(r[1]) for r in rows}
-
-        if "endpoints" not in existing:
-            conn.execute(text("ALTER TABLE ports ADD COLUMN endpoints TEXT DEFAULT '[]'"))
-
-
 def create_tables():
     Base.metadata.create_all(bind=engine)
     _ensure_app_settings_table()
     _ensure_device_ping_columns()
     _ensure_credential_rack_class_columns()
     _ensure_rack_map_columns()
-    _ensure_scan_run_topology_snapshot()
-    _ensure_port_endpoints_column()

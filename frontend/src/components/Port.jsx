@@ -10,16 +10,7 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
   const active   = port.oper_status === 1;
   const spd      = port.speed_mbps;
   const base     = !active ? "#1e293b" : speedColor(spd);
-  
-  let endpoints = [];
-  try {
-    endpoints = JSON.parse(port.endpoints || "[]");
-  } catch (e) {
-    // fallback
-  }
-  
-  const hasDev   = !!(port.peer_ip || port.peer_mac) || endpoints.length > 0;
-  const endpointCount = endpoints.length;
+  const hasDev   = !!(port.peer_ip || port.peer_mac);
 
   const linkEntry = portLinkMap && portKey ? portLinkMap[portKey] : null;
   const isLinked  = !!linkEntry;
@@ -85,18 +76,6 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
                  : "#64748b",
             fontFamily:"monospace", lineHeight:1, userSelect:"none",
           }}>{port.if_index}</span>
-          
-          {endpointCount > 1 && !isLinked && (
-            <div style={{
-              position:"absolute", bottom:-4, right:-4,
-              backgroundColor:"#3b82f6", color:"#fff",
-              fontSize:7, fontWeight:800, padding:"1px 3px",
-              borderRadius:4, border:"1px solid #020817",
-              boxShadow:"0 0 4px #3b82f6", zIndex:2
-            }}>
-              {endpointCount}
-            </div>
-          )}
         </div>
       </div>
 
@@ -124,35 +103,13 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
             </div>
           )}
           {hasDev && (
-            <div style={{display:"flex", flexDirection:"column", gap:8}}>
-              <div style={{display:"grid",gridTemplateColumns:"60px 1fr",rowGap:3}}>
-                <span style={{color:"#475569"}}>Port</span> <span>{port.if_descr}</span>
-                <span style={{color:"#475569"}}>Speed</span><span style={{color:speedColor(spd)}}>{speedLabel(spd)}</span>
-                {port.vlan > 0 && <><span style={{color:"#475569"}}>VLAN</span><span>{port.vlan}</span></>}
-              </div>
-              
-              {endpoints.length > 0 ? (
-                <div style={{marginTop: 4, borderTop: "1px solid #1e293b", paddingTop: 8}}>
-                  <div style={{color:"#94a3b8", fontSize:10, fontWeight:600, marginBottom:6}}>
-                    {endpoints.length} ENDPOINT{endpoints.length !== 1 ? "S" : ""}
-                  </div>
-                  <div style={{display:"flex", flexDirection:"column", gap:6, maxHeight:150, overflowY:"auto", paddingRight:4}}>
-                    {endpoints.map((ep, i) => (
-                      <div key={i} style={{backgroundColor:"#1e293b55", padding:"4px 8px", borderRadius:4, fontSize:10}}>
-                        {ep.ip && <div style={{color:"#7dd3fc", fontWeight:500}}>{ep.ip}</div>}
-                        {ep.host && <div style={{color:"#e2e8f0"}}>{ep.host}</div>}
-                        {ep.mac && <div style={{color:"#94a3b8", fontFamily:"monospace", fontSize:9}}>{ep.mac}</div>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div style={{display:"grid",gridTemplateColumns:"60px 1fr",rowGap:3, marginTop: 4, borderTop: "1px solid #1e293b", paddingTop: 8}}>
-                  {port.peer_ip   && <><span style={{color:"#475569"}}>IP</span>   <span style={{color:"#7dd3fc"}}>{port.peer_ip}</span></>}
-                  {port.peer_host && <><span style={{color:"#475569"}}>Host</span> <span style={{color:"#e2e8f0"}}>{port.peer_host}</span></>}
-                  {port.peer_mac  && <><span style={{color:"#475569"}}>MAC</span>  <span>{port.peer_mac}</span></>}
-                </div>
-              )}
+            <div style={{display:"grid",gridTemplateColumns:"60px 1fr",rowGap:3}}>
+              {port.peer_ip   && <><span style={{color:"#475569"}}>IP</span>   <span style={{color:"#7dd3fc"}}>{port.peer_ip}</span></>}
+              {port.peer_host && <><span style={{color:"#475569"}}>Host</span> <span style={{color:"#e2e8f0"}}>{port.peer_host}</span></>}
+              {port.peer_mac  && <><span style={{color:"#475569"}}>MAC</span>  <span>{port.peer_mac}</span></>}
+              <span style={{color:"#475569"}}>Port</span> <span>{port.if_descr}</span>
+              <span style={{color:"#475569"}}>Speed</span><span style={{color:speedColor(spd)}}>{speedLabel(spd)}</span>
+              {port.vlan > 0 && <><span style={{color:"#475569"}}>VLAN</span><span>{port.vlan}</span></>}
             </div>
           )}
         </div>

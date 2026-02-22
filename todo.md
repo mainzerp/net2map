@@ -33,9 +33,9 @@
 
 ## Product Improvements
 
-- [x] **Topology diff view between scans** -- Show newly discovered/removed devices and links after each run
-- [x] **Bulk import/export for credentials/profiles** -- CSV/JSON import with validation and dry-run mode
-- [x] **Per-port endpoint count + multi-host tooltip** -- Show number of learned MAC/IP per switch port and optional expanded list in detail view
+- [ ] **Topology diff view between scans** -- Show newly discovered/removed devices and links after each run
+- [ ] **Bulk import/export for credentials/profiles** -- CSV/JSON import with validation and dry-run mode
+- [ ] **Per-port endpoint count + multi-host tooltip** -- Show number of learned MAC/IP per switch port and optional expanded list in detail view
 
 ## DevOps / Reliability
 

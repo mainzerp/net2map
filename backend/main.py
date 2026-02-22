@@ -155,7 +155,7 @@ def update_snmp_profile(profile_id: int, body: SnmpProfileUpdate, db: Session = 
     profile = db.query(SnmpProfile).filter(SnmpProfile.id == profile_id).first()
     if not profile:
         raise HTTPException(404, "Profile not found")
-    payload = body.model_dump(exclude_unset=True)
+    payload = body.model_dump(exclude_none=True)
 
     for k, v in payload.items():
         setattr(profile, k, v)
@@ -335,7 +335,6 @@ def _persist_scan_run(db: Session, result: ScanResult) -> int:
         max_workers=result.max_workers,
         total_duration_ms=result.total_duration_ms,
         error_count=len(result.errors or []),
-        topology_snapshot=result.topology_snapshot,
     )
     db.add(run)
     db.flush()
@@ -403,15 +402,10 @@ def _execute_scan(
     switch_metrics: List[ScanSwitchMetric] = []
 
     scan_targets = []
-    profile_limits: Dict[str, int] = {}
 
     for cred in credentials:
         p = cred.profile
-        snmp_timeout, snmp_retries, profile_max_hosts = _coerce_profile_policy(
-            p, global_snmp_timeout, global_snmp_retries, configured_max_workers
-        )
         profile_key = f"profile:{p.id}" if p else f"cred:{cred.id}"
-        profile_limits[profile_key] = profile_max_hosts
 
         scan_targets.append({
             "ip": cred.ip,
@@ -426,13 +420,9 @@ def _execute_scan(
             "v3_auth_password": p.v3_auth_password if p else cred.v3_auth_password,
             "v3_priv_protocol": p.v3_priv_protocol if p else cred.v3_priv_protocol,
             "v3_priv_password": p.v3_priv_password if p else cred.v3_priv_password,
-            "snmp_timeout": snmp_timeout,
-            "snmp_retries": snmp_retries,
+            "snmp_timeout": global_snmp_timeout,
+            "snmp_retries": global_snmp_retries,
         })
-
-    profile_semaphores = {
-        k: threading.BoundedSemaphore(v) for k, v in profile_limits.items()
-    }
 
     def _scan_target(target: dict):
         started = time.perf_counter()
@@ -444,34 +434,29 @@ def _execute_scan(
             duration_ms = int((time.perf_counter() - started) * 1000)
             return ip, label, None, "cancelled", duration_ms, ping_ok, ping_rtt
 
-        sem = profile_semaphores[target["profile_key"]]
-        with sem:
-            if cancel_event and cancel_event.is_set():
-                duration_ms = int((time.perf_counter() - started) * 1000)
-                return ip, label, None, "cancelled", duration_ms, ping_ok, ping_rtt
-            try:
-                data = scan_switch(
-                    ip=ip,
-                    snmp_version=target["snmp_version"],
-                    community=target["community"],
-                    snmp_port=target["snmp_port"],
-                    snmp_timeout=target["snmp_timeout"],
-                    snmp_retries=target["snmp_retries"],
-                    v3_security_level=target["v3_security_level"],
-                    v3_username=target["v3_username"],
-                    v3_auth_protocol=target["v3_auth_protocol"],
-                    v3_auth_password=target["v3_auth_password"],
-                    v3_priv_protocol=target["v3_priv_protocol"],
-                    v3_priv_password=target["v3_priv_password"],
-                    scan_type=scan_type,
-                )
-                duration_ms = int((time.perf_counter() - started) * 1000)
-                if data:
-                    return ip, label, data, "", duration_ms, ping_ok, ping_rtt
-                return ip, label, None, "no SNMP response", duration_ms, ping_ok, ping_rtt
-            except Exception as exc:
-                duration_ms = int((time.perf_counter() - started) * 1000)
-                return ip, label, None, str(exc), duration_ms, ping_ok, ping_rtt
+        try:
+            data = scan_switch(
+                ip=ip,
+                snmp_version=target["snmp_version"],
+                community=target["community"],
+                snmp_port=target["snmp_port"],
+                snmp_timeout=target["snmp_timeout"],
+                snmp_retries=target["snmp_retries"],
+                v3_security_level=target["v3_security_level"],
+                v3_username=target["v3_username"],
+                v3_auth_protocol=target["v3_auth_protocol"],
+                v3_auth_password=target["v3_auth_password"],
+                v3_priv_protocol=target["v3_priv_protocol"],
+                v3_priv_password=target["v3_priv_password"],
+                scan_type=scan_type,
+            )
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            if data:
+                return ip, label, data, "", duration_ms, ping_ok, ping_rtt
+            return ip, label, None, "no SNMP response", duration_ms, ping_ok, ping_rtt
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            return ip, label, None, str(exc), duration_ms, ping_ok, ping_rtt
 
     scan_started = time.perf_counter()
     workers = max(1, min(int(configured_max_workers), len(scan_targets)))
@@ -609,12 +594,10 @@ def _execute_scan(
                 peer_mac = ""
                 peer_ip = ""
                 peer_host = ""
-                endpoints_json = "[]"
                 if iface.index in peers_by_ifindex and peers_by_ifindex[iface.index]:
-                    sorted_peers = sorted(peers_by_ifindex[iface.index], key=lambda x: x[1])
-                    peer_mac, peer_ip, peer_host = sorted_peers[0]
-                    endpoints_list = [{"mac": m, "ip": i, "host": h} for m, i, h in sorted_peers]
-                    endpoints_json = json.dumps(endpoints_list)
+                    peer_mac, peer_ip, peer_host = sorted(
+                        peers_by_ifindex[iface.index], key=lambda x: x[1]
+                    )[0]
 
                 db.add(Port(
                     device_id=device.id,
@@ -626,7 +609,6 @@ def _execute_scan(
                     peer_mac=peer_mac,
                     peer_ip=peer_ip,
                     peer_host=peer_host,
-                    endpoints=endpoints_json,
                 ))
 
         scanned_ips = set(switch_data.keys())
@@ -651,15 +633,6 @@ def _execute_scan(
                 ))
                 link_count += 1
 
-    # Generate topology snapshot
-    db.flush()
-    devices = db.query(Device).all()
-    links = db.query(TopologyLink).all()
-    snapshot = {
-        "nodes": [{"id": d.id, "ip": d.ip, "sys_name": d.sys_name, "vendor": d.vendor, "model": d.model} for d in devices],
-        "links": [{"id": l.id, "local_ip": l.local_ip, "remote_ip": l.remote_ip, "local_port": l.local_port, "remote_port": l.remote_port} for l in links]
-    }
-
     result = ScanResult(
         scanned=len(credentials),
         found=len(discovered_ips),
@@ -669,7 +642,6 @@ def _execute_scan(
         total_duration_ms=total_duration_ms,
         switch_metrics=switch_metrics,
         status=status,
-        topology_snapshot=json.dumps(snapshot),
     )
     result.run_id = _persist_scan_run(db, result)
     _log_event(
@@ -1026,46 +998,6 @@ def _write_scan_settings(value: dict | None):
     return payload
 
 
-@app.get("/api/scans/{run_id}/diff")
-def get_scan_diff(run_id: int, db: Session = Depends(get_db)):
-    """Return the topology diff between the given scan run and the one immediately preceding it."""
-    current_run = db.query(ScanRun).filter(ScanRun.id == run_id).first()
-    if not current_run:
-        raise HTTPException(404, "Scan run not found")
-        
-    previous_run = db.query(ScanRun).filter(ScanRun.id < run_id, ScanRun.status == "finished").order_by(ScanRun.id.desc()).first()
-    
-    try:
-        curr_snap = json.loads(current_run.topology_snapshot) if current_run.topology_snapshot else {"nodes": [], "links": []}
-    except json.JSONDecodeError:
-        curr_snap = {"nodes": [], "links": []}
-        
-    try:
-        prev_snap = json.loads(previous_run.topology_snapshot) if previous_run and previous_run.topology_snapshot else {"nodes": [], "links": []}
-    except json.JSONDecodeError:
-        prev_snap = {"nodes": [], "links": []}
-        
-    curr_nodes = {n["ip"]: n for n in curr_snap.get("nodes", [])}
-    prev_nodes = {n["ip"]: n for n in prev_snap.get("nodes", [])}
-    
-    curr_links = {f"{l['local_ip']}:{l['local_port']}->{l['remote_ip']}:{l['remote_port']}": l for l in curr_snap.get("links", [])}
-    prev_links = {f"{l['local_ip']}:{l['local_port']}->{l['remote_ip']}:{l['remote_port']}": l for l in prev_snap.get("links", [])}
-    
-    added_nodes = [n for ip, n in curr_nodes.items() if ip not in prev_nodes]
-    removed_nodes = [n for ip, n in prev_nodes.items() if ip not in curr_nodes]
-    
-    added_links = [l for k, l in curr_links.items() if k not in prev_links]
-    removed_links = [l for k, l in prev_links.items() if k not in curr_links]
-    
-    return {
-        "previous_run_id": previous_run.id if previous_run else None,
-        "current_run_id": current_run.id,
-        "added_nodes": added_nodes,
-        "removed_nodes": removed_nodes,
-        "added_links": added_links,
-        "removed_links": removed_links
-    }
-
 @app.get("/api/scan-settings")
 def get_scan_settings():
     """Return scan execution settings."""
@@ -1157,132 +1089,6 @@ def get_logs(limit: int = 200, level: str = "", event_prefix: str = "", q: str =
         ]
     return rows[-clamped:]
 
-
-@app.get("/api/export/data")
-def export_data(db: Session = Depends(get_db)):
-    """Export all credentials and profiles as JSON."""
-    profiles = db.query(SnmpProfile).all()
-    credentials = db.query(Credential).all()
-    
-    return {
-        "profiles": [
-            {
-                "label": p.label,
-                "snmp_version": p.snmp_version,
-                "community": p.community,
-                "v3_security_level": p.v3_security_level,
-                "v3_username": p.v3_username,
-                "v3_auth_protocol": p.v3_auth_protocol,
-                "v3_auth_password": p.v3_auth_password,
-                "v3_priv_protocol": p.v3_priv_protocol,
-                "v3_priv_password": p.v3_priv_password,
-            } for p in profiles
-        ],
-        "credentials": [
-            {
-                "label": c.label,
-                "ip": c.ip,
-                "snmp_port": c.snmp_port,
-                "location": c.location,
-                "enabled": c.enabled,
-                "snmp_version": c.snmp_version,
-                "community": c.community,
-                "v3_security_level": c.v3_security_level,
-                "v3_username": c.v3_username,
-                "v3_auth_protocol": c.v3_auth_protocol,
-                "v3_auth_password": c.v3_auth_password,
-                "v3_priv_protocol": c.v3_priv_protocol,
-                "v3_priv_password": c.v3_priv_password,
-                "profile_label": c.profile.label if c.profile else None,
-                "vendor": c.vendor,
-                "model": c.model,
-            } for c in credentials
-        ]
-    }
-
-@app.post("/api/import/data")
-async def import_data(request: Request, dry_run: bool = False, db: Session = Depends(get_db)):
-    """Import credentials and profiles from JSON."""
-    try:
-        data = await request.json()
-    except json.JSONDecodeError:
-        raise HTTPException(400, "Invalid JSON")
-        
-    profiles_data = data.get("profiles", [])
-    credentials_data = data.get("credentials", [])
-    
-    result = {
-        "profiles_added": 0,
-        "profiles_updated": 0,
-        "credentials_added": 0,
-        "credentials_updated": 0,
-        "errors": []
-    }
-    
-    # Process profiles
-    profile_map = {} # label -> id
-    for p_data in profiles_data:
-        label = p_data.get("label")
-        if not label:
-            result["errors"].append("Profile missing label")
-            continue
-            
-        existing = db.query(SnmpProfile).filter(SnmpProfile.label == label).first()
-        if existing:
-            if not dry_run:
-                for k, v in p_data.items():
-                    if hasattr(existing, k):
-                        setattr(existing, k, v)
-            result["profiles_updated"] += 1
-            profile_map[label] = existing.id if existing else None
-        else:
-            if not dry_run:
-                new_profile = SnmpProfile(**{k: v for k, v in p_data.items() if hasattr(SnmpProfile, k)})
-                db.add(new_profile)
-                db.flush()
-                profile_map[label] = new_profile.id
-            result["profiles_added"] += 1
-            
-    # Process credentials
-    for c_data in credentials_data:
-        ip = c_data.get("ip")
-        if not ip:
-            result["errors"].append("Credential missing IP")
-            continue
-            
-        profile_label = c_data.pop("profile_label", None)
-        profile_id = None
-        if profile_label:
-            if profile_label in profile_map and profile_map[profile_label] is not None:
-                profile_id = profile_map[profile_label]
-            else:
-                p = db.query(SnmpProfile).filter(SnmpProfile.label == profile_label).first()
-                if p:
-                    profile_id = p.id
-                else:
-                    result["errors"].append(f"Profile '{profile_label}' not found for credential {ip}")
-                    
-        existing = db.query(Credential).filter(Credential.ip == ip).first()
-        if existing:
-            if not dry_run:
-                for k, v in c_data.items():
-                    if hasattr(existing, k):
-                        setattr(existing, k, v)
-                if profile_id is not None:
-                    existing.profile_id = profile_id
-            result["credentials_updated"] += 1
-        else:
-            if not dry_run:
-                new_cred = Credential(**{k: v for k, v in c_data.items() if hasattr(Credential, k)})
-                if profile_id is not None:
-                    new_cred.profile_id = profile_id
-                db.add(new_cred)
-            result["credentials_added"] += 1
-            
-    if not dry_run:
-        db.commit()
-        
-    return result
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 

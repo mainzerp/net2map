@@ -190,7 +190,6 @@ class PortOut(BaseModel):
     peer_mac:    str
     peer_ip:     str
     peer_host:   str
-    endpoints:   str = "[]"
     vlan:        int
 
     class Config:
@@ -285,7 +284,6 @@ class ScanRunOut(BaseModel):
     max_workers:       int
     total_duration_ms: int
     error_count:       int
-    topology_snapshot: str = "{}"
     created_at:        datetime
     switch_metrics:    List[ScanSwitchMetric] = []
 
@@ -303,4 +301,3 @@ class ScanResult(BaseModel):
     switch_metrics:     List[ScanSwitchMetric] = []
     status:             str = "finished"
     run_id:             Optional[int] = None
-    topology_snapshot:  str = "{}"
