@@ -873,6 +873,15 @@ function EngineTabContent() {
     return `${(value / 1000).toFixed(2)} s`;
   };
 
+  const discoverySeconds = Math.max(0, Number(discoveryIntervalSec) || 0);
+  const portSeconds = Math.max(0, Number(portUpdateIntervalSec) || 0);
+  const discoveryLabel = discoverySeconds === 0
+    ? "disabled"
+    : discoverySeconds >= 60
+      ? `${(discoverySeconds / 60).toFixed(discoverySeconds % 60 === 0 ? 0 : 1)} min`
+      : `${discoverySeconds}s`;
+  const portsLabel = portSeconds === 0 ? "disabled" : `${portSeconds}s`;
+
   const fmtTs = (ts) => {
     if (!ts) return "-";
     const d = new Date(ts);
@@ -995,7 +1004,7 @@ function EngineTabContent() {
               fontFamily:"'Inter', system-ui, sans-serif", fontSize:10,
               opacity:(settingsLoading || settingsSaving || scanning)?0.6:1,
             }}
-          >{settingsSaving ? "Saving..." : "Save"}</button>
+          >{settingsSaving ? "Saving..." : "Save Policy"}</button>
           <span style={{ color:"#334155", fontSize:10 }}>
             {settingsLoading ? "Loading settings..." : "1-128 workers"}
           </span>
@@ -1032,6 +1041,9 @@ function EngineTabContent() {
           />
           <span style={{ color:"#334155", fontSize:10 }}>
             0 disables schedule
+          </span>
+          <span style={{ color:"#334155", fontSize:10 }}>
+            now: discovery {discoveryLabel} - ports {portsLabel}
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
