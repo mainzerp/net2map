@@ -950,7 +950,7 @@ function EngineTabContent() {
       }}>
         <div style={{ color: "#94a3b8", fontSize: 10, fontWeight: 700, letterSpacing: 2 }}>NETWORK SCAN</div>
         <div style={{ color: "#475569", fontSize: 11, lineHeight: 1.6 }}>
-          Scans all enabled switch credentials via SNMP, discovers devices, ports and LLDP neighbor links.
+          Discovers switches, ports, and LLDP neighbor links from enabled SNMP credentials.
         </div>
         <div style={{
           display:"flex", alignItems:"center", gap:8, flexWrap:"wrap",
@@ -1040,10 +1040,10 @@ function EngineTabContent() {
             }}
           />
           <span style={{ color:"#334155", fontSize:10 }}>
-            0 disables schedule
+            Set 0 to disable
           </span>
           <span style={{ color:"#334155", fontSize:10 }}>
-            active schedule: discovery {discoveryLabel} - ports {portsLabel}
+            current schedule: discovery {discoveryLabel} - ports {portsLabel}
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
