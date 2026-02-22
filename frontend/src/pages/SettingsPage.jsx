@@ -286,6 +286,7 @@ function CredentialsTabContent({ profiles }) {
             height:editFormHeight, marginBottom:18,
             backgroundColor:"#0a0e18", border:"1px solid #1e293b", borderRadius:10,
             padding:"14px", boxSizing:"border-box",
+            overflow:"hidden",
           }}>
             <div style={{color:"#e2e8f0",fontSize:10,letterSpacing:1,marginBottom:8}}>NEW ENTRY</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
@@ -306,8 +307,27 @@ function CredentialsTabContent({ profiles }) {
                 <div style={{height:30,border:"1px solid #1e293b",borderRadius:5,backgroundColor:"#0c0f18"}} />
               </div>
             </div>
-            <div style={{fontSize:10,color:"#64748b",lineHeight:1.5}}>
-              New entry remains visible while editing on the right.
+            <div style={{marginBottom:8}}>
+              <div style={{fontSize:10,color:"#e2e8f0",marginBottom:3}}>Credential profile (optional)</div>
+              <div style={{height:30,border:"1px solid #1e293b",borderRadius:5,backgroundColor:"#0c0f18"}} />
+            </div>
+            <div style={{marginBottom:8}}>
+              <div style={{fontSize:10,color:"#e2e8f0",marginBottom:4}}>SNMP Version</div>
+              <div style={{display:"flex",gap:6}}>
+                <div style={{padding:"4px 14px",borderRadius:5,fontSize:11,border:"1px solid #164e63",backgroundColor:"#083344",color:"#22d3ee"}}>v2c</div>
+                <div style={{padding:"4px 14px",borderRadius:5,fontSize:11,border:"1px solid #1e293b",backgroundColor:"transparent",color:"#64748b"}}>v3</div>
+              </div>
+            </div>
+            <div style={{marginBottom:8}}>
+              <div style={{fontSize:10,color:"#e2e8f0",marginBottom:3}}>Community String *</div>
+              <div style={{height:30,border:"1px solid #1e293b",borderRadius:5,backgroundColor:"#0c0f18"}} />
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#64748b",marginBottom:10}}>
+              <div style={{width:14,height:14,border:"1px solid #1e293b",borderRadius:3,backgroundColor:"#0c0f18"}} />
+              Include in scan
+            </div>
+            <div style={{height:30,borderRadius:6,backgroundColor:"#083344",border:"1px solid #164e63",color:"#22d3ee",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:600}}>
+              + Add
             </div>
           </div>
         )}
