@@ -222,16 +222,6 @@ function CredentialsTabContent({ profiles }) {
   const resetForm = () => { setForm({ ...EMPTY_FORM }); setEditId(null); setErr(""); };
 
   const startEdit = (c, e) => {
-    setEditId(c.id);
-    setForm({
-      label:c.label, ip:c.ip, snmp_port:c.snmp_port, location:c.location, enabled:c.enabled,
-      profile_id: c.profile_id ?? null,
-      snmp_version:c.snmp_version, community:c.community,
-      v3_security_level:c.v3_security_level, v3_username:c.v3_username,
-      v3_auth_protocol:c.v3_auth_protocol,   v3_auth_password:c.v3_auth_password,
-      v3_priv_protocol:c.v3_priv_protocol,   v3_priv_password:c.v3_priv_password,
-    });
-    setErr("");
     const rect = e?.currentTarget?.closest("[data-cred-row]")?.getBoundingClientRect?.() || e?.currentTarget?.getBoundingClientRect?.();
     if (rect) {
       setEditPanelTop(Math.max(64, Math.floor(rect.top)));
@@ -244,6 +234,16 @@ function CredentialsTabContent({ profiles }) {
       if (left < 8) left = 8;
       setEditPanelLeft(left);
     }
+    setForm({
+      label:c.label, ip:c.ip, snmp_port:c.snmp_port, location:c.location, enabled:c.enabled,
+      profile_id: c.profile_id ?? null,
+      snmp_version:c.snmp_version, community:c.community,
+      v3_security_level:c.v3_security_level, v3_username:c.v3_username,
+      v3_auth_protocol:c.v3_auth_protocol,   v3_auth_password:c.v3_auth_password,
+      v3_priv_protocol:c.v3_priv_protocol,   v3_priv_password:c.v3_priv_password,
+    });
+    setErr("");
+    setEditId(c.id);
   };
 
   const submit = async (e) => {
