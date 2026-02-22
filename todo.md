@@ -45,6 +45,8 @@
 
 ## Network Map & Access Control (Future)
 
+- [ ] **Active VLAN Provisioning (MAC-based)** -- Automatically reconfigure switch ports to a specific VLAN when a known MAC address is detected during the frequent port scan
+- [ ] **Endpoint Group Management** -- Group recognized end devices/clients and assign target VLANs to these groups for automated provisioning
 - [ ] **802.1X / MAC Authentication Bypass (MAB) status** -- Show authentication state per port (authorized, unauthorized, guest VLAN)
 - [ ] **Dynamic VLAN assignment visualization** -- Highlight ports where VLANs were dynamically assigned via RADIUS/NAC
 - [ ] **Rogue device detection** -- Alert on unknown MAC addresses appearing on access ports that are not in the allowed endpoints list
