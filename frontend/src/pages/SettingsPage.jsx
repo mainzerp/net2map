@@ -232,11 +232,11 @@ function CredentialsTabContent({ profiles }) {
       v3_priv_protocol:c.v3_priv_protocol,   v3_priv_password:c.v3_priv_password,
     });
     setErr("");
-    const rect = e?.currentTarget?.closest("div")?.getBoundingClientRect?.() || e?.currentTarget?.getBoundingClientRect?.();
+    const rect = e?.currentTarget?.closest("[data-cred-row]")?.getBoundingClientRect?.() || e?.currentTarget?.getBoundingClientRect?.();
     if (rect) {
-      setEditPanelTop(Math.max(64, Math.floor(rect.top - 20)));
+      setEditPanelTop(Math.max(64, Math.floor(rect.top)));
       const panelWidth = 540;
-      const gap = 10;
+      const gap = 12;
       let left = Math.floor(rect.right + gap);
       if (left + panelWidth > window.innerWidth - 8) {
         left = Math.floor(rect.left - panelWidth - gap);
@@ -414,7 +414,7 @@ function CredentialsTabContent({ profiles }) {
             const assignedProfile = c.profile_id ? profiles.find(p => p.id === c.profile_id) : null;
             const matchedDevice = devices.find(d => d.ip === c.ip);
             return (
-              <div key={c.id} style={{
+              <div key={c.id} data-cred-row={c.id} style={{
                 display:"flex", alignItems:"flex-start", justifyContent:"space-between",
                 padding:"10px 12px", marginBottom:6,
                 backgroundColor: editId === c.id ? "#0c1220" : "#0a0e18",
