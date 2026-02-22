@@ -229,13 +229,8 @@ function CredentialsTabContent({ profiles }) {
         if (measuredHeight) setEditFormHeight(measuredHeight);
       }
       const nextTop = Math.max(64, Math.floor(rect.top));
-      const panelWidth = 540;
       const gap = 12;
       let left = Math.floor(rect.right + gap);
-      if (left + panelWidth > window.innerWidth - 8) {
-        left = Math.floor(rect.left - panelWidth - gap);
-      }
-      if (left < 8) left = 8;
       setEditState({ id: c.id, top: nextTop, left });
     } else {
       setEditState(s => ({ ...s, id: c.id }));
