@@ -69,7 +69,6 @@ const EMPTY_PROFILE_FORM = {
   v3_security_level:"authPriv", v3_username:"",
   v3_auth_protocol:"SHA-256", v3_auth_password:"",
   v3_priv_protocol:"AES-128", v3_priv_password:"",
-  snmp_timeout:3, snmp_retries:1, max_parallel_hosts:8,
 };
 
 function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
@@ -84,9 +83,6 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
     v3_security_level:p.v3_security_level, v3_username:p.v3_username,
     v3_auth_protocol:p.v3_auth_protocol, v3_auth_password:p.v3_auth_password,
     v3_priv_protocol:p.v3_priv_protocol, v3_priv_password:p.v3_priv_password,
-    snmp_timeout:p.snmp_timeout ?? 3,
-    snmp_retries:p.snmp_retries ?? 1,
-    max_parallel_hosts:p.max_parallel_hosts ?? 8,
   }); setErr(""); setTimeout(() => formRef.current?.scrollIntoView({ behavior:"smooth", block:"start" }), 0); };
 
   const submit = async (e) => {
@@ -169,20 +165,6 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
               </>}
             </div>
           )}
-          <div style={{marginBottom:8,padding:"10px 12px",borderRadius:8,backgroundColor:"#0c0f18",border:"1px solid #1e293b"}}>
-            <div style={{fontSize:10,color:"#475569",marginBottom:6}}>Scan Policy</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-              <label style={{fontSize:10,color:"#475569",display:"block"}}>Timeout (s)
-                <input type="number" min={1} max={30} value={F.snmp_timeout} onChange={e=>set("snmp_timeout", +e.target.value)} style={{...inp,marginTop:3}}/>
-              </label>
-              <label style={{fontSize:10,color:"#475569",display:"block"}}>Retries
-                <input type="number" min={0} max={10} value={F.snmp_retries} onChange={e=>set("snmp_retries", +e.target.value)} style={{...inp,marginTop:3}}/>
-              </label>
-              <label style={{fontSize:10,color:"#475569",display:"block"}}>Parallel Hosts
-                <input type="number" min={1} max={64} value={F.max_parallel_hosts} onChange={e=>set("max_parallel_hosts", +e.target.value)} style={{...inp,marginTop:3}}/>
-              </label>
-            </div>
-          </div>
           {err && <div style={{color:"#f87171",fontSize:11,marginBottom:8}}>{err}</div>}
           <div style={{display:"flex",gap:6}}>
             <button type="submit" style={{flex:1,backgroundColor:"#083344",border:"1px solid #164e63",color:"#22d3ee",borderRadius:6,padding:"6px",cursor:"pointer",fontFamily:"'Inter', system-ui, sans-serif",fontSize:11,fontWeight:600}}>{editId?"Save":"Create profile"}</button>
@@ -197,9 +179,6 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
               <div style={{color:"#e2e8f0",fontWeight:600,fontSize:12}}>{p.label}</div>
               <div style={{color:"#475569",fontSize:10,marginTop:2}}>
                 {p.snmp_version === "v3" ? `v3 - ${p.v3_security_level} - ${p.v3_username || "-"}` : `v2c - ${p.community}`}
-              </div>
-              <div style={{color:"#334155",fontSize:9,marginTop:2}}>
-                timeout {p.snmp_timeout ?? 3}s - retries {p.snmp_retries ?? 1} - hosts {p.max_parallel_hosts ?? 8}
               </div>
             </div>
             <button onClick={()=>startEdit(p)} style={{background:"none",border:"1px solid #1e293b",color:"#475569",borderRadius:5,padding:"2px 8px",cursor:"pointer",fontSize:10,fontFamily:"'Inter', system-ui, sans-serif"}}>Edit</button>
@@ -822,6 +801,8 @@ function EngineTabContent() {
   const [history, setHistory]       = useState([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [scanWorkers, setScanWorkers] = useState(4);
+  const [snmpTimeout, setSnmpTimeout] = useState(3);
+  const [snmpRetries, setSnmpRetries] = useState(1);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [activeJobId, setActiveJobId] = useState(null);
@@ -833,6 +814,8 @@ function EngineTabContent() {
     api.get("/api/scan-settings")
       .then(s => {
         if (s?.max_workers != null) setScanWorkers(Number(s.max_workers));
+        if (s?.snmp_timeout != null) setSnmpTimeout(Number(s.snmp_timeout));
+        if (s?.snmp_retries != null) setSnmpRetries(Number(s.snmp_retries));
       })
       .finally(() => setSettingsLoading(false));
   }, []);
@@ -854,9 +837,15 @@ function EngineTabContent() {
   const saveScanSettings = async () => {
     setSettingsSaving(true);
     try {
-      const payload = { max_workers: Math.max(1, Math.min(128, Number(scanWorkers) || 1)) };
+      const payload = { 
+        max_workers: Math.max(1, Math.min(128, Number(scanWorkers) || 1)),
+        snmp_timeout: Math.max(1, Math.min(30, Number(snmpTimeout) || 3)),
+        snmp_retries: Math.max(0, Math.min(10, Number(snmpRetries) || 1))
+      };
       const result = await api.put("/api/scan-settings", payload);
       if (result?.max_workers != null) setScanWorkers(Number(result.max_workers));
+      if (result?.snmp_timeout != null) setSnmpTimeout(Number(result.snmp_timeout));
+      if (result?.snmp_retries != null) setSnmpRetries(Number(result.snmp_retries));
     } finally {
       setSettingsSaving(false);
     }
@@ -951,7 +940,33 @@ function EngineTabContent() {
             onChange={e => setScanWorkers(e.target.value)}
             disabled={settingsLoading || settingsSaving || scanning}
             style={{
-              width:90, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
+              width:60, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
+              color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
+            }}
+          />
+          <span style={{ color:"#64748b", fontSize:10, marginLeft: 10 }}>Timeout (s)</span>
+          <input
+            type="number"
+            min={1}
+            max={30}
+            value={snmpTimeout}
+            onChange={e => setSnmpTimeout(e.target.value)}
+            disabled={settingsLoading || settingsSaving || scanning}
+            style={{
+              width:60, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
+              color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
+            }}
+          />
+          <span style={{ color:"#64748b", fontSize:10, marginLeft: 10 }}>Retries</span>
+          <input
+            type="number"
+            min={0}
+            max={10}
+            value={snmpRetries}
+            onChange={e => setSnmpRetries(e.target.value)}
+            disabled={settingsLoading || settingsSaving || scanning}
+            style={{
+              width:60, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
               color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
             }}
           />
@@ -961,13 +976,10 @@ function EngineTabContent() {
             style={{
               border:"1px solid #1e293b", background:"#0f172a", color:"#94a3b8",
               borderRadius:6, padding:"5px 10px", cursor:(settingsLoading || settingsSaving || scanning)?"default":"pointer",
-              fontFamily:"'Inter', system-ui, sans-serif", fontSize:10,
+              fontFamily:"'Inter', system-ui, sans-serif", fontSize:10, marginLeft: 10,
               opacity:(settingsLoading || settingsSaving || scanning)?0.6:1,
             }}
           >{settingsSaving ? "Saving..." : "Save"}</button>
-          <span style={{ color:"#334155", fontSize:10 }}>
-            {settingsLoading ? "Loading settings..." : "1-128 workers"}
-          </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button

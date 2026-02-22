@@ -155,7 +155,7 @@ def update_snmp_profile(profile_id: int, body: SnmpProfileUpdate, db: Session = 
     profile = db.query(SnmpProfile).filter(SnmpProfile.id == profile_id).first()
     if not profile:
         raise HTTPException(404, "Profile not found")
-    payload = body.model_dump(exclude_none=True)
+    payload = body.model_dump(exclude_unset=True)
 
     for k, v in payload.items():
         setattr(profile, k, v)
@@ -403,10 +403,15 @@ def _execute_scan(
     switch_metrics: List[ScanSwitchMetric] = []
 
     scan_targets = []
+    profile_limits: Dict[str, int] = {}
 
     for cred in credentials:
         p = cred.profile
+        snmp_timeout, snmp_retries, profile_max_hosts = _coerce_profile_policy(
+            p, global_snmp_timeout, global_snmp_retries, configured_max_workers
+        )
         profile_key = f"profile:{p.id}" if p else f"cred:{cred.id}"
+        profile_limits[profile_key] = profile_max_hosts
 
         scan_targets.append({
             "ip": cred.ip,
@@ -421,9 +426,13 @@ def _execute_scan(
             "v3_auth_password": p.v3_auth_password if p else cred.v3_auth_password,
             "v3_priv_protocol": p.v3_priv_protocol if p else cred.v3_priv_protocol,
             "v3_priv_password": p.v3_priv_password if p else cred.v3_priv_password,
-            "snmp_timeout": global_snmp_timeout,
-            "snmp_retries": global_snmp_retries,
+            "snmp_timeout": snmp_timeout,
+            "snmp_retries": snmp_retries,
         })
+
+    profile_semaphores = {
+        k: threading.BoundedSemaphore(v) for k, v in profile_limits.items()
+    }
 
     def _scan_target(target: dict):
         started = time.perf_counter()
@@ -435,29 +444,34 @@ def _execute_scan(
             duration_ms = int((time.perf_counter() - started) * 1000)
             return ip, label, None, "cancelled", duration_ms, ping_ok, ping_rtt
 
-        try:
-            data = scan_switch(
-                ip=ip,
-                snmp_version=target["snmp_version"],
-                community=target["community"],
-                snmp_port=target["snmp_port"],
-                snmp_timeout=target["snmp_timeout"],
-                snmp_retries=target["snmp_retries"],
-                v3_security_level=target["v3_security_level"],
-                v3_username=target["v3_username"],
-                v3_auth_protocol=target["v3_auth_protocol"],
-                v3_auth_password=target["v3_auth_password"],
-                v3_priv_protocol=target["v3_priv_protocol"],
-                v3_priv_password=target["v3_priv_password"],
-                scan_type=scan_type,
-            )
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            if data:
-                return ip, label, data, "", duration_ms, ping_ok, ping_rtt
-            return ip, label, None, "no SNMP response", duration_ms, ping_ok, ping_rtt
-        except Exception as exc:
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            return ip, label, None, str(exc), duration_ms, ping_ok, ping_rtt
+        sem = profile_semaphores[target["profile_key"]]
+        with sem:
+            if cancel_event and cancel_event.is_set():
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                return ip, label, None, "cancelled", duration_ms, ping_ok, ping_rtt
+            try:
+                data = scan_switch(
+                    ip=ip,
+                    snmp_version=target["snmp_version"],
+                    community=target["community"],
+                    snmp_port=target["snmp_port"],
+                    snmp_timeout=target["snmp_timeout"],
+                    snmp_retries=target["snmp_retries"],
+                    v3_security_level=target["v3_security_level"],
+                    v3_username=target["v3_username"],
+                    v3_auth_protocol=target["v3_auth_protocol"],
+                    v3_auth_password=target["v3_auth_password"],
+                    v3_priv_protocol=target["v3_priv_protocol"],
+                    v3_priv_password=target["v3_priv_password"],
+                    scan_type=scan_type,
+                )
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                if data:
+                    return ip, label, data, "", duration_ms, ping_ok, ping_rtt
+                return ip, label, None, "no SNMP response", duration_ms, ping_ok, ping_rtt
+            except Exception as exc:
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                return ip, label, None, str(exc), duration_ms, ping_ok, ping_rtt
 
     scan_started = time.perf_counter()
     workers = max(1, min(int(configured_max_workers), len(scan_targets)))
