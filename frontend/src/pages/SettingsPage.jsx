@@ -288,8 +288,26 @@ function CredentialsTabContent({ profiles }) {
             padding:"14px", boxSizing:"border-box",
           }}>
             <div style={{color:"#e2e8f0",fontSize:10,letterSpacing:1,marginBottom:8}}>NEW ENTRY</div>
-            <div style={{color:"#64748b",fontSize:10,lineHeight:1.5}}>
-              New-entry area stays visible while editing a switch on the right.
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+              <div>
+                <div style={{fontSize:10,color:"#e2e8f0",marginBottom:3}}>Label *</div>
+                <div style={{height:30,border:"1px solid #1e293b",borderRadius:5,backgroundColor:"#0c0f18"}} />
+              </div>
+              <div>
+                <div style={{fontSize:10,color:"#e2e8f0",marginBottom:3}}>IP address *</div>
+                <div style={{height:30,border:"1px solid #1e293b",borderRadius:5,backgroundColor:"#0c0f18"}} />
+              </div>
+              <div>
+                <div style={{fontSize:10,color:"#e2e8f0",marginBottom:3}}>SNMP Port</div>
+                <div style={{height:30,border:"1px solid #1e293b",borderRadius:5,backgroundColor:"#0c0f18"}} />
+              </div>
+              <div>
+                <div style={{fontSize:10,color:"#e2e8f0",marginBottom:3}}>Location (optional)</div>
+                <div style={{height:30,border:"1px solid #1e293b",borderRadius:5,backgroundColor:"#0c0f18"}} />
+              </div>
+            </div>
+            <div style={{fontSize:10,color:"#64748b",lineHeight:1.5}}>
+              New entry remains visible while editing on the right.
             </div>
           </div>
         )}
