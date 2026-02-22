@@ -590,7 +590,7 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
             color: isSel ? accentColor : (VENDOR_COLOR[a?.vendor]||"#94a3b8"),
             fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
           }}>{VENDOR_ICON[a?.vendor]||"[--]"} {a?.sys_name || l.local_ip}</div>
-          <div style={{color:"#334155",fontSize:10,marginTop:1}}>{l.local_port}</div>
+          <div style={{color:"#64748b",fontSize:10,marginTop:1}}>{l.local_port}</div>
         </div>
         <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
           <div style={{
@@ -608,7 +608,7 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
             color: isSel ? accentColor : (VENDOR_COLOR[b?.vendor]||"#94a3b8"),
             fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
           }}>{b?.sys_name || l.remote_ip} {VENDOR_ICON[b?.vendor]||"[--]"}</div>
-          <div style={{color:"#334155",fontSize:10,marginTop:1}}>{l.remote_port}</div>
+          <div style={{color:"#64748b",fontSize:10,marginTop:1}}>{l.remote_port}</div>
         </div>
       </div>
     );
@@ -772,7 +772,7 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
                       <div style={{color:VENDOR_COLOR[localDev?.vendor]||"#94a3b8",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                         {VENDOR_ICON[localDev?.vendor]||"[--]"} {localDev?.sys_name || l.local_ip}
                       </div>
-                      <div style={{color:"#334155",fontSize:10,marginTop:1}}>{l.local_port}</div>
+                      <div style={{color:"#64748b",fontSize:10,marginTop:1}}>{l.local_port}</div>
                     </div>
                     <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
                       <div style={{width:"100%",height:3,borderRadius:2,background:`linear-gradient(90deg,${c}99,${c})`,boxShadow:`0 0 5px ${c}66`}}/>
@@ -782,7 +782,7 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
                       <div style={{color:"#818cf8",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                         {remoteLabel}
                       </div>
-                      <div style={{color:"#334155",fontSize:10,marginTop:1}}>{l.remote_port}</div>
+                      <div style={{color:"#64748b",fontSize:10,marginTop:1}}>{l.remote_port}</div>
                     </div>
                   </div>
                 );

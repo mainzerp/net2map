@@ -73,7 +73,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
                 }}>{switchClass.label}</span>
               )}
             </div>
-            <div style={{color:"#475569",fontSize:12}}>
+            <div style={{color:"#64748b",fontSize:12}}>
               {device.ip} - {activePorts.length}/{device.ports.length} ports active - {pingStatus}
               {pingStatus === "online" && device.ping_rtt_ms ? ` ${device.ping_rtt_ms}ms` : ""}
             </div>

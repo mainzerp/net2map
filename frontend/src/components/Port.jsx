@@ -97,17 +97,17 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
               <div style={{color:"#94a3b8"}}>
                 {linkEntry.link.local_ip} {linkEntry.link.local_port} {"<->"} {linkEntry.link.remote_port} {linkEntry.link.remote_ip}
               </div>
-              <div style={{color:"#475569", marginTop:2, fontSize:10}}>
+              <div style={{color:"#64748b", marginTop:2, fontSize:10}}>
                 Click to {selectedLink?"deselect":"highlight"}
               </div>
             </div>
           )}
           {hasDev && (
             <div style={{display:"grid",gridTemplateColumns:"60px 1fr",rowGap:3}}>
-              {port.peer_ip   && <><span style={{color:"#475569"}}>IP</span>   <span style={{color:"#7dd3fc"}}>{port.peer_ip}</span></>}
-              {port.peer_host && <><span style={{color:"#475569"}}>Host</span> <span style={{color:"#e2e8f0"}}>{port.peer_host}</span></>}
-              {port.peer_mac  && <><span style={{color:"#475569"}}>MAC</span>  <span>{port.peer_mac}</span></>}
-              <span style={{color:"#475569"}}>Port</span> <span>{port.if_descr}</span>
+              {port.peer_ip   && <><span style={{color:"#64748b"}}>IP</span>   <span style={{color:"#7dd3fc"}}>{port.peer_ip}</span></>}
+              {port.peer_host && <><span style={{color:"#64748b"}}>Host</span> <span style={{color:"#e2e8f0"}}>{port.peer_host}</span></>}
+              {port.peer_mac  && <><span style={{color:"#64748b"}}>MAC</span>  <span>{port.peer_mac}</span></>}
+              <span style={{color:"#64748b"}}>Port</span> <span>{port.if_descr}</span>
               <span style={{color:"#475569"}}>Speed</span><span style={{color:speedColor(spd)}}>{speedLabel(spd)}</span>
               {port.vlan > 0 && <><span style={{color:"#475569"}}>VLAN</span><span>{port.vlan}</span></>}
             </div>

@@ -438,7 +438,7 @@ function CredentialsTabContent({ profiles }) {
                       backgroundColor:"#052e16",border:"1px solid #166534",color:"#4ade80",
                     }}>discovered</span>}
                   </div>
-                  <div style={{color:"#475569",fontSize:10,marginTop:3,paddingLeft:14}}>
+                  <div style={{color:"#64748b",fontSize:10,marginTop:3,paddingLeft:14}}>
                     {c.ip}:{c.snmp_port}
                     {assignedProfile
                       ? <> - <span style={{color:"#7dd3fc"}}>{assignedProfile.label}</span></>
