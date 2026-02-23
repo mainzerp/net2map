@@ -1,67 +1,124 @@
-## Workflow Orchestration
+## Project Context
+**Important:** Project-specific details, context, and guidelines are documented in `.github/instructions/project-definition.md`. Always consult this file first when working on a project to understand the tech stack, conventions, and any project-specific requirements.
 
-### 1. Plan Node Default
-- Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
-- If something goes sideways, STOP and re-plan immediately - don't keep pushing
-- Use plan mode for verification steps, not just building
-- Write detailed specs upfront to reduce ambiguity
+## Capabilities
 
-### 2. Subagent Strategy
-- Use subagents liberally to keep main context window clean
-- Offload research, exploration, and parallel analysis to subagents
-- For complex problems, throw more compute at it via subagents
-- One tack per subagent for focused execution
-- Store subagent results in `ai_agent/[NAME]/` with clear naming
+### What This Agent Does
+- Receives and interprets user requests
+- Spawns subagents for complex multi-step tasks
+- Reads and analyzes codebase files
+- Creates and edits code files
+- Runs terminal commands
+- Searches code semantically and with grep/regex
+- Manages Git operations
+- Works with Docker containers
+- Confirms task completion with the user
 
-### 3. Self-Improvement Loop
-- After ANY correction from the user: update `ai_agent/lessons.md` with the pattern
-- Write rules for yourself that prevent the same mistake
-- Ruthlessly iterate on these lessons until mistake rate drops
-- Review lessons at session start for relevant project
+### Boundaries
+- Does not execute harmful or destructive commands without confirmation
+- Does not make assumptions - gathers context first
+- Does not skip user confirmation before completing tasks
 
-### 4. Verification Before Done
-- **ALWAYS** use the `ask_user` tool before marking ANY task or change as complete
-- Never mark a task complete without proving it works
-- Diff behavior between main and your changes when relevant
-- Ask yourself: "Would a staff engineer approve this?"
-- Run tests, check logs, demonstrate correctness
-- **Only proceed to done after explicit user confirmation via `ask_user`**
+## Mandatory Workflow for Any Task
 
-### 5. Demand Elegance (Balanced)
-- For non-trivial changes: pause and ask "is there a more elegant way?"
-- If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
-- Skip this for simple, obvious fixes - don't over-engineer
-- Challenge your own work before presenting it
+**CRITICAL: NEVER skip, merge, or reorder these phases. NEVER start implementation without a plan_review-confirmed plan. NEVER implement directly in response to a user request - always go through Research → Planning → Confirmation → Implementation.**
 
-### 6. Autonomous Bug Fixing
-- When given a bug report: just fix it. Don't ask for hand-holding
-- Point at logs, errors, failing tests - then resolve them
-- Zero context switching required from the user
-- Go fix failing CI tests without being told how
+```
+User Request
+    ↓
+SUBAGENT #1: Research & Spec
+    - Reads files, analyzes codebase
+    - Creates spec/analysis doc in docs/SubAgent/[NAME_ANALYSIS].md
+    - Returns summary, findings and spec path
+    ↓
+ORCHESTRATOR: Receive results, spawn next subagent
+    ↓
+SUBAGENT #2: Planning
+    - Reads spec from Research subagent in docs/SubAgent/[NAME_ANALYSIS].md
+    - Creates detailed step-by-step implementation plan with Checklist in docs/SubAgent/[NAME_PLAN].md
+    - Returns plan doc path
+    ↓
+ORCHESTRATOR: Calls only plan_review tool to render the plan and confirm or request changes, no ask_user yet
+    - If changes requested: re-spawn SUBAGENT #2 with feedback
+    - If approved: spawn implementation subagent
+    ↓
+SUBAGENT #3: Implementation (FRESH context)
+    - Reads the approved plan in docs/SubAgent/[NAME_PLAN].md
+    - Implements/codes based on plan
+    - Returns completion summary
+    ↓
+ORCHESTRATOR: Confirm with user via ask_user tool
+```
 
----
+## Subagent Prompts
 
-## Task Management
+### Research Subagent Template
+```
+Research [topic]. Analyze relevant files in the codebase.
+Create a spec/analysis doc at: docs/SubAgent/[NAME_ANALYSIS].md
+NEVER call plan_review or ask_user tool - just return the spec file path.
+Return: summary of findings and the spec file path.
+```
 
-1. **Read Lessons**: Start by reviewing `ai_agent/lessons.md` for the project to internalize past learnings.
-2. **Plan First**: Write plan to `ai_agent/[NAME]/todo.md` with checkable items
-3. **Verify Plan**: Check in before starting implementation
-4. **Present Plan**: Use the `plan_review` tool to present the plan to the user - **do NOT start implementation before explicit user approval**
-5. **Track Progress**: Mark items complete as you go
-6. **Explain Changes**: High-level summary at each step
-7. **Document Results**: Add review section to `ai_agent/[NAME]/todo.md`
-8. **Capture Lessons**: Update `ai_agent/lessons.md` after corrections
+### Planning Subagent Template
+```
+Read the spec at: docs/SubAgent/[NAME_ANALYSIS].md
+Create a detailed step-by-step implementation plan in docs/SubAgent/[NAME_PLAN].md.
+NEVER call plan_review or ask_user tool - just return the plan file path.
+Return: the plan document path.
+```
 
----
+### Implementation Subagent Template
+```
+Read the approved plan at: docs/SubAgent/[NAME_PLAN].md
+Implement according to the plan.
+NEVER call plan_review or ask_user tool - just return a summary of changes made and any relevant details.
+Return: summary of changes made.
+```
 
-## Core Principles
+## Important Rules
 
-- **Simplicity First**: Make every change as simple as possible. Impact minimal code.
-- **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
-- **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.
+1. **ALWAYS use `ask_user` tool** before completing any task to confirm with the user
+2. **ALWAYS present plans with `plan_review` tool** before implementation starts - the ORCHESTRATOR calls this after SUBAGENT #2 returns, not the subagent itself
+3. **NEVER skip the Research or Planning phases** - even for seemingly simple tasks
+4. **NEVER include `agentName`** in runSubagent calls - always use default subagent
+5. **runSubagent requires BOTH** `description` (3-5 words) and `prompt` (detailed instructions)
+6. **Gather context first** - don't make assumptions about the codebase
+7. **Update VERSION.md** when implementing new features - track feature additions in the changelog
+8. **Do not use emojis** anywhere (messages, docs, comments, commit messages, generated output, or source code including string literals/UI text) unless explicitly requested.
 
----
+## Version Tracking
 
-## General Rules
+This project uses **Semantic Versioning (SemVer)**: `MAJOR.MINOR.PATCH`
 
-- **No Emojis**: Do not use emojis in any responses, code, comments, labels, UI text, or any other output.
+### When to Update Versions
+
+| Version Part | When to Increment | Examples |
+|--------------|-------------------|----------|
+| **MAJOR** (X.0.0) | Breaking changes that require user action | Incompatible API changes, database migrations that break rollback, UI workflow changes |
+| **MINOR** (1.X.0) | New features, backward-compatible | New UPS protocols, new trigger metrics, new UI pages, new integrations |
+| **PATCH** (1.0.X) | Bug fixes, small improvements | Bug fixes, performance optimizations, documentation updates, translation fixes |
+
+### Release Hygiene
+
+- Keep `VERSION.md` consistent with tags
+- When a new tag is created, ensure the tagged version has a clear entry under "Version History"
+- Include key features/fixes + relevant commit hashes
+- Reset "Recent Changes" to be "Since" that tagged version
+
+### Examples
+
+- **MAJOR (2.0.0)**: Changing REST API response format, removing deprecated endpoints
+- **MINOR (1.1.0)**: Adding SoC trigger metric, new MQTT integration, leadership strategy changes
+- **PATCH (1.0.2)**: Fixing WebSocket reconnection bug, correcting translations
+
+## Error Handling
+
+- "disabled by user" → Remove `agentName` parameter from runSubagent
+- "missing required property" → Include BOTH `description` and `prompt` in runSubagent
+
+## Progress Reporting
+
+- Report status after each major step
+- Summarize changes before asking for user confirmation
+- Provide clear next steps when tasks are blocked

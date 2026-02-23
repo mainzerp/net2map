@@ -6,16 +6,17 @@ import DashboardPage from "./pages/DashboardPage.jsx";
 import MapPage from "./pages/MapPage.jsx";
 import LogsPage from "./pages/LogsPage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
+import ErrorBoundary from "./components/ErrorBoundary.jsx";
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <BrowserRouter>
       <Routes>
         <Route element={<App />}>
-          <Route index element={<DashboardPage />} />
-          <Route path="map" element={<MapPage />} />
-          <Route path="logs" element={<LogsPage />} />
-          <Route path="settings" element={<SettingsPage />} />
+          <Route index element={<ErrorBoundary><DashboardPage /></ErrorBoundary>} />
+          <Route path="map" element={<ErrorBoundary><MapPage /></ErrorBoundary>} />
+          <Route path="logs" element={<ErrorBoundary><LogsPage /></ErrorBoundary>} />
+          <Route path="settings" element={<ErrorBoundary><SettingsPage /></ErrorBoundary>} />
         </Route>
       </Routes>
     </BrowserRouter>

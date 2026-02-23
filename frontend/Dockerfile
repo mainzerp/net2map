@@ -3,6 +3,8 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 COPY package.json package-lock.json* ./
+# NOTE: no package-lock.json committed -- using npm install (non-reproducible).
+# Add package-lock.json and switch to `npm ci` for reproducible builds.
 RUN npm install
 
 COPY . .

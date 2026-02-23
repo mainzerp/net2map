@@ -1,3 +1,4 @@
+# DEVELOPMENT SEED DATA ONLY -- do not run against production databases.
 """
 Seed script – populates the NetMap database with realistic dummy data.
 
@@ -210,9 +211,9 @@ def seed(db: Session):
         v3_security_level  = "authPriv",
         v3_username        = "netmon_fs_global",
         v3_auth_protocol   = "SHA-256",
-        v3_auth_password   = "Auth@FS_Global#2026",
+        v3_auth_password   = "CHANGEME_auth",
         v3_priv_protocol   = "AES-256",
-        v3_priv_password   = "Priv@FS_Global#2026",
+        v3_priv_password   = "CHANGEME_priv",
     )
     prof_aruba = SnmpProfile(
         label              = "Aruba CX – SNMPv3 authPriv",
@@ -221,9 +222,9 @@ def seed(db: Session):
         v3_security_level  = "authPriv",
         v3_username        = "netmon_aruba_global",
         v3_auth_protocol   = "SHA-256",
-        v3_auth_password   = "Auth@Aruba_Global#2026",
+        v3_auth_password   = "CHANGEME_auth",
         v3_priv_protocol   = "AES-128",
-        v3_priv_password   = "Priv@Aruba_Global#2026",
+        v3_priv_password   = "CHANGEME_priv",
     )
     db.add(prof_fs)
     db.add(prof_aruba)
@@ -378,9 +379,9 @@ def seed(db: Session):
                 v3_security_level = "authPriv",
                 v3_username       = f"netmon_{sw.sys_name.replace('-','_')}",
                 v3_auth_protocol  = "SHA-256",
-                v3_auth_password  = f"Auth@{rack_id.upper()}{cred_counter:02d}#2026",
+                v3_auth_password  = "CHANGEME_auth",
                 v3_priv_protocol  = "AES-256" if is_fs else "AES-128",
-                v3_priv_password  = f"Priv@{rack_id.upper()}{cred_counter:02d}#2026",
+                v3_priv_password  = "CHANGEME_priv",
             ))
             cred_counter += 1
 

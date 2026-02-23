@@ -23,7 +23,9 @@ export default function LogsPage() {
 
   useEffect(() => {
     if (!autoRefresh) return;
-    const t = setInterval(loadLogs, 5000);
+    const t = setInterval(() => {
+      if (document.visibilityState === "visible") loadLogs();
+    }, 5000);
     return () => clearInterval(t);
   }, [autoRefresh, levelFilter, eventFilter, textFilter, limit]);
 
@@ -125,7 +127,7 @@ export default function LogsPage() {
           ) : rows.map((entry, idx) => {
             const { ts, level, event, ...payload } = entry || {};
             return (
-              <div key={idx} style={{display:"grid",gridTemplateColumns:"170px 90px 180px 1fr",gap:8,padding:"8px 12px",borderBottom:"1px solid #0f172a",fontSize:10,alignItems:"start"}}>
+              <div key={`${entry.ts || ""}-${idx}`} style={{display:"grid",gridTemplateColumns:"170px 90px 180px 1fr",gap:8,padding:"8px 12px",borderBottom:"1px solid #0f172a",fontSize:10,alignItems:"start"}}>
                 <span style={{color:"#64748b",whiteSpace:"nowrap"}}>{ts || "-"}</span>
                 <span style={{color:lvlColor(level),fontWeight:600}}>{level || "-"}</span>
                 <span style={{color:"#94a3b8",wordBreak:"break-all"}}>{event || "-"}</span>

@@ -16,6 +16,11 @@ env/
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
+
+# Python test cache
+.pytest_cache/
 
 # Node / frontend
 node_modules/
@@ -30,3 +35,10 @@ frontend/.vite/
 .idea/
 *.swp
 *.swo
+
+# Build artifacts and secrets
+*.bak
+bundle_debug.js
+todo.md
+.env.*
+!.env.example

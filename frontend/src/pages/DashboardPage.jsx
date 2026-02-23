@@ -6,13 +6,17 @@ import { api, VENDOR_LABEL, VENDOR_COLOR, VENDOR_ICON } from "../api.js";
 export default function DashboardPage() {
   const navigate = useNavigate();
   const [topology, setTopology] = useState({ nodes: [], links: [], racks: [], classes: [] });
+  const [apiStats, setApiStats] = useState(null);
   const [loading, setLoading]   = useState(true);
 
   const loadData = () => {
     setLoading(true);
-    api.get("/api/topology")
-      .then(d => { setTopology(d); setLoading(false); })
-      .catch(() => setLoading(false));
+    Promise.allSettled([api.get("/api/topology"), api.get("/api/stats")])
+      .then(([topoRes, statsRes]) => {
+        if (topoRes.status === "fulfilled") setTopology(topoRes.value);
+        if (statsRes.status === "fulfilled") setApiStats(statsRes.value);
+        setLoading(false);
+      });
   };
   useEffect(() => { loadData(); }, []);
 
@@ -22,8 +26,9 @@ export default function DashboardPage() {
     const links = topology.links || [];
     const racks = topology.racks || [];
 
-    const totalPorts  = nodes.reduce((s, d) => s + d.ports.length, 0);
-    const activePorts = nodes.reduce((s, d) => s + d.ports.filter(p => p.oper_status === 1).length, 0);
+    // Use API-provided counts when available for accuracy
+    const totalPorts  = apiStats != null ? apiStats.port_count  : nodes.reduce((s, d) => s + d.ports.length, 0);
+    const activePorts = apiStats != null ? apiStats.port_up_count : nodes.reduce((s, d) => s + d.ports.filter(p => p.oper_status === 1).length, 0);
 
     // Vendor breakdown
     const vendors = {};
@@ -50,17 +55,17 @@ export default function DashboardPage() {
     const unassigned = nodes.filter(n => !n.rack_id);
 
     return {
-      switchCount: nodes.length,
+      switchCount: apiStats != null ? apiStats.device_count : nodes.length,
       totalPorts,
       activePorts,
       linkCount: links.length,
-      rackCount: racks.length,
+      rackCount: apiStats != null ? apiStats.rack_count : racks.length,
       vendors,
       speeds,
       rackStats,
       unassignedCount: unassigned.length,
     };
-  }, [topology]);
+  }, [topology, apiStats]);
 
   // ── Styles ─────────────────────────────────────────────────────────────────
   const cardStyle = {

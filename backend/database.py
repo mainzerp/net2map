@@ -167,10 +167,10 @@ class Device(Base):
     class_id     = Column(Integer, ForeignKey("switch_classes.id"), nullable=True)
     model_id     = Column(Integer, ForeignKey("switch_models.id"), nullable=True)
 
-    ports        = relationship("Port", back_populates="device", cascade="all, delete-orphan")
-    rack         = relationship("Rack", back_populates="devices")
-    switch_class = relationship("SwitchClass", back_populates="devices")
-    switch_model = relationship("SwitchModel", back_populates="devices")
+    ports        = relationship("Port", back_populates="device", cascade="all, delete-orphan", lazy="selectin")
+    rack         = relationship("Rack", back_populates="devices", lazy="joined")
+    switch_class = relationship("SwitchClass", back_populates="devices", lazy="joined")
+    switch_model = relationship("SwitchModel", back_populates="devices", lazy="joined")
 
 
 class Port(Base):
@@ -255,141 +255,35 @@ class ScanRunSwitchMetric(Base):
     scan_run = relationship("ScanRun", back_populates="switch_metrics")
 
 
-def _ensure_device_ping_columns():
-    """Add ping-related columns for existing SQLite databases without migrations."""
+def _seed_default_settings():
+    """Insert default app_settings rows if they do not already exist.
+
+    This is pure DML — no DDL. Safe to call every startup because
+    INSERT OR IGNORE is a no-op when the row is already present.
+    """
     with engine.begin() as conn:
-        if conn.dialect.name != "sqlite":
-            return
-
-        rows = conn.execute(text("PRAGMA table_info(devices)")).fetchall()
-        existing = {str(r[1]) for r in rows}
-
-        additions = [
-            ("ping_status", "VARCHAR DEFAULT 'unknown'"),
-            ("ping_rtt_ms", "INTEGER DEFAULT 0"),
-            ("last_ping", "DATETIME"),
-        ]
-        for col_name, col_def in additions:
-            if col_name not in existing:
-                conn.execute(text(f"ALTER TABLE devices ADD COLUMN {col_name} {col_def}"))
-
-
-def _ensure_credential_rack_class_columns():
-    """Add rack_id and class_id columns to credentials for existing SQLite databases."""
-    with engine.begin() as conn:
-        if conn.dialect.name != "sqlite":
-            return
-
-        rows = conn.execute(text("PRAGMA table_info(credentials)")).fetchall()
-        existing = {str(r[1]) for r in rows}
-
-        additions = [
-            ("rack_id", "INTEGER"),
-            ("class_id", "INTEGER"),
-            ("vendor", "VARCHAR DEFAULT ''"),
-            ("model", "VARCHAR DEFAULT ''"),
-        ]
-        for col_name, col_def in additions:
-            if col_name not in existing:
-                conn.execute(text(f"ALTER TABLE credentials ADD COLUMN {col_name} {col_def}"))
-
-
-def _ensure_rack_map_columns():
-    """Add map_x and map_y columns to racks for existing SQLite databases."""
-    with engine.begin() as conn:
-        if conn.dialect.name != "sqlite":
-            return
-
-        rows = conn.execute(text("PRAGMA table_info(racks)")).fetchall()
-        existing = {str(r[1]) for r in rows}
-
-        additions = [
-            ("map_x", "FLOAT DEFAULT 100.0"),
-            ("map_y", "FLOAT DEFAULT 100.0"),
-        ]
-        for col_name, col_def in additions:
-            if col_name not in existing:
-                conn.execute(text(f"ALTER TABLE racks ADD COLUMN {col_name} {col_def}"))
-
-
-def _ensure_scan_run_snapshot_columns():
-    """Add snapshot columns to scan_runs for existing SQLite databases."""
-    with engine.begin() as conn:
-        if conn.dialect.name != "sqlite":
-            return
-
-        rows = conn.execute(text("PRAGMA table_info(scan_runs)")).fetchall()
-        existing = {str(r[1]) for r in rows}
-
-        additions = [
-            ("devices_snapshot_json", "TEXT DEFAULT '[]'"),
-            ("links_snapshot_json", "TEXT DEFAULT '[]'"),
-        ]
-        for col_name, col_def in additions:
-            if col_name not in existing:
-                conn.execute(text(f"ALTER TABLE scan_runs ADD COLUMN {col_name} {col_def}"))
-
-
-def _ensure_port_endpoint_columns():
-    """Add endpoint count/details columns to ports for existing SQLite databases."""
-    with engine.begin() as conn:
-        if conn.dialect.name != "sqlite":
-            return
-
-        rows = conn.execute(text("PRAGMA table_info(ports)")).fetchall()
-        existing = {str(r[1]) for r in rows}
-
-        additions = [
-            ("endpoint_count", "INTEGER DEFAULT 0"),
-            ("endpoint_details_json", "TEXT DEFAULT '[]'"),
-        ]
-        for col_name, col_def in additions:
-            if col_name not in existing:
-                conn.execute(text(f"ALTER TABLE ports ADD COLUMN {col_name} {col_def}"))
-
-
-def _ensure_app_settings_table():
-    """Ensure app_settings table exists and has default values."""
-    with engine.begin() as conn:
-        if conn.dialect.name != "sqlite":
-            return
-        
-        # Create table if it doesn't exist
-        conn.execute(text('''
-            CREATE TABLE IF NOT EXISTS app_settings (
-                key VARCHAR PRIMARY KEY,
-                value VARCHAR NOT NULL
-            )
-        '''))
-        
-        # Insert default values if they don't exist
         defaults = [
             ("discovery_interval_sec", "1800"),
             ("port_update_interval_sec", "30"),
             ("discovery_scan_ranges", "[]"),
         ]
         for key, value in defaults:
-            conn.execute(text(f"INSERT OR IGNORE INTO app_settings (key, value) VALUES ('{key}', '{value}')"))
+            conn.execute(
+                text("INSERT OR IGNORE INTO app_settings (key, value) VALUES (:key, :value)"),
+                {"key": key, "value": value},
+            )
 
-
-def _ensure_device_model_id_column():
-    """Add model_id FK column to devices for existing SQLite databases."""
-    with engine.begin() as conn:
-        if conn.dialect.name != "sqlite":
-            return
-
-        rows = conn.execute(text("PRAGMA table_info(devices)")).fetchall()
-        existing = {str(r[1]) for r in rows}
-
-        if "model_id" not in existing:
-            conn.execute(text("ALTER TABLE devices ADD COLUMN model_id INTEGER REFERENCES switch_models(id)"))
 
 def create_tables():
+    """Ensure tables exist and seed initial data.
+
+    In Docker deployments the entrypoint runs `alembic upgrade head` before
+    uvicorn starts, so by the time this function is called all tables already
+    exist and create_all() is a no-op.
+
+    In bare-Python local dev (no Docker, no alembic run) create_all() creates
+    the tables from the ORM metadata so the app can start without any migration
+    tooling.
+    """
     Base.metadata.create_all(bind=engine)
-    _ensure_app_settings_table()
-    _ensure_device_ping_columns()
-    _ensure_credential_rack_class_columns()
-    _ensure_rack_map_columns()
-    _ensure_scan_run_snapshot_columns()
-    _ensure_port_endpoint_columns()
-    _ensure_device_model_id_column()
+    _seed_default_settings()

@@ -4,36 +4,58 @@
 // Set VITE_API_URL=http://host:8000 to point to a remote backend
 export const API = (import.meta.env.VITE_API_URL ?? "").replace(/\/+$/, "");
 
+// Optional Bearer token for authenticated backends (set VITE_API_TOKEN to enable)
+const TOKEN = import.meta.env.VITE_API_TOKEN || "";
+const _authHeader = TOKEN ? { Authorization: "Bearer " + TOKEN } : {};
+
 // ETag cache for GET requests that support conditional fetching
 const _etagCache = {};
 
+async function _checkOk(r) {
+  if (!r.ok) {
+    let msg;
+    try { msg = await r.text(); } catch { msg = r.statusText; }
+    throw new Error(`HTTP ${r.status}: ${msg}`);
+  }
+  return r;
+}
+
 export const api = {
   get: async (path) => {
-    const headers = {};
+    const headers = { ..._authHeader };
     if (_etagCache[path]) headers["If-None-Match"] = _etagCache[path].etag;
     const r = await fetch(`${API}${path}`, { headers });
     if (r.status === 304) {
       if (_etagCache[path]) return _etagCache[path].data;
       // Cache miss despite 304 - re-fetch without ETag
-      const r2 = await fetch(`${API}${path}`);
+      const r2 = await fetch(`${API}${path}`, { headers: { ..._authHeader } });
+      await _checkOk(r2);
       const data2 = await r2.json();
       return data2;
     }
-    if (!r.ok) return r.json();
+    await _checkOk(r);
     const etag = r.headers.get("ETag");
     const data = await r.json();
-    if (etag) _etagCache[path] = { etag, data };
+    if (etag) {
+      _etagCache[path] = { etag, data };
+      const keys = Object.keys(_etagCache);
+      if (keys.length > 200) {
+        delete _etagCache[keys[0]]; // evict oldest entry
+      }
+    }
     return data;
   },
-  post:  (path, body) => fetch(`${API}${path}`, { method:"POST",   headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) }).then(r => r.json()),
-  put:   (path, body) => fetch(`${API}${path}`, { method:"PUT",    headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) }).then(r => r.json()),
-  patch: (path, body) => fetch(`${API}${path}`, { method:"PATCH",  headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) }).then(r => r.json()),
-  del:   (path)       => fetch(`${API}${path}`, { method:"DELETE" }),
+  post:  (path, body) => fetch(`${API}${path}`, { method:"POST",   headers:{"Content-Type":"application/json", ..._authHeader}, body: JSON.stringify(body) }).then(_checkOk).then(r => r.json()),
+  put:   (path, body) => fetch(`${API}${path}`, { method:"PUT",    headers:{"Content-Type":"application/json", ..._authHeader}, body: JSON.stringify(body) }).then(_checkOk).then(r => r.json()),
+  patch: (path, body) => fetch(`${API}${path}`, { method:"PATCH",  headers:{"Content-Type":"application/json", ..._authHeader}, body: JSON.stringify(body) }).then(_checkOk).then(r => r.json()),
+  del:   (path)       => fetch(`${API}${path}`, { method:"DELETE", headers:{ ..._authHeader } }).then(_checkOk),
 };
 
 // ── Visual constants ─────────────────────────────────────────────────────────
 export const CABLE_COLORS = ["#f472b6","#fb923c","#a78bfa","#34d399","#fbbf24","#60a5fa","#f87171","#e879f9"];
 
+// NOTE: This logic is mirrored in backend/snmp_scanner.py speed_label().
+// Any changes here must be reflected there too.
 export const speedLabel = mbps =>
   mbps >= 100000 ? "100G" :
   mbps >= 10000  ? "10G"  :

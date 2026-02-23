@@ -95,3 +95,17 @@ Das Scan-Ergebnis (`POST /api/scan`) enthält zusätzliche Laufzeitdaten:
 - Backend: FastAPI, SQLAlchemy, Pydantic, PySNMP
 - Frontend: React, React Router, Vite
 - Deployment: Docker, Nginx
+
+## Configuration
+
+`VITE_API_URL` is baked into the frontend bundle at build time.
+To point the frontend at a different backend URL, rebuild the image:
+```bash
+docker buildx build --build-arg VITE_API_URL=http://your-backend:8000 -t netmap-frontend .
+```
+
+## Security Notes
+
+- **Authentication**: Set `SECRET_TOKEN` in the backend environment to enable bearer token authentication. Leave empty to disable (LAN-only setups).
+- **No HTTPS**: All traffic is unencrypted HTTP. Do not use on untrusted networks. To enable HTTPS, place a reverse proxy (Traefik, Caddy, nginx) in front of the frontend container.
+- **SNMP Credentials**: API responses mask SNMP v3 passwords. However, if you enable `SECRET_TOKEN`, ensure it is kept secret.

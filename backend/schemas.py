@@ -1,7 +1,7 @@
 """Pydantic schemas for request / response validation."""
 from datetime import datetime
 from typing import Literal, Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 
 # ─── Enums ────────────────────────────────────────────────────────────────────
 SnmpVersion   = Literal["v2c", "v3"]
@@ -143,6 +143,10 @@ class SnmpProfileOut(SnmpProfileBase):
     created_at: datetime
     updated_at: datetime
 
+    @field_serializer("v3_auth_password", "v3_priv_password")
+    def _mask_password(self, v: str) -> str:
+        return "***" if v else ""
+
     class Config:
         from_attributes = True
 
@@ -202,6 +206,10 @@ class CredentialOut(CredentialBase):
     id:         int
     created_at: datetime
     updated_at: datetime
+
+    @field_serializer("v3_auth_password", "v3_priv_password")
+    def _mask_password(self, v: str) -> str:
+        return "***" if v else ""
 
     class Config:
         from_attributes = True
@@ -338,7 +346,7 @@ class ScanResult(BaseModel):
     max_workers:        int = 1
     total_duration_ms:  int = 0
     switch_metrics:     List[ScanSwitchMetric] = []
-    status:             str = "finished"
+    status:             str = "unknown"
     run_id:             Optional[int] = None
 
 

@@ -36,7 +36,7 @@ AUTH_PROTOCOLS = {
     "MD5":    usmHMACMD5AuthProtocol,
     "SHA":    usmHMACSHAAuthProtocol,
     "SHA-224": usmHMAC128SHA224AuthProtocol,
-    "SHA-256": usmHMAC192SHA256AuthProtocol,
+    "SHA-256": usmHMAC192SHA256AuthProtocol,  # "192" in the constant name refers to HMAC key size, not hash size
     "SHA-384": usmHMAC256SHA384AuthProtocol,
     "SHA-512": usmHMAC384SHA512AuthProtocol,
 }
@@ -188,7 +188,13 @@ async def snmp_get(ip: str, port: int, auth,
         for vb in var_binds:
             result[str(vb[0])] = str(vb[1])
     except Exception as exc:
-        log.debug("snmp_get %s: %s", ip, exc)
+        exc_type = type(exc).__name__
+        if "Authentication" in exc_type or "auth" in str(exc).lower():
+            log.warning("snmp_get %s: authentication error: %s", ip, exc)
+        elif "Connection" in exc_type or "timeout" in str(exc).lower():
+            log.warning("snmp_get %s: connection error: %s", ip, exc)
+        else:
+            log.debug("snmp_get %s: %s: %s", ip, exc_type, exc)
     finally:
         try:
             engine.transportDispatcher.closeDispatcher()
@@ -294,6 +300,8 @@ def is_virtual(if_descr: str, vendor: str) -> bool:
 
 # --- Speed label helper -------------------------------------------------------
 
+# NOTE: This logic is mirrored in frontend/src/api.js speedLabel().
+# Any changes here must be reflected there too.
 def speed_label(mbps: int) -> str:
     if mbps >= 100_000: return "100G"
     if mbps >= 40_000:  return "40G"

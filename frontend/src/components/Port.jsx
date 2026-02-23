@@ -16,7 +16,8 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
       if (!raw) return [];
       const value = typeof raw === "string" ? JSON.parse(raw) : raw;
       return Array.isArray(value) ? value : [];
-    } catch {
+    } catch (e) {
+      console.warn("Port: failed to parse JSON value", raw, e);
       return [];
     }
   })();
@@ -84,7 +85,7 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
             }}/>
           )}
           <span style={{
-            fontSize:8, fontWeight:700,
+            fontSize:12, fontWeight:700,
             color: hl ? "rgba(255,255,255,0.95)"
                  : (isLinked && !hl) ? "#e2e8f0"
                  : active ? "rgba(0,0,0,0.75)"
@@ -101,18 +102,18 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
           backgroundColor:"#0f172a", border:`1px solid ${isLinked ? cc+"55" : "#334155"}`,
           borderRadius:8, padding:"10px 14px", minWidth:240,
           pointerEvents:"none",
-          fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, color:"#94a3b8",
+          fontFamily:"'Inter', system-ui, sans-serif", fontSize:12, color:"#94a3b8",
           boxShadow:`0 8px 32px rgba(0,0,0,0.7), 0 0 12px ${cc}18`,
         }}>
           {isLinked && (
             <div style={{marginBottom: hasDev ? 10 : 0, padding:"5px 8px",
               backgroundColor:`${cc}12`, border:`1px solid ${cc}33`,
-              borderRadius:5, color:cc, fontSize:10}}>
+              borderRadius:5, color:cc, fontSize:12}}>
               <div style={{fontWeight:600, marginBottom:3}}>Switch-to-switch - {linkEntry.link.speed_label}</div>
               <div style={{color:"#94a3b8"}}>
                 {linkEntry.link.local_ip} {linkEntry.link.local_port} {"<->"} {linkEntry.link.remote_port} {linkEntry.link.remote_ip}
               </div>
-              <div style={{color:"#64748b", marginTop:2, fontSize:10}}>
+              <div style={{color:"#64748b", marginTop:2, fontSize:12}}>
                 Click to {selectedLink?"deselect":"highlight"}
               </div>
             </div>

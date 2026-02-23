@@ -7,13 +7,20 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: "sqlite:////data/netmap.db"
+      CORS_ORIGIN: "http://localhost:3000"
+      SECRET_TOKEN: ""
     volumes:
       - netmap-data:/data          # persistent SQLite file
     # SNMP requires access to your LAN – use host network or expose nothing
     # (SNMP queries originate FROM this container, no inbound ports needed)
     networks:
       - netmap
-
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
   # ─── React/Nginx Frontend ────────────────────────────────────────────────────
   frontend:
     build:
@@ -27,7 +34,8 @@ services:
     ports:
       - "3000:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - netmap
 

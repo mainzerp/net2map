@@ -1,8 +1,12 @@
 fastapi==0.115.5
 uvicorn[standard]==0.32.1
 sqlalchemy==2.0.36
+alembic==1.13.3
 pydantic==2.9.2
 python-multipart>=0.0.7
+# pysnmp-lextudio: maintained community fork of the abandoned pysnmp library.
+# Original pysnmp (<=4.4.12) is unmaintained since 2019.
+# Monitor: https://github.com/lextudio/pysnmp for updates.
 pysnmp-lextudio==5.0.34
 pyasn1==0.4.8
 pyasn1-modules==0.2.8
