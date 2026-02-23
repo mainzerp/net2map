@@ -68,7 +68,7 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
         style={{ flexShrink:0, opacity: hl==="dim" ? 0.22 : 1, transition:"opacity 0.18s", cursor: isLinked ? "pointer" : "default" }}
       >
         <div title={port.if_descr} style={{
-          width:44, height:24, borderRadius:2,
+          width:34, height:20, borderRadius:2,
           backgroundColor: bg,
           border:`1px solid ${border}`,
           boxShadow: shadow,
@@ -84,7 +84,7 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
             }}/>
           )}
           <span style={{
-            fontSize:10, fontWeight:700,
+            fontSize:8, fontWeight:700,
             color: hl ? "rgba(255,255,255,0.95)"
                  : (isLinked && !hl) ? "#e2e8f0"
                  : active ? "rgba(0,0,0,0.75)"

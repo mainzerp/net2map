@@ -426,7 +426,7 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
 
 
 // ── RackDetail ───────────────────────────────────────────────────────────────
-function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder, onReorder, onClose, onRename, onMoveDevice, onUpdateDeviceMeta }) {
+function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks, deviceOrder, onReorder, onClose, onRename, onMoveDevice, onUpdateDeviceMeta }) {
   const [editing, setEditing] = useState(false);
   const [nameInput, setNameInput] = useState(rack.label);
   const [selectedLink, setSelectedLink] = useState(null);
@@ -440,8 +440,9 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
     rack.devices.forEach(d => { if (d.ports_per_row && d.ports_per_row > m) m = d.ports_per_row; });
     return m;
   }, [rack.devices]);
-  // Port = 44px + 2px gap, plus panel chrome (14px padding each side + 23px reorder buttons + 5px gap + scrollbar)
-  const panelWidth = Math.max(620, maxPPR * 46 + 70);
+  // Port = 34px + 2px gap = 36px per port column
+  // Chrome: content padding (40) + scrollbar (6) + reorder btns (23) + SwitchPanel border (2) + SwitchPanel padding (28) + extra (1) = 100px
+  const panelWidth = Math.max(520, maxPPR * 36 + 100);
 
   const commitRename = () => {
     if (nameInput.trim() && nameInput.trim() !== rack.label) onRename?.(nameInput.trim());
@@ -465,6 +466,7 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
   const otherDevices  = useMemo(() => rack.devices.filter(d => d.class_id == null && d.vendor !== "fs" && d.vendor !== "aruba_cx"), [rack.devices]);
 
   const classMap = useMemo(() => Object.fromEntries((switchClasses || []).map(c => [c.id, c])), [switchClasses]);
+  const modelMap = useMemo(() => Object.fromEntries((switchModels || []).map(m => [m.id, m])), [switchModels]);
 
   const { uplinks, trunks, external } = useMemo(() => {
     const rackIps  = new Set(rack.devices.map(d => d.ip));
@@ -581,7 +583,8 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
           onUpdateMeta={onUpdateDeviceMeta}
           portLinkMap={portLinkMap} selectedLink={selectedLink}
           onPortClick={toggleLink} linkColorMap={linkColorMap}
-          switchClass={d.class_id ? classMap[d.class_id] : null}/>
+          switchClass={d.class_id ? classMap[d.class_id] : null}
+          switchModel={d.model_id ? modelMap[d.model_id] : null}/>
       </div>
     </div>
   ));
@@ -1085,6 +1088,7 @@ export default function MapPage() {
           rack={selectedRack}
           allRacks={allRacks}
           switchClasses={topology.classes || []}
+          switchModels={topology.models || []}
           topologyLinks={topology.links}
           deviceOrder={selectedRack ? Object.fromEntries(
             ["tor","access","other"].map(g => [

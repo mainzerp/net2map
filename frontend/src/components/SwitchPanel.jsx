@@ -3,7 +3,7 @@ import { speedColor } from "../api.js";
 import Port from "./Port.jsx";
 
 // ── SwitchPanel ──────────────────────────────────────────────────────────────
-export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateMeta, portLinkMap, selectedLink, onPortClick, linkColorMap, switchClass }) {
+export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateMeta, portLinkMap, selectedLink, onPortClick, linkColorMap, switchClass, switchModel }) {
   const [open, setOpen] = useState(true);
   const [showMove, setShowMove] = useState(false);
   const panelRef = useRef(null);
@@ -30,7 +30,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
             style={{width:8,height:8,borderRadius:"50%",backgroundColor:statusColor,boxShadow:`0 0 6px ${statusColor}`}}/>
           <div>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <span style={{color:"#e2e8f0",fontWeight:600,fontSize:14}}>{device.model || device.sys_name}</span>
+              <span style={{color:"#e2e8f0",fontWeight:600,fontSize:14}}>{switchModel ? switchModel.name : (device.model || device.sys_name)}</span>
               {switchClass && (
                 <span style={{
                   fontSize:10, padding:"1px 6px", borderRadius:3,
@@ -40,6 +40,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
                 }}>{switchClass.label}</span>
               )}
             </div>
+            {switchModel && <div style={{color:"#94a3b8",fontSize:11}}>{device.sys_name}</div>}
             <div style={{color:"#64748b",fontSize:12}}>
               {device.ip} - {activePorts.length}/{device.ports.length} ports active - {pingStatus}
               {pingStatus === "online" && device.ping_rtt_ms ? ` ${device.ping_rtt_ms}ms` : ""}
