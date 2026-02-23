@@ -5,25 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NetMap - Aruba CX Topology</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>N</text></svg>"/>
-    <script>
-      window.__REACT_MOUNTED__ = false;
-      window.onerror = function(msg, url, line, col, err) {
-        if (window.__REACT_MOUNTED__) { console.error('JS ERROR:', msg, err); return false; }
-        var el = document.getElementById('root');
-        if (el) el.innerHTML =
-          '<pre style="color:red;padding:20px;font-size:14px;">JS ERROR:\n' +
-          msg + '\nat ' + url + ':' + line + ':' + col + '\n' +
-          (err && err.stack ? err.stack : '') + '</pre>';
-        return false;
-      };
-      window.addEventListener('unhandledrejection', function(e) {
-        if (window.__REACT_MOUNTED__) { console.error('Unhandled rejection:', e.reason); return; }
-        var el = document.getElementById('root');
-        if (el) el.innerHTML =
-          '<pre style="color:orange;padding:20px;font-size:14px;">UNHANDLED REJECTION:\n' +
-          (e.reason && e.reason.stack ? e.reason.stack : String(e.reason)) + '</pre>';
-      });
-    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -21,6 +21,3 @@ createRoot(document.getElementById("root")).render(
     </BrowserRouter>
   </StrictMode>
 );
-
-// Signal to index.html error handlers that React has taken over rendering
-window.__REACT_MOUNTED__ = true;

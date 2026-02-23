@@ -23,7 +23,7 @@ export default function LogsPage() {
 
   useEffect(() => {
     if (!autoRefresh) return;
-    const t = setInterval(loadLogs, 2000);
+    const t = setInterval(loadLogs, 5000);
     return () => clearInterval(t);
   }, [autoRefresh, levelFilter, eventFilter, textFilter, limit]);
 
