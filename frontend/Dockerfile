@@ -7,7 +7,7 @@ RUN npm install
 
 COPY . .
 # API URL is injected at build time; defaults to same-host nginx proxy
-ARG VITE_API_URL=/
+ARG VITE_API_URL=
 ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build
 

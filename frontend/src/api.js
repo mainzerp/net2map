@@ -2,10 +2,29 @@
 
 // Empty string = use relative URLs (works with Vite proxy in dev and nginx in Docker)
 // Set VITE_API_URL=http://host:8000 to point to a remote backend
-export const API = import.meta.env.VITE_API_URL ?? "";
+export const API = (import.meta.env.VITE_API_URL ?? "").replace(/\/+$/, "");
+
+// ETag cache for GET requests that support conditional fetching
+const _etagCache = {};
 
 export const api = {
-  get:   (path)       => fetch(`${API}${path}`).then(r => r.json()),
+  get: async (path) => {
+    const headers = {};
+    if (_etagCache[path]) headers["If-None-Match"] = _etagCache[path].etag;
+    const r = await fetch(`${API}${path}`, { headers });
+    if (r.status === 304) {
+      if (_etagCache[path]) return _etagCache[path].data;
+      // Cache miss despite 304 - re-fetch without ETag
+      const r2 = await fetch(`${API}${path}`);
+      const data2 = await r2.json();
+      return data2;
+    }
+    if (!r.ok) return r.json();
+    const etag = r.headers.get("ETag");
+    const data = await r.json();
+    if (etag) _etagCache[path] = { etag, data };
+    return data;
+  },
   post:  (path, body) => fetch(`${API}${path}`, { method:"POST",   headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) }).then(r => r.json()),
   put:   (path, body) => fetch(`${API}${path}`, { method:"PUT",    headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) }).then(r => r.json()),
   patch: (path, body) => fetch(`${API}${path}`, { method:"PATCH",  headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) }).then(r => r.json()),
