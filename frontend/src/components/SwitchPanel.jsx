@@ -88,22 +88,48 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
 
       {open && device.ports.length > 0 && (
         <div style={{padding:"0 14px 12px"}}>
-          <div style={{display:"flex",gap:4,flexWrap:"wrap",alignItems:"flex-start"}}>
-            {device.ports.map(port => {
-              const pKey = `${device.ip}:${port.if_descr}`;
-              return (
-                <Port
-                  key={port.id}
-                  port={port}
-                  portKey={pKey}
-                  portLinkMap={portLinkMap}
-                  selectedLink={selectedLink}
-                  onPortClick={onPortClick}
-                  cableColor={linkColorMap?.[pKey]}
-                />
+          {(() => {
+            // Sort ports by if_index for physical layout
+            const sorted = [...device.ports].sort((a, b) => (a.if_index || 0) - (b.if_index || 0));
+            const oddPorts  = sorted.filter(p => p.if_index % 2 === 1);
+            const evenPorts = sorted.filter(p => p.if_index % 2 === 0);
+            // Determine how many visual columns we have (each column = one odd/even pair)
+            const maxPairs = Math.max(oddPorts.length, evenPorts.length);
+            const pairsPerRow = 24;
+            const rowCount = Math.ceil(maxPairs / pairsPerRow);
+            const rows = [];
+            for (let row = 0; row < rowCount; row++) {
+              const startIdx = row * pairsPerRow;
+              const endIdx   = Math.min(startIdx + pairsPerRow, maxPairs);
+              const topRow   = oddPorts.slice(startIdx, endIdx);
+              const botRow   = evenPorts.slice(startIdx, endIdx);
+              rows.push(
+                <div key={row} style={{marginBottom: row < rowCount - 1 ? 6 : 0}}>
+                  <div style={{display:"flex",gap:2,alignItems:"flex-start"}}>
+                    {topRow.map(port => {
+                      const pKey = `${device.ip}:${port.if_descr}`;
+                      return (
+                        <Port key={port.id} port={port} portKey={pKey}
+                          portLinkMap={portLinkMap} selectedLink={selectedLink}
+                          onPortClick={onPortClick} cableColor={linkColorMap?.[pKey]}/>
+                      );
+                    })}
+                  </div>
+                  <div style={{display:"flex",gap:2,alignItems:"flex-start",marginTop:1}}>
+                    {botRow.map(port => {
+                      const pKey = `${device.ip}:${port.if_descr}`;
+                      return (
+                        <Port key={port.id} port={port} portKey={pKey}
+                          portLinkMap={portLinkMap} selectedLink={selectedLink}
+                          onPortClick={onPortClick} cableColor={linkColorMap?.[pKey]}/>
+                      );
+                    })}
+                  </div>
+                </div>
               );
-            })}
-          </div>
+            }
+            return rows;
+          })()}
           <div style={{display:"flex",gap:14,marginTop:9,fontSize:10,color:"#475569",flexWrap:"wrap"}}>
             <span><span style={{color:"#22c55e"}}>|</span> 1G</span>
             <span><span style={{color:"#22d3ee"}}>|</span> 10G+</span>
