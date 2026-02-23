@@ -471,12 +471,13 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
     (topologyLinks || []).forEach(l => {
       const localHere  = rackIps.has(l.local_ip);
       const remoteHere = rackIps.has(l.remote_ip);
-      const key = [l.local_ip, l.remote_ip].sort().join("|");
+      // Use port-level key to preserve multiple physical links between the same switch pair
+      const portKey = [l.local_ip + ":" + l.local_port, l.remote_ip + ":" + l.remote_port].sort().join("|");
       if (localHere && remoteHere) {
-        if (!seenIntra.has(key)) { seenIntra.add(key); intraAll.push(l); }
+        if (!seenIntra.has(portKey)) { seenIntra.add(portKey); intraAll.push(l); }
       } else if (localHere || remoteHere) {
-        if (!seenExternal.has(key)) {
-          seenExternal.add(key);
+        if (!seenExternal.has(portKey)) {
+          seenExternal.add(portKey);
           const norm = localHere ? l : { ...l,
             local_ip: l.remote_ip, local_port: l.remote_port,
             remote_ip: l.local_ip, remote_port: l.local_port };
