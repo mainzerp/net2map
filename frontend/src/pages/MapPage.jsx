@@ -434,6 +434,15 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
   const activePorts = rack.devices.reduce((s,d) => s + d.ports.filter(p => p.oper_status === 1).length, 0);
   const otherRacks  = (allRacks || []).filter(r => r.id !== rack.id);
 
+  // Compute panel width based on max ports_per_row across devices
+  const maxPPR = useMemo(() => {
+    let m = 24;
+    rack.devices.forEach(d => { if (d.ports_per_row && d.ports_per_row > m) m = d.ports_per_row; });
+    return m;
+  }, [rack.devices]);
+  // Port = 44px + 2px gap, plus panel chrome (14px padding each side + 23px reorder buttons + 5px gap + scrollbar)
+  const panelWidth = Math.max(620, maxPPR * 46 + 70);
+
   const commitRename = () => {
     if (nameInput.trim() && nameInput.trim() !== rack.label) onRename?.(nameInput.trim());
     setEditing(false);
@@ -628,7 +637,7 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
   return (
     <>
     <div style={{
-      position:"fixed", right:0, top:48, bottom:0, width:760,
+      position:"fixed", right:0, top:48, bottom:0, width:panelWidth,
       backgroundColor:"#020817", borderLeft:"1px solid #1e293b",
       zIndex:100, display:"flex", flexDirection:"column",
       fontFamily:"'Inter', system-ui, sans-serif",

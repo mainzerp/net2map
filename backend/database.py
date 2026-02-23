@@ -9,7 +9,21 @@ from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./netmap.db")
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    # Enable WAL mode via connect event for better read/write concurrency
+)
+
+from sqlalchemy import event as _sa_event
+
+@_sa_event.listens_for(engine, "connect")
+def _set_sqlite_pragma(dbapi_conn, connection_record):
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA busy_timeout=10000")
+    cursor.close()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -52,6 +66,21 @@ class SwitchClass(Base):
     updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     devices = relationship("Device", back_populates="switch_class")
+
+
+class SwitchModel(Base):
+    """Physical switch model definition with port layout parameters."""
+    __tablename__ = "switch_models"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    name          = Column(String, nullable=False, unique=True)   # e.g. "Aruba CX 6300M-48"
+    ports_per_row = Column(Integer, default=24)                   # physical ports per row on faceplate
+    total_ports   = Column(Integer, nullable=True)                # expected total ports (optional)
+    description   = Column(String, default="")
+    created_at    = Column(DateTime, default=datetime.utcnow)
+    updated_at    = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    devices = relationship("Device", back_populates="switch_model")
 
 
 class SnmpProfile(Base):
@@ -136,10 +165,12 @@ class Device(Base):
     # Optional assignment to a managed rack and switch class
     rack_id      = Column(Integer, ForeignKey("racks.id"), nullable=True)
     class_id     = Column(Integer, ForeignKey("switch_classes.id"), nullable=True)
+    model_id     = Column(Integer, ForeignKey("switch_models.id"), nullable=True)
 
     ports        = relationship("Port", back_populates="device", cascade="all, delete-orphan")
     rack         = relationship("Rack", back_populates="devices")
     switch_class = relationship("SwitchClass", back_populates="devices")
+    switch_model = relationship("SwitchModel", back_populates="devices")
 
 
 class Port(Base):
@@ -334,10 +365,24 @@ def _ensure_app_settings_table():
         # Insert default values if they don't exist
         defaults = [
             ("discovery_interval_sec", "1800"),
-            ("port_update_interval_sec", "30")
+            ("port_update_interval_sec", "30"),
+            ("discovery_scan_ranges", "[]"),
         ]
         for key, value in defaults:
             conn.execute(text(f"INSERT OR IGNORE INTO app_settings (key, value) VALUES ('{key}', '{value}')"))
+
+
+def _ensure_device_model_id_column():
+    """Add model_id FK column to devices for existing SQLite databases."""
+    with engine.begin() as conn:
+        if conn.dialect.name != "sqlite":
+            return
+
+        rows = conn.execute(text("PRAGMA table_info(devices)")).fetchall()
+        existing = {str(r[1]) for r in rows}
+
+        if "model_id" not in existing:
+            conn.execute(text("ALTER TABLE devices ADD COLUMN model_id INTEGER REFERENCES switch_models(id)"))
 
 def create_tables():
     Base.metadata.create_all(bind=engine)
@@ -347,3 +392,4 @@ def create_tables():
     _ensure_rack_map_columns()
     _ensure_scan_run_snapshot_columns()
     _ensure_port_endpoint_columns()
+    _ensure_device_model_id_column()

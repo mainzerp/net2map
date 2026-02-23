@@ -1,6 +1,8 @@
 """FastAPI application – NetMap backend."""
+import asyncio
 import json
 import csv
+import hashlib
 import io
 import logging
 import os
@@ -18,7 +20,7 @@ from typing import Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
 from database import (
@@ -28,6 +30,7 @@ from database import (
     AppSetting,
     create_tables, get_db,
 )
+from database import SwitchModel as SwitchModelModel
 from schemas import (
     CredentialCreate, CredentialOut, CredentialUpdate,
     DeviceOut, DevicePositionUpdate, DeviceMetaUpdate, RackPositionUpdate,
@@ -35,6 +38,7 @@ from schemas import (
     SnmpProfileCreate, SnmpProfileUpdate, SnmpProfileOut,
     RackCreate, RackUpdate, RackOut,
     SwitchClassCreate, SwitchClassUpdate, SwitchClassOut,
+    SwitchModelCreate, SwitchModelUpdate, SwitchModelOut,
     AppSettingOut, AppSettingUpdate,
     BulkImportRequest, BulkImportResult, BulkImportError, BulkExportOut,
     GlobalConfigExportOut, GlobalConfigImportRequest,
@@ -105,13 +109,21 @@ def _background_scheduler():
             # Run discovery scan
             if discovery_interval > 0 and (now - last_discovery) >= discovery_interval:
                 _log_event(logging.INFO, "scheduler.discovery.start")
-                _execute_scan(db, scan_type="discovery")
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(_execute_scan(db, scan_type="discovery"))
+                finally:
+                    loop.close()
                 last_discovery = time.time()
-                
+
             # Run ports scan
             if ports_interval > 0 and (now - last_ports) >= ports_interval:
                 _log_event(logging.INFO, "scheduler.ports.start")
-                _execute_scan(db, scan_type="ports")
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(_execute_scan(db, scan_type="ports"))
+                finally:
+                    loop.close()
                 last_ports = time.time()
                 
         except Exception as e:
@@ -606,6 +618,45 @@ def delete_switch_class(class_id: int, db: Session = Depends(get_db)):
     db.commit()
 
 
+# ─── Switch Models ────────────────────────────────────────────────────────────
+
+@app.get("/api/switch-models", response_model=List[SwitchModelOut])
+def list_switch_models(db: Session = Depends(get_db)):
+    return db.query(SwitchModelModel).order_by(SwitchModelModel.id).all()
+
+
+@app.post("/api/switch-models", response_model=SwitchModelOut, status_code=201)
+def create_switch_model(body: SwitchModelCreate, db: Session = Depends(get_db)):
+    sm = SwitchModelModel(**body.model_dump())
+    db.add(sm)
+    db.commit()
+    db.refresh(sm)
+    return sm
+
+
+@app.put("/api/switch-models/{model_id}", response_model=SwitchModelOut)
+def update_switch_model(model_id: int, body: SwitchModelUpdate, db: Session = Depends(get_db)):
+    sm = db.query(SwitchModelModel).filter(SwitchModelModel.id == model_id).first()
+    if not sm:
+        raise HTTPException(404, "Switch model not found")
+    for k, v in body.model_dump(exclude_none=True).items():
+        setattr(sm, k, v)
+    db.commit()
+    db.refresh(sm)
+    return sm
+
+
+@app.delete("/api/switch-models/{model_id}", status_code=204)
+def delete_switch_model(model_id: int, db: Session = Depends(get_db)):
+    sm = db.query(SwitchModelModel).filter(SwitchModelModel.id == model_id).first()
+    if not sm:
+        raise HTTPException(404, "Switch model not found")
+    # Detach devices assigned to this model before deleting
+    db.query(Device).filter(Device.model_id == model_id).update({"model_id": None})
+    db.delete(sm)
+    db.commit()
+
+
 # ─── Credentials ──────────────────────────────────────────────────────────────
 
 @app.get("/api/credentials", response_model=List[CredentialOut])
@@ -711,25 +762,133 @@ def _persist_scan_run(db: Session, result: ScanResult, devices_snapshot: List[st
     return run.id
 
 
-def _execute_scan(
+def _read_discovery_ranges(db: Session) -> List[str]:
+    """Return list of configured CIDR/IP discovery ranges from AppSettings."""
+    row = db.query(AppSetting).filter(AppSetting.key == "discovery_scan_ranges").first()
+    if not row or not row.value:
+        return []
+    try:
+        value = json.loads(row.value)
+        if isinstance(value, list):
+            return [str(v).strip() for v in value if str(v).strip()]
+    except Exception:
+        pass
+    return []
+
+
+def _expand_ranges_to_ips(ranges: List[str]) -> List[str]:
+    """Expand a list of CIDR ranges or single IPs into individual IP strings."""
+    result: List[str] = []
+    for entry in ranges:
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            network = ipaddress.ip_network(entry, strict=False)
+            # Skip gigantic ranges (> 65536 hosts) to avoid memory issues
+            if network.num_addresses > 65536:
+                log.warning("Skipping oversized range %s (%d hosts)", entry, network.num_addresses)
+                continue
+            result.extend(str(ip) for ip in network.hosts())
+        except ValueError:
+            try:
+                result.append(str(ipaddress.ip_address(entry)))
+            except ValueError:
+                log.warning("Invalid IP/range in discovery_scan_ranges: %s", entry)
+    return result
+
+
+async def _execute_scan(
     db: Session,
     cancel_event: Optional[threading.Event] = None,
     correlation_id: Optional[str] = None,
     scan_type: str = "full",
+    dry_run: bool = False,
 ) -> ScanResult:
     corr = correlation_id or str(uuid.uuid4())
-    
+
     if scan_type == "ports":
         # Only scan credentials that are already in the Device table
         known_ips = {d.ip for d in db.query(Device.ip).all()}
         credentials = db.query(Credential).filter(Credential.enabled == True, Credential.ip.in_(known_ips)).all()
     else:
         credentials = db.query(Credential).filter(Credential.enabled == True).all()
-        
+
     scan_settings = _read_scan_settings()
     configured_max_workers = scan_settings.get("max_workers", 4)
     global_snmp_timeout = scan_settings.get("snmp_timeout", 3)
     global_snmp_retries = scan_settings.get("snmp_retries", 1)
+
+    # ── Range-based discovery (only for discovery/full scans) ──────────────────
+    range_targets: List[dict] = []
+    if scan_type != "ports":
+        configured_ranges = _read_discovery_ranges(db)
+        if configured_ranges:
+            range_ips = _expand_ranges_to_ips(configured_ranges)
+            cred_ips = {c.ip for c in credentials}
+            # Load all profiles to try for each range IP
+            all_profiles = db.query(SnmpProfile).order_by(SnmpProfile.id).all()
+            for ip in range_ips:
+                if ip in cred_ips:
+                    continue  # already covered by existing credential
+                if all_profiles:
+                    profiles_data = [
+                        {
+                            "profile_id": p.id,
+                            "profile_label": p.label,
+                            "snmp_version": p.snmp_version,
+                            "community": p.community,
+                            "v3_security_level": p.v3_security_level,
+                            "v3_username": p.v3_username,
+                            "v3_auth_protocol": p.v3_auth_protocol,
+                            "v3_auth_password": p.v3_auth_password,
+                            "v3_priv_protocol": p.v3_priv_protocol,
+                            "v3_priv_password": p.v3_priv_password,
+                        }
+                        for p in all_profiles
+                    ]
+                else:
+                    # No profiles defined - try SNMPv2c public as fallback
+                    profiles_data = [{
+                        "profile_id": None,
+                        "profile_label": "default-public",
+                        "snmp_version": "v2c",
+                        "community": "public",
+                        "v3_security_level": "authPriv",
+                        "v3_username": "",
+                        "v3_auth_protocol": "SHA-256",
+                        "v3_auth_password": "",
+                        "v3_priv_protocol": "AES-128",
+                        "v3_priv_password": "",
+                    }]
+                range_targets.append({
+                    "ip": ip,
+                    "label": ip,
+                    "profile_key": f"range_probe:{ip}",
+                    "snmp_port": 161,
+                    "snmp_timeout": global_snmp_timeout,
+                    "snmp_retries": global_snmp_retries,
+                    "is_range_probe": True,
+                    "profiles_to_try": profiles_data,
+                    # These fields are filled after profile selection:
+                    "snmp_version": "v2c",
+                    "community": "public",
+                    "v3_security_level": "authPriv",
+                    "v3_username": "",
+                    "v3_auth_protocol": "SHA-256",
+                    "v3_auth_password": "",
+                    "v3_priv_protocol": "AES-128",
+                    "v3_priv_password": "",
+                })
+            _log_event(
+                logging.INFO,
+                "scan.range_probe.start",
+                correlation_id=corr,
+                ranges=configured_ranges,
+                range_ips=len(range_ips),
+                new_ips=len(range_targets),
+                profiles=len(all_profiles),
+            )
 
     _log_event(
         logging.INFO,
@@ -737,15 +896,16 @@ def _execute_scan(
         correlation_id=corr,
         scan_type=scan_type,
         enabled_credentials=len(credentials),
+        range_probes=len(range_targets),
         configured_max_workers=configured_max_workers,
     )
 
-    if not credentials:
+    if not credentials and not range_targets:
         result = ScanResult(
             scanned=0,
             found=0,
             links=0,
-            errors=["No enabled credentials"],
+            errors=["No enabled credentials and no discovery ranges configured"],
             max_workers=configured_max_workers,
             total_duration_ms=0,
             switch_metrics=[],
@@ -758,6 +918,7 @@ def _execute_scan(
     switch_data: Dict[str, SwitchData] = {}
     ping_by_ip: Dict[str, tuple[bool, int]] = {}
     switch_metrics: List[ScanSwitchMetric] = []
+    range_found_ips: List[str] = []  # IPs from ranges that responded to SNMP
 
     scan_targets = []
 
@@ -780,74 +941,162 @@ def _execute_scan(
             "v3_priv_password": p.v3_priv_password if p else cred.v3_priv_password,
             "snmp_timeout": global_snmp_timeout,
             "snmp_retries": global_snmp_retries,
+            "is_range_probe": False,
         })
 
-    def _scan_target(target: dict):
-        started = time.perf_counter()
-        ip = target["ip"]
-        label = target["label"]
-        ping_ok, ping_rtt = _ping_host(ip)
+    scan_targets.extend(range_targets)
 
-        if cancel_event and cancel_event.is_set():
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            return ip, label, None, "cancelled", duration_ms, ping_ok, ping_rtt
-
+    async def _ping_host_async(ip: str, timeout_sec: int = 1) -> tuple[bool, int]:
+        """Non-blocking ICMP ping via asyncio subprocess."""
+        if not ip:
+            return False, 0
+        cmd = ["ping", "-c", "1", "-W", str(timeout_sec), ip]
         try:
-            data = scan_switch(
-                ip=ip,
-                snmp_version=target["snmp_version"],
-                community=target["community"],
-                snmp_port=target["snmp_port"],
-                snmp_timeout=target["snmp_timeout"],
-                snmp_retries=target["snmp_retries"],
-                v3_security_level=target["v3_security_level"],
-                v3_username=target["v3_username"],
-                v3_auth_protocol=target["v3_auth_protocol"],
-                v3_auth_password=target["v3_auth_password"],
-                v3_priv_protocol=target["v3_priv_protocol"],
-                v3_priv_password=target["v3_priv_password"],
-                scan_type=scan_type,
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            if data:
-                return ip, label, data, "", duration_ms, ping_ok, ping_rtt
-            return ip, label, None, "no SNMP response", duration_ms, ping_ok, ping_rtt
-        except Exception as exc:
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            return ip, label, None, str(exc), duration_ms, ping_ok, ping_rtt
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=max(1, timeout_sec + 1))
+            except asyncio.TimeoutError:
+                proc.kill()
+                return False, 0
+            if proc.returncode != 0:
+                return False, 0
+            out = (stdout.decode(errors="replace") + "\n" + stderr.decode(errors="replace")).lower()
+            import re as _re
+            for pat in [
+                r"time[=<]\s*([0-9]+(?:\.[0-9]+)?)\s*ms",
+                r"average\s*=\s*([0-9]+)ms",
+                r"durchschnitt\s*=\s*([0-9]+)ms",
+            ]:
+                m = _re.search(pat, out)
+                if m:
+                    return True, max(1, int(float(m.group(1))))
+            return True, 1
+        except Exception:
+            return False, 0
+
+    async def _scan_target_async(target: dict, sem: asyncio.Semaphore):
+        async with sem:
+            started = time.perf_counter()
+            ip = target["ip"]
+            label = target["label"]
+            is_probe = target.get("is_range_probe", False)
+            ping_ok, ping_rtt = await _ping_host_async(ip)
+
+            # For range probes: skip SNMP scan if host does not respond to ping
+            if is_probe and not ping_ok:
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                return ip, label, None, "no ping", duration_ms, False, 0, is_probe, None
+
+            if cancel_event and cancel_event.is_set():
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                return ip, label, None, "cancelled", duration_ms, ping_ok, ping_rtt, is_probe, None
+
+            # For range probes: try all profiles in sequence until one succeeds
+            if is_probe:
+                profiles_to_try = target.get("profiles_to_try", [])
+                for prof in profiles_to_try:
+                    try:
+                        data = await asyncio.to_thread(
+                            scan_switch,
+                            ip=ip,
+                            snmp_version=prof["snmp_version"],
+                            community=prof["community"],
+                            snmp_port=target["snmp_port"],
+                            snmp_timeout=target["snmp_timeout"],
+                            snmp_retries=target["snmp_retries"],
+                            v3_security_level=prof["v3_security_level"],
+                            v3_username=prof["v3_username"],
+                            v3_auth_protocol=prof["v3_auth_protocol"],
+                            v3_auth_password=prof["v3_auth_password"],
+                            v3_priv_protocol=prof["v3_priv_protocol"],
+                            v3_priv_password=prof["v3_priv_password"],
+                            scan_type="discovery",
+                        )
+                        if data:
+                            duration_ms = int((time.perf_counter() - started) * 1000)
+                            return ip, label, data, "", duration_ms, ping_ok, ping_rtt, is_probe, prof["profile_id"]
+                    except Exception:
+                        continue
+                # No profile worked
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                return ip, label, None, "no profile suitable", duration_ms, ping_ok, ping_rtt, is_probe, None
+
+            try:
+                data = await asyncio.to_thread(
+                    scan_switch,
+                    ip=ip,
+                    snmp_version=target["snmp_version"],
+                    community=target["community"],
+                    snmp_port=target["snmp_port"],
+                    snmp_timeout=target["snmp_timeout"],
+                    snmp_retries=target["snmp_retries"],
+                    v3_security_level=target["v3_security_level"],
+                    v3_username=target["v3_username"],
+                    v3_auth_protocol=target["v3_auth_protocol"],
+                    v3_auth_password=target["v3_auth_password"],
+                    v3_priv_protocol=target["v3_priv_protocol"],
+                    v3_priv_password=target["v3_priv_password"],
+                    scan_type=scan_type,
+                )
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                if data:
+                    return ip, label, data, "", duration_ms, ping_ok, ping_rtt, is_probe, None
+                return ip, label, None, "no SNMP response", duration_ms, ping_ok, ping_rtt, is_probe, None
+            except Exception as exc:
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                return ip, label, None, str(exc), duration_ms, ping_ok, ping_rtt, is_probe, None
+
+    # Track per-IP matched profile for auto-credential creation
+    range_matched_profile: Dict[str, Optional[int]] = {}
+    # Track IPs that responded but no profile matched
+    range_no_profile_ips: List[str] = []
 
     scan_started = time.perf_counter()
-    workers = max(1, min(int(configured_max_workers), len(scan_targets)))
+    workers = max(1, min(int(configured_max_workers), max(len(scan_targets), 1)))
+    sem = asyncio.Semaphore(workers)
 
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(_scan_target, target) for target in scan_targets]
-        for fut in as_completed(futures):
-            ip, label, data, error_msg, duration_ms, ping_ok, ping_rtt = fut.result()
-            ping_by_ip[ip] = (ping_ok, ping_rtt)
-            if data:
-                switch_data[ip] = data
+    results = await asyncio.gather(
+        *[_scan_target_async(t, sem) for t in scan_targets],
+        return_exceptions=False,
+    )
+    for ip, label, data, error_msg, duration_ms, ping_ok, ping_rtt, is_probe, matched_profile_id in results:
+        ping_by_ip[ip] = (ping_ok, ping_rtt)
+        if data:
+            switch_data[ip] = data
+            if is_probe:
+                range_found_ips.append(ip)
+                range_matched_profile[ip] = matched_profile_id
+            _log_event(
+                logging.INFO,
+                "scan.switch.result",
+                correlation_id=corr,
+                ip=ip,
+                label=label,
+                success=True,
+                ping_ok=ping_ok,
+                ping_rtt_ms=ping_rtt,
+                duration_ms=duration_ms,
+                range_probe=is_probe,
+            )
+            switch_metrics.append(ScanSwitchMetric(
+                ip=ip, label=label, duration_ms=duration_ms, success=True, error=""
+            ))
+        else:
+            # Suppress noisy "no ping" errors for range probes (expected for most hosts)
+            if error_msg and error_msg not in ("cancelled", "no ping") and not is_probe:
+                if ping_ok:
+                    errors.append(f"{ip}: {error_msg} (ping ok)")
+                else:
+                    errors.append(f"{ip}: {error_msg}")
+            if is_probe and error_msg == "no profile suitable" and ping_ok:
+                range_no_profile_ips.append(ip)
+            if not is_probe or (error_msg and error_msg not in ("cancelled", "no ping")):
                 _log_event(
-                    logging.INFO,
-                    "scan.switch.result",
-                    correlation_id=corr,
-                    ip=ip,
-                    label=label,
-                    success=True,
-                    ping_ok=ping_ok,
-                    ping_rtt_ms=ping_rtt,
-                    duration_ms=duration_ms,
-                )
-                switch_metrics.append(ScanSwitchMetric(
-                    ip=ip, label=label, duration_ms=duration_ms, success=True, error=""
-                ))
-            else:
-                if error_msg and error_msg != "cancelled":
-                    if ping_ok:
-                        errors.append(f"{ip}: {error_msg} (ping ok)")
-                    else:
-                        errors.append(f"{ip}: {error_msg}")
-                _log_event(
-                    logging.WARNING if error_msg and error_msg != "cancelled" else logging.INFO,
+                    logging.WARNING if (error_msg and error_msg not in ("cancelled", "no ping") and not is_probe) else logging.DEBUG,
                     "scan.switch.result",
                     correlation_id=corr,
                     ip=ip,
@@ -857,7 +1106,9 @@ def _execute_scan(
                     ping_rtt_ms=ping_rtt,
                     duration_ms=duration_ms,
                     error=error_msg,
+                    range_probe=is_probe,
                 )
+            if not is_probe:
                 switch_metrics.append(ScanSwitchMetric(
                     ip=ip, label=label, duration_ms=duration_ms,
                     success=False, error=error_msg or "no SNMP response"
@@ -867,12 +1118,92 @@ def _execute_scan(
     switch_metrics.sort(key=lambda m: m.duration_ms, reverse=True)
     status = "cancelled" if (cancel_event and cancel_event.is_set()) else "finished"
 
+    # In dry_run mode: return preview without writing anything to DB
+    if dry_run:
+        dry_run_preview = []
+        for ip in range_found_ips:
+            sw = switch_data.get(ip)
+            prof_id = range_matched_profile.get(ip)
+            existing_cred = db.query(Credential).filter(Credential.ip == ip).first()
+            dry_run_preview.append({
+                "ip": ip,
+                "sys_name": sw.sys_name if sw else "",
+                "sys_descr": sw.sys_descr if sw else "",
+                "vendor": sw.vendor if sw else "generic",
+                "location": sw.location if sw else "",
+                "matched_profile_id": prof_id,
+                "already_exists": existing_cred is not None,
+            })
+        for ip in range_no_profile_ips:
+            ping_ok, _ = ping_by_ip.get(ip, (False, 0))
+            if ping_ok:
+                dry_run_preview.append({
+                    "ip": ip,
+                    "sys_name": "",
+                    "sys_descr": "",
+                    "vendor": "unknown",
+                    "location": "",
+                    "matched_profile_id": None,
+                    "already_exists": False,
+                    "no_profile_suitable": True,
+                })
+        result = ScanResult(
+            scanned=len(scan_targets),
+            found=len(range_found_ips),
+            links=0,
+            errors=errors,
+            max_workers=workers,
+            total_duration_ms=total_duration_ms,
+            switch_metrics=switch_metrics,
+            status="dry_run",
+        )
+        # Attach preview as extra data outside the Pydantic model
+        result.__dict__["_dry_run_preview"] = dry_run_preview
+        return result
+
+    # Auto-create credentials for IPs discovered via range probes
+    if range_found_ips:
+        for found_ip in range_found_ips:
+            existing_cred = db.query(Credential).filter(Credential.ip == found_ip).first()
+            if not existing_cred:
+                sw = switch_data.get(found_ip)
+                cred_label = sw.sys_name if (sw and sw.sys_name) else found_ip
+                matched_prof_id = range_matched_profile.get(found_ip)
+                matched_prof = db.query(SnmpProfile).filter(SnmpProfile.id == matched_prof_id).first() if matched_prof_id else None
+                new_cred = Credential(
+                    label=cred_label,
+                    ip=found_ip,
+                    snmp_port=161,
+                    enabled=True,
+                    location=sw.location if sw else "",
+                    profile_id=matched_prof.id if matched_prof else None,
+                    snmp_version=(matched_prof.snmp_version if matched_prof else "v2c"),
+                    community=(matched_prof.community if matched_prof else "public"),
+                    v3_security_level=(matched_prof.v3_security_level if matched_prof else "authPriv"),
+                    v3_username=(matched_prof.v3_username if matched_prof else ""),
+                    v3_auth_protocol=(matched_prof.v3_auth_protocol if matched_prof else "SHA-256"),
+                    v3_auth_password=(matched_prof.v3_auth_password if matched_prof else ""),
+                    v3_priv_protocol=(matched_prof.v3_priv_protocol if matched_prof else "AES-128"),
+                    v3_priv_password=(matched_prof.v3_priv_password if matched_prof else ""),
+                )
+                db.add(new_cred)
+                _log_event(
+                    logging.INFO,
+                    "scan.range_probe.auto_credential",
+                    correlation_id=corr,
+                    ip=found_ip,
+                    label=cred_label,
+                    profile_id=matched_prof.id if matched_prof else None,
+                )
+        db.commit()
+
     discovered_ips = set(switch_data.keys()) | {ip for ip, (ok, _) in ping_by_ip.items() if ok}
     existing_ips = {d.ip for d in db.query(Device.ip).all()}
     new_ips = [ip for ip in discovered_ips if ip not in existing_ips]
     all_ips_ordered = list(existing_ips) + new_ips
     layout = auto_layout(all_ips_ordered)
-    cred_by_ip = {c.ip: c for c in credentials}
+    # Reload credentials to include any auto-created entries from range probes
+    cred_by_ip = {c.ip: c for c in db.query(Credential).filter(Credential.ip.in_(list(discovered_ips))).all()}
 
     for ip in discovered_ips:
         sw = switch_data.get(ip)
@@ -924,7 +1255,7 @@ def _execute_scan(
                 class_id=cred.class_id if cred else None,
             ))
 
-    db.flush()
+    db.commit()
 
     link_count = 0
     if scan_type != "discovery":
@@ -979,6 +1310,7 @@ def _execute_scan(
                     endpoint_count=len(endpoint_details),
                     endpoint_details_json=json.dumps(endpoint_details),
                 ))
+            db.commit()
 
         scanned_ips = set(switch_data.keys())
         db.query(TopologyLink).filter(TopologyLink.local_ip.in_(scanned_ips)).delete(
@@ -1001,6 +1333,7 @@ def _execute_scan(
                     speed_label=spd_label,
                 ))
                 link_count += 1
+        db.commit()
 
     result = ScanResult(
         scanned=len(credentials),
@@ -1042,10 +1375,18 @@ def _execute_scan(
     return result
 
 
-def _run_scan_job(job_id: str, cancel_event: threading.Event):
+def _run_scan_job(job_id: str, cancel_event: threading.Event, dry_run: bool = False):
     db = SessionLocal()
+    result = None
     try:
-        result = _execute_scan(db, cancel_event, correlation_id=job_id)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                _execute_scan(db, cancel_event, correlation_id=job_id, dry_run=dry_run)
+            )
+        finally:
+            loop.close()
     except Exception as exc:
         result = ScanResult(
             scanned=0,
@@ -1060,24 +1401,42 @@ def _run_scan_job(job_id: str, cancel_event: threading.Event):
     finally:
         db.close()
 
+    if result is None:
+        return
+
+    result_dict = result.model_dump()
+    if dry_run:
+        result_dict["preview"] = result.__dict__.get("_dry_run_preview", [])
+
     with SCAN_JOBS_LOCK:
         state = SCAN_JOBS.get(job_id)
         if not state:
             return
         state["finished_at"] = datetime.utcnow().isoformat()
-        state["result"] = result.model_dump()
-        state["status"] = result.status if result.status in {"finished", "cancelled"} else "failed"
+        state["result"] = result_dict
+        state["status"] = result.status if result.status in {"finished", "cancelled", "dry_run"} else "failed"
 
 
 @app.post("/api/scan", response_model=ScanResult)
-def run_scan(db: Session = Depends(get_db)):
+async def run_scan(db: Session = Depends(get_db)):
     """Synchronous scan execution (compatibility endpoint)."""
-    return _execute_scan(db, None, correlation_id=f"sync-{uuid.uuid4()}")
+    return await _execute_scan(db, None, correlation_id=f"sync-{uuid.uuid4()}")
 
 
 @app.post("/api/scan/jobs")
 def start_scan_job():
     """Start background scan job and return job ID immediately."""
+    return _start_job(dry_run=False)
+
+
+@app.post("/api/scan/dry-run/jobs")
+def start_dry_run_job():
+    """Start a background dry-run discovery job. Returns job ID immediately.
+    Poll /api/scan/jobs/{job_id} for results; result will contain a 'preview' key."""
+    return _start_job(dry_run=True)
+
+
+def _start_job(dry_run: bool = False) -> dict:
     job_id = str(uuid.uuid4())
     cancel_event = threading.Event()
 
@@ -1093,11 +1452,11 @@ def start_scan_job():
             "thread": None,
         }
 
-    t = threading.Thread(target=_run_scan_job, args=(job_id, cancel_event), daemon=True)
+    t = threading.Thread(target=_run_scan_job, args=(job_id, cancel_event, dry_run), daemon=True)
     with SCAN_JOBS_LOCK:
         SCAN_JOBS[job_id]["thread"] = t
     t.start()
-    _log_event(logging.INFO, "scan.job.start", correlation_id=job_id, job_id=job_id)
+    _log_event(logging.INFO, "scan.job.start", correlation_id=job_id, job_id=job_id, dry_run=dry_run)
 
     return {"job_id": job_id, "status": "running"}
 
@@ -1181,13 +1540,32 @@ def list_scan_runs(limit: int = 20, db: Session = Depends(get_db)):
 
 # ─── Topology ─────────────────────────────────────────────────────────────────
 
-@app.get("/api/topology", response_model=TopologyOut)
-def get_topology(db: Session = Depends(get_db)):
+@app.get("/api/topology")
+def get_topology(request: Request, db: Session = Depends(get_db)):
     nodes   = db.query(Device).all()
     links   = db.query(TopologyLink).all()
     racks   = db.query(RackModel).order_by(RackModel.id).all()
     classes = db.query(SwitchClassModel).order_by(SwitchClassModel.id).all()
-    return TopologyOut(nodes=nodes, links=links, racks=racks, classes=classes)
+    models  = db.query(SwitchModelModel).order_by(SwitchModelModel.id).all()
+
+    # Build a lookup for ports_per_row from switch models
+    model_ppr = {m.id: m.ports_per_row for m in models}
+
+    # Build DeviceOut objects with resolved ports_per_row
+    node_dicts = []
+    for d in nodes:
+        dout = DeviceOut.model_validate(d)
+        if d.model_id and d.model_id in model_ppr:
+            dout.ports_per_row = model_ppr[d.model_id]
+        node_dicts.append(dout)
+
+    result  = TopologyOut(nodes=node_dicts, links=links, racks=racks, classes=classes, models=models)
+    # ETag: hash of serialized result to allow browser-side caching
+    body = result.model_dump_json()
+    etag = f'"{hashlib.md5(body.encode()).hexdigest()}"'
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304)
+    return Response(content=body, media_type="application/json", headers={"ETag": etag, "Cache-Control": "no-cache"})
 
 
 @app.patch("/api/topology/devices/{device_id}/position", response_model=DeviceOut)
@@ -1249,10 +1627,21 @@ def update_device_meta(
         if class_id is not None and not db.query(SwitchClassModel).filter(SwitchClassModel.id == class_id).first():
             raise HTTPException(404, "Switch class not found")
         device.class_id = class_id
+    if "model_id" in payload:
+        model_id = payload["model_id"]
+        if model_id is not None and not db.query(SwitchModelModel).filter(SwitchModelModel.id == model_id).first():
+            raise HTTPException(404, "Switch model not found")
+        device.model_id = model_id
 
     db.commit()
     db.refresh(device)
-    return device
+    # Resolve ports_per_row from switch model
+    dout = DeviceOut.model_validate(device)
+    if device.model_id:
+        sm = db.query(SwitchModelModel).filter(SwitchModelModel.id == device.model_id).first()
+        if sm:
+            dout.ports_per_row = sm.ports_per_row
+    return dout
 
 
 # ─── Map Background ──────────────────────────────────────────────────────────
@@ -1409,7 +1798,47 @@ async def update_scan_settings(request: Request):
     return _write_scan_settings(body)
 
 
-# ─── DNS Settings ─────────────────────────────────────────────────────────────
+# ─── Discovery Range Settings ─────────────────────────────────────────────────
+
+@app.get("/api/discovery-ranges")
+def get_discovery_ranges(db: Session = Depends(get_db)):
+    """Return configured discovery scan ranges."""
+    return {"ranges": _read_discovery_ranges(db)}
+
+
+@app.put("/api/discovery-ranges")
+async def update_discovery_ranges(request: Request, db: Session = Depends(get_db)):
+    """Save discovery scan ranges (CIDR notation or single IPs)."""
+    body = await request.json()
+    raw_ranges = body.get("ranges", [])
+    if not isinstance(raw_ranges, list):
+        raise HTTPException(400, "'ranges' must be an array")
+
+    validated: List[str] = []
+    for entry in raw_ranges:
+        entry = str(entry).strip()
+        if not entry:
+            continue
+        try:
+            ipaddress.ip_network(entry, strict=False)
+            validated.append(entry)
+        except ValueError:
+            try:
+                ipaddress.ip_address(entry)
+                validated.append(entry)
+            except ValueError:
+                raise HTTPException(400, f"Invalid IP or CIDR range: {entry}")
+
+    row = db.query(AppSetting).filter(AppSetting.key == "discovery_scan_ranges").first()
+    if row:
+        row.value = json.dumps(validated)
+    else:
+        db.add(AppSetting(key="discovery_scan_ranges", value=json.dumps(validated)))
+    db.commit()
+    return {"ranges": validated}
+
+
+
 
 DNS_SETTINGS_PATH = os.path.join(MAP_BG_DIR, "dns-settings.json")
 DEFAULT_DNS_SETTINGS = {"servers": []}

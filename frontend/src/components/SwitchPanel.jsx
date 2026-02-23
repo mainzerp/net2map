@@ -95,7 +95,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
             const evenPorts = sorted.filter(p => p.if_index % 2 === 0);
             // Determine how many visual columns we have (each column = one odd/even pair)
             const maxPairs = Math.max(oddPorts.length, evenPorts.length);
-            const pairsPerRow = 24;
+            const pairsPerRow = device.ports_per_row || 24;
             const rowCount = Math.ceil(maxPairs / pairsPerRow);
             const rows = [];
             for (let row = 0; row < rowCount; row++) {

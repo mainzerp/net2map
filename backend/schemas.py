@@ -79,6 +79,35 @@ class SwitchClassOut(SwitchClassBase):
         from_attributes = True
 
 
+# ─── SwitchModel ──────────────────────────────────────────────────────────────
+
+class SwitchModelBase(BaseModel):
+    name:          str
+    ports_per_row: int = 24
+    total_ports:   Optional[int] = None
+    description:   str = ""
+
+
+class SwitchModelCreate(SwitchModelBase):
+    pass
+
+
+class SwitchModelUpdate(BaseModel):
+    name:          Optional[str] = None
+    ports_per_row: Optional[int] = None
+    total_ports:   Optional[int] = None
+    description:   Optional[str] = None
+
+
+class SwitchModelOut(SwitchModelBase):
+    id:         int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 # ─── SnmpProfile ─────────────────────────────────────────────────────────────
 
 class SnmpProfileBase(BaseModel):
@@ -214,11 +243,13 @@ class DeviceBase(BaseModel):
 
 
 class DeviceOut(DeviceBase):
-    id:        int
-    last_seen: datetime
-    ports:     List[PortOut] = []
-    rack_id:   Optional[int] = None
-    class_id:  Optional[int] = None
+    id:            int
+    last_seen:     datetime
+    ports:         List[PortOut] = []
+    rack_id:       Optional[int] = None
+    class_id:      Optional[int] = None
+    model_id:      Optional[int] = None
+    ports_per_row: Optional[int] = None   # resolved from switch_model
 
     class Config:
         from_attributes = True
@@ -240,6 +271,7 @@ class DeviceMetaUpdate(BaseModel):
     model:    Optional[str] = None
     rack_id:  Optional[int] = None
     class_id: Optional[int] = None
+    model_id: Optional[int] = None
 
 
 # ─── Topology Link ────────────────────────────────────────────────────────────
@@ -265,6 +297,7 @@ class TopologyOut(BaseModel):
     links:   List[TopologyLinkOut]
     racks:   List[RackOut]          = []
     classes: List[SwitchClassOut]   = []
+    models:  List[SwitchModelOut]   = []
 
 
 # ─── Scan ─────────────────────────────────────────────────────────────────────

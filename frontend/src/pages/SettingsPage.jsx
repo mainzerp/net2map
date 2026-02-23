@@ -194,6 +194,8 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged }) {
 const EMPTY_FORM = {
   label:"", ip:"", snmp_port:161, location:"", enabled:true,
   profile_id: null,
+  rack_id: null,
+  class_id: null,
   vendor:"generic", model:"",
   snmp_version:"v2c", community:"public",
   v3_security_level:"authPriv", v3_username:"",
@@ -204,6 +206,8 @@ const EMPTY_FORM = {
 function CredentialsTabContent({ profiles }) {
   const [creds, setCreds]       = useState([]);
   const [devices, setDevices]   = useState([]);
+  const [racks, setRacks]       = useState([]);
+  const [classes, setClasses]   = useState([]);
   const [loading, setLoading]   = useState(true);
   const [editState, setEditState] = useState({ id: null, top: 80, left: 540 });
   const [editFormHeight, setEditFormHeight] = useState(0);
@@ -214,8 +218,13 @@ function CredentialsTabContent({ profiles }) {
 
   const refresh = () => {
     setLoading(true);
-    Promise.all([api.get("/api/credentials"), api.get("/api/topology")])
-      .then(([c, t]) => { setCreds(c); setDevices(t.nodes || []); setLoading(false); })
+    Promise.all([
+      api.get("/api/credentials"),
+      api.get("/api/topology"),
+      api.get("/api/racks"),
+      api.get("/api/switch-classes"),
+    ])
+      .then(([c, t, r, cl]) => { setCreds(c); setDevices(t.nodes || []); setRacks(r || []); setClasses(cl || []); setLoading(false); })
       .catch(() => setLoading(false));
   };
   useEffect(() => { refresh(); }, []);
@@ -239,6 +248,8 @@ function CredentialsTabContent({ profiles }) {
     setForm({
       label:c.label, ip:c.ip, snmp_port:c.snmp_port, location:c.location, enabled:c.enabled,
       profile_id: c.profile_id ?? null,
+      rack_id: c.rack_id ?? null,
+      class_id: c.class_id ?? null,
       vendor: c.vendor ?? "generic", model: c.model ?? "",
       snmp_version:c.snmp_version, community:c.community,
       v3_security_level:c.v3_security_level, v3_username:c.v3_username,
@@ -365,6 +376,18 @@ function CredentialsTabContent({ profiles }) {
             </label>
             <label style={lbl()}>Model
               <input value={F.model || ""} onChange={e=>set("model",e.target.value)} placeholder="e.g. UniFi USW-24" style={{...inp,marginTop:3}}/>
+            </label>
+            <label style={lbl()}>Rack (optional)
+              <select value={F.rack_id ?? ""} onChange={e=>set("rack_id", e.target.value ? +e.target.value : null)} style={{...sel,marginTop:3}}>
+                <option value="">-- No rack --</option>
+                {racks.map(r=><option key={r.id} value={r.id}>{r.label}{r.room ? ` / ${r.room}` : ""}</option>)}
+              </select>
+            </label>
+            <label style={lbl()}>Class (optional)
+              <select value={F.class_id ?? ""} onChange={e=>set("class_id", e.target.value ? +e.target.value : null)} style={{...sel,marginTop:3}}>
+                <option value="">-- No class --</option>
+                {classes.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
             </label>
           </div>
           <div style={{marginBottom:10}}>
@@ -857,6 +880,173 @@ function ClassesTabContent() {
 }
 
 
+// ── ModelsTabContent ────────────────────────────────────────────────────────
+const EMPTY_MODEL_FORM = { name: "", ports_per_row: 24, total_ports: "", description: "" };
+
+function ModelsTabContent() {
+  const [models, setModels]     = useState([]);
+  const [devices, setDevices]   = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [editId, setEditId]     = useState(null);
+  const [form, setForm]         = useState({ ...EMPTY_MODEL_FORM });
+  const [err, setErr]           = useState("");
+  const [assignSel, setAssignSel] = useState({});
+
+  const refreshAll = () => {
+    setLoading(true);
+    Promise.all([api.get("/api/switch-models"), api.get("/api/topology")])
+      .then(([m, t]) => { setModels(m); setDevices(t.nodes || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  };
+  useEffect(() => { refreshAll(); }, []);
+
+  const resetForm = () => { setForm({ ...EMPTY_MODEL_FORM }); setEditId(null); setErr(""); };
+  const startEdit = (sm) => {
+    setEditId(sm.id);
+    setForm({ name: sm.name, ports_per_row: sm.ports_per_row, total_ports: sm.total_ports ?? "", description: sm.description });
+    setErr("");
+  };
+
+  const submit = async (e) => {
+    e.preventDefault(); setErr("");
+    try {
+      if (!form.name.trim()) { setErr("Name is required"); return; }
+      const ppr = parseInt(form.ports_per_row, 10);
+      if (isNaN(ppr) || ppr < 1) { setErr("Ports per row must be a positive number"); return; }
+      const payload = {
+        name: form.name.trim(),
+        ports_per_row: ppr,
+        total_ports: form.total_ports !== "" ? parseInt(form.total_ports, 10) || null : null,
+        description: form.description,
+      };
+      if (editId) { await api.put(`/api/switch-models/${editId}`, payload); }
+      else {
+        const r = await api.post("/api/switch-models", payload);
+        if (r.detail) { setErr(typeof r.detail === "string" ? r.detail : JSON.stringify(r.detail)); return; }
+      }
+      resetForm(); refreshAll();
+    } catch (ex) { setErr(String(ex)); }
+  };
+
+  const remove = async (id) => {
+    if (!confirm("Delete model? All assignments will be removed.")) return;
+    await api.del(`/api/switch-models/${id}`); refreshAll();
+  };
+
+  const assignDevice = async (modelId) => {
+    const devId = assignSel[modelId];
+    if (!devId) return;
+    await api.patch(`/api/topology/devices/${devId}/meta`, { model_id: modelId });
+    setAssignSel(prev => ({ ...prev, [modelId]: "" }));
+    refreshAll();
+  };
+
+  const unassignDevice = async (devId) => {
+    await api.patch(`/api/topology/devices/${devId}/meta`, { model_id: null });
+    refreshAll();
+  };
+
+  const INPUT = { width:"100%", backgroundColor:"#020817", border:"1px solid #1e293b", borderRadius:4, padding:"5px 8px", color:"#e2e8f0", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, boxSizing:"border-box" };
+  const LBL   = { color:"#94a3b8", fontSize:10, marginBottom:3, display:"block" };
+  const BTNP  = { backgroundColor:"#083344", border:"1px solid #164e63", color:"#22d3ee", borderRadius:6, padding:"6px", cursor:"pointer", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, fontWeight:600 };
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:16, overflowY:"auto", paddingTop:20, flex:1 }}>
+      <form onSubmit={submit} style={{ backgroundColor:"#0a0e18", border:"1px solid #1e293b", borderRadius:8, padding:14, display:"flex", flexDirection:"column", gap:8 }}>
+        <div style={{ color:"#94a3b8", fontSize:10, fontWeight:700, letterSpacing:1, marginBottom:4 }}>
+          {editId ? "EDIT MODEL" : "NEW MODEL"}
+        </div>
+        <div style={{ display:"flex", gap:8 }}>
+          <div style={{ flex:2 }}>
+            <label style={LBL}>Name</label>
+            <input required style={INPUT} value={form.name} onChange={e => setForm(f => ({...f, name:e.target.value}))} placeholder="e.g. Aruba CX 6300M-48" />
+          </div>
+          <div style={{ flex:1 }}>
+            <label style={LBL}>Ports per row</label>
+            <input type="number" min="1" max="96" style={INPUT} value={form.ports_per_row} onChange={e => setForm(f => ({...f, ports_per_row:e.target.value}))} />
+          </div>
+          <div style={{ flex:1 }}>
+            <label style={LBL}>Total ports</label>
+            <input type="number" min="0" style={INPUT} value={form.total_ports} onChange={e => setForm(f => ({...f, total_ports:e.target.value}))} placeholder="optional" />
+          </div>
+        </div>
+        <div>
+          <label style={LBL}>Description</label>
+          <input style={INPUT} value={form.description} onChange={e => setForm(f => ({...f, description:e.target.value}))} placeholder="optional" />
+        </div>
+        {err && <div style={{ color:"#f87171", fontSize:11 }}>{err}</div>}
+        <div style={{ display:"flex", gap:6 }}>
+          <button type="submit" style={{ ...BTNP, flex:1 }}>{editId ? "Save" : "Create model"}</button>
+          {editId && <button type="button" onClick={resetForm} style={{ backgroundColor:"transparent", border:"1px solid #1e293b", color:"#64748b", borderRadius:6, padding:"6px 12px", cursor:"pointer", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11 }}>Cancel</button>}
+        </div>
+      </form>
+
+      {loading ? (
+        <div style={{ color:"#475569", fontSize:11 }}>Loading...</div>
+      ) : models.length === 0 ? (
+        <div style={{ color:"#475569", fontSize:11, textAlign:"center", marginTop:20 }}>No models defined yet</div>
+      ) : models.map(sm => {
+        const assigned  = devices.filter(d => d.model_id === sm.id);
+        const available = devices.filter(d => d.model_id !== sm.id);
+        const selVal    = assignSel[sm.id] || "";
+        return (
+          <div key={sm.id} style={{ backgroundColor:"#0a0e18", border:"1px solid #1e293b", borderRadius:8, padding:"12px 14px", position:"relative", overflow:"hidden" }}>
+            <div style={{ position:"absolute", top:0, left:0, width:3, bottom:0, backgroundColor:"#22d3ee", borderRadius:"8px 0 0 8px" }} />
+            <div style={{ marginLeft:12 }}>
+              <div style={{ display:"flex", alignItems:"flex-start" }}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <span style={{ color:"#e2e8f0", fontWeight:600, fontSize:13 }}>{sm.name}</span>
+                    <span style={{ color:"#22d3ee", fontSize:10, backgroundColor:"#083344", padding:"1px 6px", borderRadius:3, border:"1px solid #164e63" }}>
+                      {sm.ports_per_row} ports/row
+                    </span>
+                    {sm.total_ports != null && (
+                      <span style={{ color:"#64748b", fontSize:10 }}>{sm.total_ports} total</span>
+                    )}
+                  </div>
+                  {sm.description && <div style={{ color:"#475569", fontSize:10, marginTop:2 }}>{sm.description}</div>}
+                </div>
+                <div style={{ display:"flex", gap:4, flexShrink:0 }}>
+                  <button onClick={() => startEdit(sm)} style={{ background:"none", border:"1px solid #1e293b", color:"#64748b", borderRadius:4, padding:"2px 8px", cursor:"pointer", fontSize:10, fontFamily:"'Inter', system-ui, sans-serif" }}>Edit</button>
+                  <button onClick={() => remove(sm.id)} style={{ background:"none", border:"1px solid #7f1d1d", color:"#f87171", borderRadius:4, padding:"2px 8px", cursor:"pointer", fontSize:10, fontFamily:"'Inter', system-ui, sans-serif" }}>Delete</button>
+                </div>
+              </div>
+              <div style={{ marginTop:10, borderTop:"1px solid #0f172a", paddingTop:8 }}>
+                <div style={{ color:"#475569", fontSize:10, letterSpacing:1, marginBottom:6 }}>
+                  ASSIGNED SWITCHES ({assigned.length})
+                </div>
+                {assigned.length > 0 && (
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginBottom:8 }}>
+                    {assigned.map(d => (
+                      <div key={d.id} style={{ backgroundColor:"#0c1a2e", border:"1px solid #1e3a5f", borderRadius:4, padding:"2px 6px 2px 8px", display:"flex", alignItems:"center", gap:4, fontSize:10 }}>
+                        <span style={{ color:"#7dd3fc" }}>{d.sys_name || d.ip}</span>
+                        <span style={{ color:"#334155", fontSize:10 }}>{d.ip}</span>
+                        <button onClick={() => unassignDevice(d.id)} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", padding:"0 2px", fontSize:11, lineHeight:1 }} title="Unassign">x</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display:"flex", gap:4 }}>
+                  <select value={selVal} onChange={e => setAssignSel(p => ({...p, [sm.id]:e.target.value}))}
+                    style={{ flex:1, backgroundColor:"#020817", border:"1px solid #1e293b", borderRadius:4, padding:"4px 6px", color:selVal?"#e2e8f0":"#475569", fontFamily:"'Inter', system-ui, sans-serif", fontSize:10 }}>
+                    <option value="">-- Assign switch --</option>
+                    {available.map(d => <option key={d.id} value={d.id}>{d.sys_name || d.ip} ({d.ip})</option>)}
+                  </select>
+                  <button onClick={() => assignDevice(sm.id)} disabled={!selVal}
+                    style={{ backgroundColor:selVal?"#083344":"#0a0e18", border:"1px solid #164e63", color:selVal?"#22d3ee":"#1e3a5f", borderRadius:4, padding:"4px 10px", cursor:selVal?"pointer":"not-allowed", fontFamily:"'Inter', system-ui, sans-serif", fontSize:10 }}>
+                    Assign
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+
 // ── EngineTabContent ────────────────────────────────────────────────────────
 function EngineTabContent() {
   const [scanning, setScanning]     = useState(false);
@@ -872,11 +1062,21 @@ function EngineTabContent() {
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [activeJobId, setActiveJobId] = useState(null);
 
+  // Discovery ranges state
+  const [discoveryRanges, setDiscoveryRanges] = useState([]);
+  const [rangesInput, setRangesInput] = useState("");
+  const [rangesSaving, setRangesSaving] = useState(false);
+  const [rangesError, setRangesError] = useState("");
+
+  // Dry run state
+  const [dryRunLoading, setDryRunLoading] = useState(false);
+  const [dryRunResult, setDryRunResult] = useState(null);
+
   const pollRef = useRef(null);
 
   useEffect(() => {
-    Promise.all([api.get("/api/scan-settings"), api.get("/api/settings")])
-      .then(([scanSettings, appSettings]) => {
+    Promise.all([api.get("/api/scan-settings"), api.get("/api/settings"), api.get("/api/discovery-ranges")])
+      .then(([scanSettings, appSettings, rangesResp]) => {
         if (scanSettings?.max_workers != null) setScanWorkers(Number(scanSettings.max_workers));
         if (scanSettings?.snmp_timeout != null) setSnmpTimeout(Number(scanSettings.snmp_timeout));
         if (scanSettings?.snmp_retries != null) setSnmpRetries(Number(scanSettings.snmp_retries));
@@ -886,6 +1086,10 @@ function EngineTabContent() {
         const ports = settingsList.find(s => s.key === "port_update_interval_sec");
         if (discovery?.value != null) setDiscoveryIntervalSec(Number(discovery.value));
         if (ports?.value != null) setPortUpdateIntervalSec(Number(ports.value));
+
+        const ranges = Array.isArray(rangesResp?.ranges) ? rangesResp.ranges : [];
+        setDiscoveryRanges(ranges);
+        setRangesInput(ranges.join("\n"));
       })
       .finally(() => setSettingsLoading(false));
   }, []);
@@ -927,6 +1131,68 @@ function EngineTabContent() {
       setPortUpdateIntervalSec(nextPortsInterval);
     } finally {
       setSettingsSaving(false);
+    }
+  };
+
+  const saveDiscoveryRanges = async () => {
+    setRangesError("");
+    setRangesSaving(true);
+    try {
+      const lines = rangesInput
+        .split(/[\n,;]+/)
+        .map(s => s.trim())
+        .filter(Boolean);
+      const resp = await api.put("/api/discovery-ranges", { ranges: lines });
+      if (resp?.detail) {
+        setRangesError(typeof resp.detail === "string" ? resp.detail : JSON.stringify(resp.detail));
+        return;
+      }
+      const saved = Array.isArray(resp?.ranges) ? resp.ranges : lines;
+      setDiscoveryRanges(saved);
+      setRangesInput(saved.join("\n"));
+    } catch (ex) {
+      setRangesError(String(ex));
+    } finally {
+      setRangesSaving(false);
+    }
+  };
+
+  const removeRange = (idx) => {
+    const next = discoveryRanges.filter((_, i) => i !== idx);
+    setDiscoveryRanges(next);
+    setRangesInput(next.join("\n"));
+  };
+
+  const runDryRun = async () => {
+    setDryRunLoading(true);
+    setDryRunResult(null);
+    try {
+      const job = await api.post("/api/scan/dry-run/jobs", {});
+      if (!job?.job_id) throw new Error("Dry run job could not be created");
+      // Poll until done
+      const poll = setInterval(async () => {
+        try {
+          const st = await api.get(`/api/scan/jobs/${job.job_id}`);
+          if (st?.result) {
+            const preview = st.result?.preview ?? [];
+            setDryRunResult({
+              status: st.result.status,
+              scanned: st.result.scanned,
+              found: st.result.found,
+              errors: st.result.errors,
+              total_duration_ms: st.result.total_duration_ms,
+              preview,
+            });
+          }
+          if (st?.status && st.status !== "running") {
+            clearInterval(poll);
+            setDryRunLoading(false);
+          }
+        } catch (_) {}
+      }, 2000);
+    } catch (ex) {
+      setDryRunResult({ status: "error", errors: [String(ex)], preview: [] });
+      setDryRunLoading(false);
     }
   };
 
@@ -1125,6 +1391,124 @@ function EngineTabContent() {
               current port schedule: {portsLabel}
             </span>
           </div>
+        </div>
+        {/* Discovery IP Ranges */}
+        <div style={{
+          display:"flex", flexDirection:"column", gap:10,
+          padding:"10px 12px", border:"1px solid #1e293b", borderRadius:8, backgroundColor:"#020817",
+        }}>
+          <div style={{ color:"#94a3b8", fontSize:10, fontWeight:700, letterSpacing:1.2 }}>DISCOVERY IP RANGES</div>
+          <div style={{ color:"#475569", fontSize:10, lineHeight:1.6 }}>
+            IPs or CIDR ranges scanned automatically during discovery. Responding hosts are added as credentials. One entry per line (e.g. 192.168.1.0/24).
+          </div>
+          {/* Existing ranges as removable chips */}
+          {discoveryRanges.length > 0 && (
+            <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+              {discoveryRanges.map((r, idx) => (
+                <span key={idx} style={{
+                  display:"inline-flex", alignItems:"center", gap:5,
+                  backgroundColor:"#0c1220", border:"1px solid #1e3a52", borderRadius:5,
+                  padding:"2px 8px", fontSize:11, color:"#7dd3fc", fontFamily:"monospace",
+                }}>
+                  {r}
+                  <button
+                    onClick={() => removeRange(idx)}
+                    style={{
+                      background:"none", border:"none", color:"#64748b", cursor:"pointer",
+                      padding:0, fontSize:13, lineHeight:1, fontFamily:"inherit",
+                    }}
+                    title="Remove"
+                  >x</button>
+                </span>
+              ))}
+            </div>
+          )}
+          <textarea
+            rows={4}
+            value={rangesInput}
+            onChange={e => setRangesInput(e.target.value)}
+            placeholder={"192.168.1.0/24\n10.0.0.0/16\n172.16.5.42"}
+            disabled={settingsLoading || rangesSaving}
+            style={{
+              backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
+              color:"#e2e8f0", padding:"6px 8px", fontFamily:"monospace", fontSize:11,
+              resize:"vertical", minHeight:70,
+            }}
+          />
+          {rangesError && (
+            <div style={{ color:"#f87171", fontSize:11 }}>{rangesError}</div>
+          )}
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <button
+              onClick={saveDiscoveryRanges}
+              disabled={settingsLoading || rangesSaving}
+              style={{
+                border:"1px solid #1e293b", background:"#0f172a", color:"#94a3b8",
+                borderRadius:6, padding:"5px 12px", cursor:(settingsLoading || rangesSaving)?"default":"pointer",
+                fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
+                opacity:(settingsLoading || rangesSaving)?0.6:1,
+              }}
+            >{rangesSaving ? "Saving..." : "Save Ranges"}</button>
+            <button
+              onClick={runDryRun}
+              disabled={settingsLoading || dryRunLoading || discoveryRanges.length === 0}
+              style={{
+                border:"1px solid #164e63", background:"#083344", color:"#22d3ee",
+                borderRadius:6, padding:"5px 12px",
+                cursor:(settingsLoading || dryRunLoading || discoveryRanges.length === 0)?"default":"pointer",
+                fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
+                opacity:(settingsLoading || dryRunLoading || discoveryRanges.length === 0)?0.5:1,
+              }}
+            >{dryRunLoading ? "Scanning..." : "Dry Run"}</button>
+            {discoveryRanges.length > 0 && (
+              <span style={{ color:"#334155", fontSize:10 }}>{discoveryRanges.length} range(s) active</span>
+            )}
+          </div>
+          {/* Dry run results */}
+          {dryRunResult && (
+            <div style={{
+              marginTop:8, padding:"10px 12px",
+              border:"1px solid #1e3a52", borderRadius:8, backgroundColor:"#0c1220",
+            }}>
+              <div style={{ color:"#94a3b8", fontSize:10, fontWeight:700, letterSpacing:1, marginBottom:8 }}>
+                DRY RUN RESULT - {dryRunResult.found ?? 0} host(s) found, {dryRunResult.scanned ?? 0} probed - {dryRunResult.total_duration_ms != null ? ((dryRunResult.total_duration_ms / 1000).toFixed(1) + "s") : ""}
+              </div>
+              {(dryRunResult.preview || []).length === 0 ? (
+                <div style={{ color:"#475569", fontSize:11 }}>No responding hosts found in configured ranges.</div>
+              ) : (
+                <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+                  {(dryRunResult.preview || []).map((item, i) => (
+                    <div key={i} style={{
+                      display:"flex", alignItems:"center", gap:8, flexWrap:"wrap",
+                      padding:"4px 8px", borderRadius:5,
+                      backgroundColor: item.no_profile_suitable ? "#1c0a0a" : item.already_exists ? "#0a1a0a" : "#0a1220",
+                      border: `1px solid ${item.no_profile_suitable ? "#7f1d1d" : item.already_exists ? "#14532d" : "#1e3a52"}`,
+                    }}>
+                      <span style={{ color:"#7dd3fc", fontFamily:"monospace", fontSize:11, minWidth:120 }}>{item.ip}</span>
+                      <span style={{ color:"#94a3b8", fontSize:11 }}>{item.sys_name || "-"}</span>
+                      {item.already_exists && (
+                        <span style={{ color:"#4ade80", fontSize:9, fontWeight:700, letterSpacing:1, padding:"1px 5px", borderRadius:3, backgroundColor:"#14532d30", border:"1px solid #14532d" }}>existing</span>
+                      )}
+                      {item.no_profile_suitable && (
+                        <span style={{ color:"#f87171", fontSize:9, fontWeight:700, letterSpacing:1, padding:"1px 5px", borderRadius:3, backgroundColor:"#7f1d1d30", border:"1px solid #7f1d1d" }}>no profile suitable</span>
+                      )}
+                      {!item.no_profile_suitable && !item.already_exists && (
+                        <span style={{ color:"#22d3ee", fontSize:9, fontWeight:700, letterSpacing:1, padding:"1px 5px", borderRadius:3, backgroundColor:"#083344", border:"1px solid #164e63" }}>would create credential</span>
+                      )}
+                      {item.vendor && item.vendor !== "unknown" && (
+                        <span style={{ color:"#64748b", fontSize:10 }}>{item.vendor}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {(dryRunResult.errors || []).length > 0 && (
+                <div style={{ marginTop:8, color:"#f87171", fontSize:10 }}>
+                  {dryRunResult.errors.slice(0, 5).map((e, i) => <div key={i}>{e}</div>)}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button
@@ -1531,6 +1915,7 @@ export default function SettingsPage() {
         { tab:"switches", label:"Switches",  desc:"Credentials" },
         { tab:"racks",    label:"Racks",     desc:"Rack definitions" },
         { tab:"classes",  label:"Classes",   desc:"Device roles / classes" },
+        { tab:"models",   label:"Models",    desc:"Switch models & port layout" },
       ],
     },
     {
@@ -1625,6 +2010,7 @@ export default function SettingsPage() {
           {activeTab === "data"     && <DataImportExportTabContent onProfilesChanged={refreshProfiles} />}
           {activeTab === "racks"    && <RacksTabContent />}
           {activeTab === "classes"  && <ClassesTabContent />}
+          {activeTab === "models"   && <ModelsTabContent />}
           {activeTab === "scan"     && <EngineTabContent />}
           {activeTab === "dns"      && <DnsSettingsTabContent />}
           {activeTab === "map"      && (
