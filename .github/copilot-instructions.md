@@ -1,23 +1,68 @@
-# Copilot Instructions
+## Workflow Orchestration
 
-## MANDATORY: `ask_user` After Every Task
+### 1. Plan Node Default
+- Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
+- If something goes sideways, STOP and re-plan immediately - don't keep pushing
+- Use plan mode for verification steps, not just building
+- Write detailed specs upfront to reduce ambiguity
 
-**This rule is non-optional and must never be skipped.**
+### 2. Subagent Strategy
+- Use subagents liberally to keep main context window clean
+- Offload research, exploration, and parallel analysis to subagents
+- For complex problems, throw more compute at it via subagents
+- One tack per subagent for focused execution
+- Store subagent results in `ai_agent/[NAME]/` with clear naming
 
-After the **complete completion of every task** -- no matter how small or trivial -- the `ask_user` tool **MUST** be called. There are zero exceptions.
+### 3. Self-Improvement Loop
+- After ANY correction from the user: update `ai_agent/lessons.md` with the pattern
+- Write rules for yourself that prevent the same mistake
+- Ruthlessly iterate on these lessons until mistake rate drops
+- Review lessons at session start for relevant project
 
-- Every single task ends with an `ask_user` call.
-- This includes one-line fixes, file reads, refactors, multi-step work -- everything.
-- If a task is finished, `ask_user` is the final action. Period.
-- Skipping this step is a violation of these instructions.
+### 4. Verification Before Done
+- **ALWAYS** use the `ask_user` tool before marking ANY task or change as complete
+- Never mark a task complete without proving it works
+- Diff behavior between main and your changes when relevant
+- Ask yourself: "Would a staff engineer approve this?"
+- Run tests, check logs, demonstrate correctness
+- **Only proceed to done after explicit user confirmation via `ask_user`**
 
-The purpose of the `ask_user` call is to:
-1. Confirm completion and summarize what was done.
-2. Ask whether further steps are desired or adjustments are needed.
+### 5. Demand Elegance (Balanced)
+- For non-trivial changes: pause and ask "is there a more elegant way?"
+- If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
+- Skip this for simple, obvious fixes - don't over-engineer
+- Challenge your own work before presenting it
 
-**Do not end a turn without calling `ask_user` after task completion.**
+### 6. Autonomous Bug Fixing
+- When given a bug report: just fix it. Don't ask for hand-holding
+- Point at logs, errors, failing tests - then resolve them
+- Zero context switching required from the user
+- Go fix failing CI tests without being told how
+
+---
+
+## Task Management
+
+1. **Read Lessons**: Start by reviewing `ai_agent/lessons.md` for the project to internalize past learnings.
+2. **Plan First**: Write plan to `ai_agent/[NAME]/todo.md` with checkable items
+3. **Verify Plan**: Check in before starting implementation
+4. **Present Plan**: Use the `plan_review` tool to present the plan to the user - **do NOT start implementation before explicit user approval**
+5. **Track Progress**: Mark items complete as you go
+6. **Explain Changes**: High-level summary at each step
+7. **Document Results**: Add review section to `ai_agent/[NAME]/todo.md`
+8. **Capture Lessons**: Update `ai_agent/lessons.md` after corrections
+
+---
+
+## Core Principles
+
+- **Simplicity First**: Make every change as simple as possible. Impact minimal code.
+- **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
+- **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.
+
+---
 
 ## General Rules
 
-- **No emojis** -- Do not use emojis in any responses, code, comments, labels, UI text, or any other output.
-
+- **No Emojis**: Do not use emojis in any responses, code, comments, labels, UI text, or any other output.
+- **Gitignore**: Always add the `ai_agent` folder to `.gitignore` - it must never be committed to version control.

@@ -30,3 +30,6 @@ frontend/.vite/
 .idea/
 *.swp
 *.swo
+
+# AI
+ai_agent/
