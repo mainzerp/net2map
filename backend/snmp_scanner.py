@@ -1,4 +1,4 @@
-"""SNMP scanner - SNMPv2c / SNMPv3, vendor-aware (Aruba CX + FS.com + generic).
+﻿"""SNMP scanner - SNMPv2c / SNMPv3, vendor-aware (Aruba CX + FS.com + generic).
 
 Fully async: all SNMP I/O uses pysnmp.hlapi.asyncio so the event loop is
 never blocked. scan_switch() is now a coroutine; call it with await.
@@ -350,6 +350,8 @@ async def scan_switch(
 ) -> Optional[SwitchData]:
     """Async full SNMP scan of one switch. Returns SwitchData or None on failure."""
 
+    scan_mode = scan_type if scan_type in {"discovery", "ports", "links", "macs", "full"} else "full"
+
     auth = build_auth(
         snmp_version=snmp_version,
         community=community,
@@ -386,7 +388,7 @@ async def scan_switch(
     sw.vendor = detect_vendor(sw.sys_descr, sys_oid)
     log.info("Detected vendor=%s for %s (%s)", sw.vendor, ip, sw.sys_name)
 
-    if scan_type == "discovery":
+    if scan_mode == "discovery":
         return sw
 
     # -- 3. Interface table (all four walks in parallel) ----------------------
@@ -429,83 +431,88 @@ async def scan_switch(
         if idx is None: continue
         sw.interfaces.setdefault(idx, IfInfo(index=idx)).alias = val
 
-    # -- 4. LLDP neighbor table (all three walks in parallel) -----------------
-    sys_rows, port_rows, pdesc_rows = await asyncio.gather(
-        snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_SYS_NAME, timeout=snmp_timeout, retries=snmp_retries),
-        snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_PORT_ID, timeout=snmp_timeout, retries=snmp_retries),
-        snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_PORT_DESC, timeout=snmp_timeout, retries=snmp_retries),
-    )
+    wants_links = scan_mode in {"full", "ports", "links"}
+    wants_macs = scan_mode in {"full", "ports", "macs"}
 
-    nbr_map: Dict[Tuple[int, int], LldpNeighbor] = {}
+    if wants_links:
+        # -- 4. LLDP neighbor table (all three walks in parallel) -------------
+        sys_rows, port_rows, pdesc_rows = await asyncio.gather(
+            snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_SYS_NAME, timeout=snmp_timeout, retries=snmp_retries),
+            snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_PORT_ID, timeout=snmp_timeout, retries=snmp_retries),
+            snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_PORT_DESC, timeout=snmp_timeout, retries=snmp_retries),
+        )
 
-    def _lldp_key(oid_s: str) -> Optional[Tuple[int, int]]:
-        parts = oid_s.split(".")
-        try:
-            return int(parts[-2]), int(parts[-1])
-        except (ValueError, IndexError):
-            return None
+        nbr_map: Dict[Tuple[int, int], LldpNeighbor] = {}
 
-    for oid_s, val in sys_rows:
-        k = _lldp_key(oid_s)
-        if k is None: continue
-        local_port, _ = k
-        nbr_map.setdefault(k, LldpNeighbor(local_port_idx=local_port)).remote_sys = val
+        def _lldp_key(oid_s: str) -> Optional[Tuple[int, int]]:
+            parts = oid_s.split(".")
+            try:
+                return int(parts[-2]), int(parts[-1])
+            except (ValueError, IndexError):
+                return None
 
-    for oid_s, val in port_rows:
-        k = _lldp_key(oid_s)
-        if k and k in nbr_map:
-            nbr_map[k].remote_port = val
+        for oid_s, val in sys_rows:
+            k = _lldp_key(oid_s)
+            if k is None: continue
+            local_port, _ = k
+            nbr_map.setdefault(k, LldpNeighbor(local_port_idx=local_port)).remote_sys = val
 
-    for oid_s, val in pdesc_rows:
-        k = _lldp_key(oid_s)
-        if k and k in nbr_map:
-            local_port = k[0]
-            if not nbr_map[k].remote_port:
+        for oid_s, val in port_rows:
+            k = _lldp_key(oid_s)
+            if k and k in nbr_map:
                 nbr_map[k].remote_port = val
-            if local_port in sw.interfaces:
-                nbr_map[k].local_port_desc = sw.interfaces[local_port].descr
 
-    sw.lldp_neighbors = list(nbr_map.values())
+        for oid_s, val in pdesc_rows:
+            k = _lldp_key(oid_s)
+            if k and k in nbr_map:
+                local_port = k[0]
+                if not nbr_map[k].remote_port:
+                    nbr_map[k].remote_port = val
+                if local_port in sw.interfaces:
+                    nbr_map[k].local_port_desc = sw.interfaces[local_port].descr
 
-    # -- 5. ARP + BRIDGE-MIB in parallel -------------------------------------
-    (arp_mac_rows, arp_ip_rows,
-     base_port_rows, fdb_rows) = await asyncio.gather(
-        snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_MAC, timeout=snmp_timeout, retries=snmp_retries),
-        snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_IP, timeout=snmp_timeout, retries=snmp_retries),
-        snmp_bulk_walk(ip, snmp_port, auth, OID_DOT1D_BASE_PORT_IF_INDEX, timeout=snmp_timeout, retries=snmp_retries),
-        snmp_bulk_walk(ip, snmp_port, auth, OID_DOT1D_TP_FDB_PORT, timeout=snmp_timeout, retries=snmp_retries),
-    )
+        sw.lldp_neighbors = list(nbr_map.values())
 
-    ip_by_suffix: Dict[str, str] = {}
-    for oid_s, val in arp_ip_rows:
-        suffix = ".".join(oid_s.split(".")[-5:])
-        ip_by_suffix[suffix] = val
-    for oid_s, mac_val in arp_mac_rows:
-        suffix = ".".join(oid_s.split(".")[-5:])
-        arp_ip = ip_by_suffix.get(suffix, "")
-        mac = _hex_to_mac(mac_val)
-        if mac and arp_ip:
-            sw.arp_table[mac] = arp_ip
+    if wants_macs:
+        # -- 5. ARP + BRIDGE-MIB in parallel ---------------------------------
+        (arp_mac_rows, arp_ip_rows,
+         base_port_rows, fdb_rows) = await asyncio.gather(
+            snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_MAC, timeout=snmp_timeout, retries=snmp_retries),
+            snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_IP, timeout=snmp_timeout, retries=snmp_retries),
+            snmp_bulk_walk(ip, snmp_port, auth, OID_DOT1D_BASE_PORT_IF_INDEX, timeout=snmp_timeout, retries=snmp_retries),
+            snmp_bulk_walk(ip, snmp_port, auth, OID_DOT1D_TP_FDB_PORT, timeout=snmp_timeout, retries=snmp_retries),
+        )
 
-    bridge_to_ifindex: Dict[int, int] = {}
-    for oid_s, ifindex_val in base_port_rows:
-        try:
-            bridge_port = int(_last_n(oid_s, 1)[0])
-            bridge_to_ifindex[bridge_port] = int(ifindex_val)
-        except ValueError:
-            continue
+        ip_by_suffix: Dict[str, str] = {}
+        for oid_s, val in arp_ip_rows:
+            suffix = ".".join(oid_s.split(".")[-5:])
+            ip_by_suffix[suffix] = val
+        for oid_s, mac_val in arp_mac_rows:
+            suffix = ".".join(oid_s.split(".")[-5:])
+            arp_ip = ip_by_suffix.get(suffix, "")
+            mac = _hex_to_mac(mac_val)
+            if mac and arp_ip:
+                sw.arp_table[mac] = arp_ip
 
-    for oid_s, bridge_port_val in fdb_rows:
-        mac = _oid_to_mac(oid_s)
-        if not mac:
-            continue
-        try:
-            bridge_port = int(bridge_port_val)
-        except ValueError:
-            continue
-        ifindex = bridge_to_ifindex.get(bridge_port)
-        if ifindex is not None:
-            sw.mac_ifindex[mac] = ifindex
+        bridge_to_ifindex: Dict[int, int] = {}
+        for oid_s, ifindex_val in base_port_rows:
+            try:
+                bridge_port = int(_last_n(oid_s, 1)[0])
+                bridge_to_ifindex[bridge_port] = int(ifindex_val)
+            except ValueError:
+                continue
+
+        for oid_s, bridge_port_val in fdb_rows:
+            mac = _oid_to_mac(oid_s)
+            if not mac:
+                continue
+            try:
+                bridge_port = int(bridge_port_val)
+            except ValueError:
+                continue
+            ifindex = bridge_to_ifindex.get(bridge_port)
+            if ifindex is not None:
+                sw.mac_ifindex[mac] = ifindex
 
     log.info("Scanned %s (%s) vendor=%s: %d ifaces, %d LLDP nbrs",
              ip, sw.sys_name, sw.vendor, len(sw.interfaces), len(sw.lldp_neighbors))

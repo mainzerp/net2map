@@ -87,9 +87,10 @@ def on_startup():
     threading.Thread(target=_background_scheduler, daemon=True).start()
 
 def _background_scheduler():
-    """Runs discovery and port scans periodically based on app settings."""
+    """Runs discovery, link and MAC scans periodically based on app settings."""
     last_discovery = 0
-    last_ports = 0
+    last_links = 0
+    last_macs = 0
     
     while True:
         time.sleep(5)
@@ -99,10 +100,14 @@ def _background_scheduler():
             
             # Read settings
             discovery_setting = db.query(AppSetting).filter(AppSetting.key == "discovery_interval_sec").first()
-            ports_setting = db.query(AppSetting).filter(AppSetting.key == "port_update_interval_sec").first()
+            links_setting = db.query(AppSetting).filter(AppSetting.key == "link_update_interval_sec").first()
+            macs_setting = db.query(AppSetting).filter(AppSetting.key == "mac_update_interval_sec").first()
+            ports_legacy_setting = db.query(AppSetting).filter(AppSetting.key == "port_update_interval_sec").first()
             
             discovery_interval = int(discovery_setting.value) if discovery_setting else 1800
-            ports_interval = int(ports_setting.value) if ports_setting else 30
+            legacy_ports_interval = int(ports_legacy_setting.value) if ports_legacy_setting else 30
+            links_interval = int(links_setting.value) if links_setting else legacy_ports_interval
+            macs_interval = int(macs_setting.value) if macs_setting else legacy_ports_interval
             
             now = time.time()
             
@@ -116,15 +121,25 @@ def _background_scheduler():
                     loop.close()
                 last_discovery = time.time()
 
-            # Run ports scan
-            if ports_interval > 0 and (now - last_ports) >= ports_interval:
-                _log_event(logging.INFO, "scheduler.ports.start")
+            # Run link/neighbor scan
+            if links_interval > 0 and (now - last_links) >= links_interval:
+                _log_event(logging.INFO, "scheduler.links.start")
                 loop = asyncio.new_event_loop()
                 try:
-                    loop.run_until_complete(_execute_scan(db, scan_type="ports"))
+                    loop.run_until_complete(_execute_scan(db, scan_type="links"))
                 finally:
                     loop.close()
-                last_ports = time.time()
+                last_links = time.time()
+
+            # Run MAC-at-port scan
+            if macs_interval > 0 and (now - last_macs) >= macs_interval:
+                _log_event(logging.INFO, "scheduler.macs.start")
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(_execute_scan(db, scan_type="macs"))
+                finally:
+                    loop.close()
+                last_macs = time.time()
                 
         except Exception as e:
             _log_event(logging.ERROR, "scheduler.error", error=str(e))
@@ -807,7 +822,9 @@ async def _execute_scan(
 ) -> ScanResult:
     corr = correlation_id or str(uuid.uuid4())
 
-    if scan_type == "ports":
+    scan_mode = scan_type if scan_type in {"discovery", "ports", "links", "macs", "full"} else "full"
+
+    if scan_mode in {"ports", "links", "macs"}:
         # Only scan credentials that are already in the Device table
         known_ips = {d.ip for d in db.query(Device.ip).all()}
         credentials = db.query(Credential).filter(Credential.enabled == True, Credential.ip.in_(known_ips)).all()
@@ -821,7 +838,7 @@ async def _execute_scan(
 
     # ── Range-based discovery (only for discovery/full scans) ──────────────────
     range_targets: List[dict] = []
-    if scan_type != "ports":
+    if scan_mode in {"discovery", "full"}:
         configured_ranges = _read_discovery_ranges(db)
         if configured_ranges:
             range_ips = _expand_ranges_to_ips(configured_ranges)
@@ -894,7 +911,7 @@ async def _execute_scan(
         logging.INFO,
         "scan.start",
         correlation_id=corr,
-        scan_type=scan_type,
+        scan_type=scan_mode,
         enabled_credentials=len(credentials),
         range_probes=len(range_targets),
         configured_max_workers=configured_max_workers,
@@ -1000,8 +1017,7 @@ async def _execute_scan(
                 profiles_to_try = target.get("profiles_to_try", [])
                 for prof in profiles_to_try:
                     try:
-                        data = await asyncio.to_thread(
-                            scan_switch,
+                        data = await scan_switch(
                             ip=ip,
                             snmp_version=prof["snmp_version"],
                             community=prof["community"],
@@ -1026,8 +1042,7 @@ async def _execute_scan(
                 return ip, label, None, "no profile suitable", duration_ms, ping_ok, ping_rtt, is_probe, None
 
             try:
-                data = await asyncio.to_thread(
-                    scan_switch,
+                data = await scan_switch(
                     ip=ip,
                     snmp_version=target["snmp_version"],
                     community=target["community"],
@@ -1040,7 +1055,7 @@ async def _execute_scan(
                     v3_auth_password=target["v3_auth_password"],
                     v3_priv_protocol=target["v3_priv_protocol"],
                     v3_priv_password=target["v3_priv_password"],
-                    scan_type=scan_type,
+                    scan_type=scan_mode,
                 )
                 duration_ms = int((time.perf_counter() - started) * 1000)
                 if data:
@@ -1258,7 +1273,9 @@ async def _execute_scan(
     db.commit()
 
     link_count = 0
-    if scan_type != "discovery":
+    update_ports = scan_mode in {"full", "ports", "macs"}
+    update_links = scan_mode in {"full", "ports", "links"}
+    if update_ports:
         dns_cache: Dict[str, str] = {}
         dns_servers = _read_dns_settings().get("servers", [])
 
@@ -1312,6 +1329,7 @@ async def _execute_scan(
                 ))
             db.commit()
 
+    if update_links:
         scanned_ips = set(switch_data.keys())
         db.query(TopologyLink).filter(TopologyLink.local_ip.in_(scanned_ips)).delete(
             synchronize_session=False

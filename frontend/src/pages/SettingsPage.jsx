@@ -1057,7 +1057,8 @@ function EngineTabContent() {
   const [snmpTimeout, setSnmpTimeout] = useState(3);
   const [snmpRetries, setSnmpRetries] = useState(1);
   const [discoveryIntervalSec, setDiscoveryIntervalSec] = useState(1800);
-  const [portUpdateIntervalSec, setPortUpdateIntervalSec] = useState(30);
+  const [linkUpdateIntervalSec, setLinkUpdateIntervalSec] = useState(30);
+  const [macUpdateIntervalSec, setMacUpdateIntervalSec] = useState(30);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [activeJobId, setActiveJobId] = useState(null);
@@ -1083,9 +1084,13 @@ function EngineTabContent() {
 
         const settingsList = Array.isArray(appSettings) ? appSettings : [];
         const discovery = settingsList.find(s => s.key === "discovery_interval_sec");
-        const ports = settingsList.find(s => s.key === "port_update_interval_sec");
+        const legacyPorts = settingsList.find(s => s.key === "port_update_interval_sec");
+        const links = settingsList.find(s => s.key === "link_update_interval_sec");
+        const macs = settingsList.find(s => s.key === "mac_update_interval_sec");
+        const fallbackPortValue = legacyPorts?.value != null ? Number(legacyPorts.value) : 30;
         if (discovery?.value != null) setDiscoveryIntervalSec(Number(discovery.value));
-        if (ports?.value != null) setPortUpdateIntervalSec(Number(ports.value));
+        setLinkUpdateIntervalSec(links?.value != null ? Number(links.value) : fallbackPortValue);
+        setMacUpdateIntervalSec(macs?.value != null ? Number(macs.value) : fallbackPortValue);
 
         const ranges = Array.isArray(rangesResp?.ranges) ? rangesResp.ranges : [];
         setDiscoveryRanges(ranges);
@@ -1118,17 +1123,21 @@ function EngineTabContent() {
       };
 
       const nextDiscoveryInterval = Math.max(0, Math.min(86400, Number(discoveryIntervalSec) || 0));
-      const nextPortsInterval = Math.max(0, Math.min(3600, Number(portUpdateIntervalSec) || 0));
+      const nextLinksInterval = Math.max(0, Math.min(3600, Number(linkUpdateIntervalSec) || 0));
+      const nextMacsInterval = Math.max(0, Math.min(3600, Number(macUpdateIntervalSec) || 0));
 
       const result = await api.put("/api/scan-settings", payload);
       await api.put("/api/settings/discovery_interval_sec", { value: String(nextDiscoveryInterval) });
-      await api.put("/api/settings/port_update_interval_sec", { value: String(nextPortsInterval) });
+      await api.put("/api/settings/link_update_interval_sec", { value: String(nextLinksInterval) });
+      await api.put("/api/settings/mac_update_interval_sec", { value: String(nextMacsInterval) });
+      await api.put("/api/settings/port_update_interval_sec", { value: String(nextMacsInterval) });
 
       if (result?.max_workers != null) setScanWorkers(Number(result.max_workers));
       if (result?.snmp_timeout != null) setSnmpTimeout(Number(result.snmp_timeout));
       if (result?.snmp_retries != null) setSnmpRetries(Number(result.snmp_retries));
       setDiscoveryIntervalSec(nextDiscoveryInterval);
-      setPortUpdateIntervalSec(nextPortsInterval);
+      setLinkUpdateIntervalSec(nextLinksInterval);
+      setMacUpdateIntervalSec(nextMacsInterval);
     } finally {
       setSettingsSaving(false);
     }
@@ -1203,13 +1212,15 @@ function EngineTabContent() {
   };
 
   const discoverySeconds = Math.max(0, Number(discoveryIntervalSec) || 0);
-  const portSeconds = Math.max(0, Number(portUpdateIntervalSec) || 0);
+  const linkSeconds = Math.max(0, Number(linkUpdateIntervalSec) || 0);
+  const macSeconds = Math.max(0, Number(macUpdateIntervalSec) || 0);
   const discoveryLabel = discoverySeconds === 0
     ? "disabled"
     : discoverySeconds >= 60
       ? `${(discoverySeconds / 60).toFixed(discoverySeconds % 60 === 0 ? 0 : 1)} min`
       : `${discoverySeconds}s`;
-  const portsLabel = portSeconds === 0 ? "disabled" : `${portSeconds}s`;
+  const linksLabel = linkSeconds === 0 ? "disabled" : `${linkSeconds}s`;
+  const macsLabel = macSeconds === 0 ? "disabled" : `${macSeconds}s`;
 
   const fmtTs = (ts) => {
     if (!ts) return "-";
@@ -1369,15 +1380,15 @@ function EngineTabContent() {
           display:"flex", flexDirection:"column", gap:6,
           padding:"10px 12px", border:"1px solid #1e293b", borderRadius:8, backgroundColor:"#020817",
         }}>
-          <div style={{ color:"#94a3b8", fontSize:10, fontWeight:700, letterSpacing:1.2 }}>PORT UPDATE SETTINGS</div>
+          <div style={{ color:"#94a3b8", fontSize:10, fontWeight:700, letterSpacing:1.2 }}>LINK / NEIGHBOR UPDATE SETTINGS</div>
           <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
-            <span style={{ color:"#64748b", fontSize:10 }}>Port Poll Interval (sec)</span>
+            <span style={{ color:"#64748b", fontSize:10 }}>LLDP Link Poll Interval (sec)</span>
             <input
               type="number"
               min={0}
               max={3600}
-              value={portUpdateIntervalSec}
-              onChange={e => setPortUpdateIntervalSec(e.target.value)}
+              value={linkUpdateIntervalSec}
+              onChange={e => setLinkUpdateIntervalSec(e.target.value)}
               disabled={settingsLoading || settingsSaving || scanning}
               style={{
                 width:84, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
@@ -1388,7 +1399,34 @@ function EngineTabContent() {
               Set 0 to disable
             </span>
             <span style={{ color:"#334155", fontSize:10 }}>
-              current port schedule: {portsLabel}
+              current link schedule: {linksLabel}
+            </span>
+          </div>
+        </div>
+        <div style={{
+          display:"flex", flexDirection:"column", gap:6,
+          padding:"10px 12px", border:"1px solid #1e293b", borderRadius:8, backgroundColor:"#020817",
+        }}>
+          <div style={{ color:"#94a3b8", fontSize:10, fontWeight:700, letterSpacing:1.2 }}>MAC AT PORT UPDATE SETTINGS</div>
+          <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+            <span style={{ color:"#64748b", fontSize:10 }}>MAC Poll Interval (sec)</span>
+            <input
+              type="number"
+              min={0}
+              max={3600}
+              value={macUpdateIntervalSec}
+              onChange={e => setMacUpdateIntervalSec(e.target.value)}
+              disabled={settingsLoading || settingsSaving || scanning}
+              style={{
+                width:84, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5,
+                color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
+              }}
+            />
+            <span style={{ color:"#334155", fontSize:10 }}>
+              Set 0 to disable
+            </span>
+            <span style={{ color:"#334155", fontSize:10 }}>
+              current MAC schedule: {macsLabel}
             </span>
           </div>
         </div>
