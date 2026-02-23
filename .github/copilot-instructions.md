@@ -65,4 +65,3 @@
 ## General Rules
 
 - **No Emojis**: Do not use emojis in any responses, code, comments, labels, UI text, or any other output.
-- **Gitignore**: Always add the `ai_agent` folder to `.gitignore` - it must never be committed to version control.
