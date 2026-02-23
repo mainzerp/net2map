@@ -204,18 +204,28 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
   }, [racks]);
 
   const rackLinks = useMemo(() => {
-    const seen = new Set();
-    const result = [];
+    const grouped = {};
     links.forEach(l => {
       const ra = ipToRackId[l.local_ip];
       const rb = ipToRackId[l.remote_ip];
       if (!ra || !rb || ra === rb) return;
       const key = [ra, rb].sort().join("|");
-      if (seen.has(key)) return;
-      seen.add(key);
-      result.push({ key, from: ra, to: rb, speed: l.speed_label });
+      if (!grouped[key]) grouped[key] = { key, from: ra, to: rb, individual: [] };
+      grouped[key].individual.push(l);
     });
-    return result;
+    return Object.values(grouped).map(g => {
+      // Deduplicate by sorted port-pair key to avoid counting both directions
+      const portSeen = new Set();
+      const unique = [];
+      g.individual.forEach(l => {
+        const pk = [l.local_ip + ":" + l.local_port, l.remote_ip + ":" + l.remote_port].sort().join("|");
+        if (!portSeen.has(pk)) { portSeen.add(pk); unique.push(l); }
+      });
+      // Pick the highest speed for the line color
+      const speedOrder = { "100G":5, "25G":4, "10G":3, "1G":2, "100M":1 };
+      const best = unique.reduce((a, b) => (speedOrder[b.speed_label] || 0) > (speedOrder[a.speed_label] || 0) ? b : a, unique[0]);
+      return { ...g, count: unique.length, speed: best.speed_label };
+    });
   }, [links, ipToRackId]);
 
   const svgPoint = (e) => {
@@ -338,15 +348,16 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
         const ra = rackById(l.from), rb = rackById(l.to);
         if (!ra || !rb) return null;
         const pa = getRackCenter(ra), pb = getRackCenter(rb);
-        const c = l.speed === "100G" ? "#22d3ee" : l.speed === "10G" ? "#4ade80" : "#334155";
+        const c = l.speed === "100G" ? "#22d3ee" : l.speed === "10G" || l.speed === "25G" ? "#4ade80" : "#334155";
         const w = l.speed === "100G" ? 2.5 : 1.5;
+        const label = l.count > 1 ? `${l.count}x ${l.speed}` : l.speed;
         return (
           <g key={l.key}>
             <line x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
-                  stroke={c} strokeWidth={w} strokeOpacity={0.45}/>
+                  stroke={c} strokeWidth={w * Math.min(l.count, 4)} strokeOpacity={0.45}/>
             <text x={(pa.x+pb.x)/2} y={(pa.y+pb.y)/2 - 6}
                   fill={c} fontSize={9} textAnchor="middle"
-                  opacity={0.75} fontFamily="monospace">{l.speed}</text>
+                  opacity={0.75} fontFamily="monospace">{label}</text>
           </g>
         );
       })}
@@ -440,9 +451,11 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
     });
   }, [deviceOrder]);
 
-  const torDevices    = useMemo(() => sortGroup(rack.devices.filter(d => d.vendor === "fs"),       "fs"),       [rack.devices, sortGroup]);
-  const accessDevices = useMemo(() => sortGroup(rack.devices.filter(d => d.vendor === "aruba_cx"), "aruba_cx"), [rack.devices, sortGroup]);
-  const otherDevices  = useMemo(() => rack.devices.filter(d => d.vendor !== "fs" && d.vendor !== "aruba_cx"), [rack.devices]);
+  const torDevices    = useMemo(() => sortGroup(rack.devices.filter(d => d.class_id === 1 || (!d.class_id && d.vendor === "fs")),    "tor"),    [rack.devices, sortGroup]);
+  const accessDevices = useMemo(() => sortGroup(rack.devices.filter(d => d.class_id === 2 || (!d.class_id && d.vendor === "aruba_cx")), "access"), [rack.devices, sortGroup]);
+  const otherDevices  = useMemo(() => rack.devices.filter(d => d.class_id == null && d.vendor !== "fs" && d.vendor !== "aruba_cx"), [rack.devices]);
+
+  const classMap = useMemo(() => Object.fromEntries((switchClasses || []).map(c => [c.id, c])), [switchClasses]);
 
   const { uplinks, trunks, external } = useMemo(() => {
     const rackIps  = new Set(rack.devices.map(d => d.ip));
@@ -474,12 +487,11 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
 
     const uplinks = intraAll.filter(l => {
       const a = devByIp[l.local_ip], b = devByIp[l.remote_ip];
-      return (a?.vendor === "aruba_cx" && b?.vendor === "fs") ||
-             (a?.vendor === "fs" && b?.vendor === "aruba_cx");
+      return a?.class_id !== b?.class_id;
     });
     const trunks = intraAll.filter(l => {
       const a = devByIp[l.local_ip], b = devByIp[l.remote_ip];
-      return a?.vendor === "fs" && b?.vendor === "fs";
+      return a?.class_id != null && a?.class_id === b?.class_id;
     });
     return { uplinks, trunks, external };
   }, [rack.devices, topologyLinks, allRacks]);
@@ -527,8 +539,6 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
     if (el) el.addEventListener("scroll", computeLine, { passive: true });
     return () => { if (el) el.removeEventListener("scroll", computeLine); };
   }, [selectedLink]);
-
-  const classMap = useMemo(() => Object.fromEntries((switchClasses || []).map(c => [c.id, c])), [switchClasses]);
 
   const renderGroup = (devices, groupKey) => devices.map((d, idx) => (
     <div key={d.id} style={{display:"flex",alignItems:"flex-start",gap:5,marginBottom:4}}>
@@ -678,30 +688,30 @@ function RackDetail({ rack, allRacks, switchClasses, topologyLinks, deviceOrder,
         {torDevices.length > 0 && (
           <>
             <div style={{
-              fontSize:10, color:"#22d3ee", marginBottom:6,
+              fontSize:10, color: classMap[1]?.color || "#22d3ee", marginBottom:6,
               letterSpacing:"0.1em", textTransform:"uppercase",
               display:"flex", alignItems:"center", gap:8,
             }}>
-              <span style={{flex:1,borderBottom:"1px solid #164e63",height:0,display:"inline-block"}}/>
-              [FS] Top-of-Rack ({torDevices.length})
-              <span style={{flex:1,borderBottom:"1px solid #164e63",height:0,display:"inline-block"}}/>
+              <span style={{flex:1,borderBottom:`1px solid ${classMap[1]?.color ? classMap[1].color+"44" : "#164e63"}`,height:0,display:"inline-block"}}/>
+              {classMap[1]?.label || "Top-of-Rack"} ({torDevices.length})
+              <span style={{flex:1,borderBottom:`1px solid ${classMap[1]?.color ? classMap[1].color+"44" : "#164e63"}`,height:0,display:"inline-block"}}/>
             </div>
-            {renderGroup(torDevices, "fs")}
+            {renderGroup(torDevices, "tor")}
           </>
         )}
 
         {accessDevices.length > 0 && (
           <>
             <div style={{
-              fontSize:10, color:"#f59e0b", marginTop:10, marginBottom:6,
+              fontSize:10, color: classMap[2]?.color || "#f59e0b", marginTop:10, marginBottom:6,
               letterSpacing:"0.1em", textTransform:"uppercase",
               display:"flex", alignItems:"center", gap:8,
             }}>
-              <span style={{flex:1,borderBottom:"1px solid #78350f",height:0,display:"inline-block"}}/>
-              Access ({accessDevices.length})
-              <span style={{flex:1,borderBottom:"1px solid #78350f",height:0,display:"inline-block"}}/>
+              <span style={{flex:1,borderBottom:`1px solid ${classMap[2]?.color ? classMap[2].color+"44" : "#78350f"}`,height:0,display:"inline-block"}}/>
+              {classMap[2]?.label || "Access"} ({accessDevices.length})
+              <span style={{flex:1,borderBottom:`1px solid ${classMap[2]?.color ? classMap[2].color+"44" : "#78350f"}`,height:0,display:"inline-block"}}/>
             </div>
-            {renderGroup(accessDevices, "aruba_cx")}
+            {renderGroup(accessDevices, "access")}
           </>
         )}
 
@@ -974,9 +984,9 @@ export default function MapPage() {
     if (!selectedRack) return;
     const rackId  = selectedRack.id;
     const devs    = selectedRack.devices.filter(d =>
-      groupKey === "fs"       ? d.vendor === "fs" :
-      groupKey === "aruba_cx" ? d.vendor === "aruba_cx" :
-      d.vendor !== "fs" && d.vendor !== "aruba_cx"
+      groupKey === "tor"    ? (d.class_id === 1 || (!d.class_id && d.vendor === "fs")) :
+      groupKey === "access" ? (d.class_id === 2 || (!d.class_id && d.vendor === "aruba_cx")) :
+      d.class_id == null && d.vendor !== "fs" && d.vendor !== "aruba_cx"
     );
     const ids    = devs.map(d => d.id);
     const storeKey = `${rackId}::${groupKey}`;
@@ -1067,11 +1077,11 @@ export default function MapPage() {
           switchClasses={topology.classes || []}
           topologyLinks={topology.links}
           deviceOrder={selectedRack ? Object.fromEntries(
-            ["fs","aruba_cx","other"].map(g => [
+            ["tor","access","other"].map(g => [
               g, rackOrders[`${selectedRack.id}::${g}`]
             ])
           ) : {}}
-          onReorder={(deviceId, dir) => reorderDevice(deviceId, dir)}
+          onReorder={(deviceId, dir, groupKey) => reorderDevice(deviceId, dir, groupKey)}
           onClose={() => setSelectedRack(null)}
           onRename={newName => renameRack(selectedRack, newName)}
           onMoveDevice={moveDevice}
