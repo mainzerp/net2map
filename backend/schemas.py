@@ -1,7 +1,7 @@
 """Pydantic schemas for request / response validation."""
 from datetime import datetime
 from typing import Literal, Optional, List
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel, field_serializer, model_validator
 
 # ─── Enums ────────────────────────────────────────────────────────────────────
 SnmpVersion   = Literal["v2c", "v3"]
@@ -219,17 +219,34 @@ class CredentialOut(CredentialBase):
 
 class PortOut(BaseModel):
     id:          int
-    if_index:    int
-    if_descr:    str
-    if_alias:    str
-    speed_mbps:  int
-    oper_status: int
-    peer_mac:    str
-    peer_ip:     str
-    peer_host:   str
-    endpoint_count: int = 0
-    endpoint_details_json: str = "[]"
-    vlan:        int
+    if_index:    Optional[int] = 0
+    if_descr:    Optional[str] = ""
+    if_alias:    Optional[str] = ""
+    speed_mbps:  Optional[int] = 0
+    oper_status: Optional[int] = 0
+    peer_mac:    Optional[str] = ""
+    peer_ip:     Optional[str] = ""
+    peer_host:   Optional[str] = ""
+    endpoint_count:        Optional[int] = 0
+    endpoint_details_json: Optional[str] = "[]"
+    vlan:        Optional[int] = 0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_nulls(cls, data):
+        if hasattr(data, "__dict__"):
+            # ORM object — convert to dict-like via __dict__
+            data = {k: v for k, v in data.__dict__.items() if not k.startswith("_")}
+        if isinstance(data, dict):
+            defaults = {
+                "if_index": 0, "if_descr": "", "if_alias": "", "speed_mbps": 0,
+                "oper_status": 0, "peer_mac": "", "peer_ip": "", "peer_host": "",
+                "endpoint_count": 0, "endpoint_details_json": "[]", "vlan": 0,
+            }
+            for field, fallback in defaults.items():
+                if data.get(field) is None:
+                    data[field] = fallback
+        return data
 
     class Config:
         from_attributes = True
