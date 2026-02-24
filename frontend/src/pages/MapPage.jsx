@@ -18,7 +18,8 @@ export default function MapPage() {
   // receives a rack object that actually has a .devices array.
   const selectedRackFull = useMemo(() => {
     if (!selectedRack) return null;
-    const devices = topology.nodes.filter(n => n.rack_id === selectedRack.id);
+    const selectedRackId = Number(selectedRack.id);
+    const devices = topology.nodes.filter(n => Number(n.rack_id) === selectedRackId);
     return { ...selectedRack, devices };
   }, [selectedRack, topology.nodes]);
 
