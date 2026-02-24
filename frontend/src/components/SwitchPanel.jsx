@@ -92,8 +92,11 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
           {(() => {
             // Sort ports by if_index for physical layout
             const sorted = [...device.ports].sort((a, b) => (a.if_index || 0) - (b.if_index || 0));
-            const oddPorts  = sorted.filter(p => p.if_index % 2 === 1);
-            const evenPorts = sorted.filter(p => p.if_index % 2 === 0);
+            // Apply port cutoff: hide aggregation/uplink ports beyond the physical port count
+            const cutoff = device.total_ports || sorted.length;
+            const visible = sorted.slice(0, cutoff);
+            const oddPorts  = visible.filter(p => p.if_index % 2 === 1);
+            const evenPorts = visible.filter(p => p.if_index % 2 === 0);
             // Determine how many visual columns we have (each column = one odd/even pair)
             const maxPairs = Math.max(oddPorts.length, evenPorts.length);
             const pairsPerRow = device.ports_per_row || 24;

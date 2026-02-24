@@ -365,20 +365,28 @@ def _last_n(oid_str: str, n: int = 1) -> List[str]:
 def _decode_snmp_str(val) -> str:
     """Safely decode a pysnmp value to a clean Unicode string.
 
-    pysnmp OctetString.__str__() silently decodes bytes as Latin-1, which
-    produces garbage like '\u00ac\u00a9+\u00f2\u00ed' for non-ASCII byte
-    sequences.  We instead:
-      1. Extract raw bytes (bytes() works on OctetString; str() on anything else).
-      2. Try UTF-8 first, then Latin-1.
-      3. Strip non-printable control characters.
-      4. Return empty string if the result is all non-ASCII garbage.
+    OctetString.__str__() silently decodes bytes as Latin-1, producing garbage
+    for non-ASCII sequences.  Non-OctetString types (Integer, Counter32/64,
+    Gauge32, TimeTicks …) must go through str() directly — bytes() on those
+    returns null-padded binary representations (e.g. Integer(1) -> b'\\x00').
     """
-    try:
-        raw: bytes = bytes(val)  # works for OctetString; raises TypeError otherwise
-    except (TypeError, Exception):
+    from pysnmp.proto.rfc1902 import OctetString as _OctetString
+
+    # Non-string SNMP types: use str() which gives the correct decimal value.
+    if not isinstance(val, _OctetString):
         return str(val).strip()
 
-    # Try UTF-8 first (strict), then Latin-1 as fallback
+    # OctetString: decode raw bytes, trying UTF-8 then Latin-1.
+    try:
+        raw: bytes = bytes(val)
+    except Exception:
+        return str(val).strip()
+
+    # 6-byte OctetStrings are almost always binary MAC addresses (e.g. LLDP
+    # portId subtype 3).  Convert to human-readable xx:xx:xx:xx:xx:xx form.
+    if len(raw) == 6 and any(b > 0x7E for b in raw):
+        return ":".join(f"{b:02x}" for b in raw)
+
     for enc in ("utf-8", "latin-1"):
         try:
             decoded = raw.decode(enc)
@@ -386,14 +394,16 @@ def _decode_snmp_str(val) -> str:
         except UnicodeDecodeError:
             continue
     else:
-        return ""  # can't decode at all
+        return ""
 
-    # Strip C0/C1 control characters (keep printable + common whitespace)
+    # Strip C0/C1 control characters
     cleaned = "".join(c for c in decoded if c >= " " or c in "\t\n\r")
     cleaned = cleaned.strip()
 
-    # If more than half the chars are non-ASCII, it's likely binary garbage
-    if cleaned and sum(ord(c) > 127 for c in cleaned) > len(cleaned) / 2:
+    # Reject strings where more than 25% of chars are non-ASCII (binary garbage).
+    # Legitimate strings (port names, sys names) are almost always pure ASCII.
+    # Using 25% to catch binary sequences like binary-encoded MAC addresses.
+    if cleaned and sum(ord(c) > 127 for c in cleaned) / len(cleaned) > 0.25:
         return ""
 
     return cleaned
@@ -562,13 +572,16 @@ async def scan_switch(
         for oid_s, val in port_rows:
             k = _lldp_key(oid_s)
             if k and k in nbr_map:
-                nbr_map[k].remote_port = val
+                nbr_map[k].remote_port = val  # lldpRemPortId — may be overridden below
 
         for oid_s, val in pdesc_rows:
             k = _lldp_key(oid_s)
             if k and k in nbr_map:
                 local_port = k[0]
-                if not nbr_map[k].remote_port:
+                # Always prefer lldpRemPortDesc (human-readable interface name) over
+                # lldpRemPortId which can be a binary-encoded MAC (subtype 3) or
+                # other non-printable value.
+                if val:
                     nbr_map[k].remote_port = val
                 if local_port in sw.interfaces:
                     nbr_map[k].local_port_desc = sw.interfaces[local_port].descr

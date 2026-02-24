@@ -10,6 +10,7 @@ function ModelsTabContent() {
   const [loading, setLoading]   = useState(true);
   const [editId, setEditId]     = useState(null);
   const [form, setForm]         = useState({ ...EMPTY_MODEL_FORM });
+  const [cutoffEnabled, setCutoffEnabled] = useState(false);
   const [err, setErr]           = useState("");
   const [assignSel, setAssignSel] = useState({});
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
@@ -27,10 +28,11 @@ function ModelsTabContent() {
   };
   useEffect(() => { refreshAll(); }, []);
 
-  const resetForm = () => { setForm({ ...EMPTY_MODEL_FORM }); setEditId(null); setErr(""); };
+  const resetForm = () => { setForm({ ...EMPTY_MODEL_FORM }); setCutoffEnabled(false); setEditId(null); setErr(""); };
   const startEdit = (sm) => {
     setEditId(sm.id);
     setForm({ name: sm.name, ports_per_row: sm.ports_per_row, total_ports: sm.total_ports ?? "", description: sm.description });
+    setCutoffEnabled(sm.total_ports != null);
     setErr("");
   };
 
@@ -43,7 +45,7 @@ function ModelsTabContent() {
       const payload = {
         name: form.name.trim(),
         ports_per_row: ppr,
-        total_ports: form.total_ports !== "" ? parseInt(form.total_ports, 10) || null : null,
+        total_ports: cutoffEnabled && form.total_ports !== "" ? parseInt(form.total_ports, 10) || null : null,
         description: form.description,
       };
       if (editId) { await api.put(`/api/switch-models/${editId}`, payload); }
@@ -95,8 +97,40 @@ function ModelsTabContent() {
             <input type="number" min="1" max="96" style={INPUT} value={form.ports_per_row} onChange={e => setForm(f => ({...f, ports_per_row:e.target.value}))} />
           </div>
           <div style={{ flex:1 }}>
-            <label style={LBL}>Total ports</label>
-            <input type="number" min="0" style={INPUT} value={form.total_ports} onChange={e => setForm(f => ({...f, total_ports:e.target.value}))} placeholder="optional" />
+            <label style={LBL} title="Ports beyond this count (sorted by index) are hidden. Use to suppress aggregation or uplink ports that appear as regular ports on some devices.">
+              Total ports (cutoff)
+            </label>
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              {/* Toggle switch */}
+              <div
+                onClick={() => { setCutoffEnabled(v => !v); if (cutoffEnabled) setForm(f => ({...f, total_ports:""})); }}
+                style={{
+                  width:32, height:18, borderRadius:9, cursor:"pointer", flexShrink:0,
+                  backgroundColor: cutoffEnabled ? "#0e7490" : "#1e293b",
+                  border: `1px solid ${cutoffEnabled ? "#22d3ee" : "#334155"}`,
+                  position:"relative", transition:"background 0.2s, border 0.2s",
+                }}>
+                <div style={{
+                  position:"absolute", top:2, left: cutoffEnabled ? 14 : 2,
+                  width:12, height:12, borderRadius:"50%",
+                  backgroundColor: cutoffEnabled ? "#22d3ee" : "#475569",
+                  transition:"left 0.2s, background 0.2s",
+                }}/>
+              </div>
+              {cutoffEnabled && (
+                <input
+                  type="number" min="1"
+                  style={{ ...INPUT, width:"auto", flex:1 }}
+                  value={form.total_ports}
+                  onChange={e => setForm(f => ({...f, total_ports:e.target.value}))}
+                  placeholder="e.g. 48"
+                  autoFocus
+                />
+              )}
+              {!cutoffEnabled && (
+                <span style={{ color:"#334155", fontSize:10 }}>disabled</span>
+              )}
+            </div>
           </div>
         </div>
         <div>

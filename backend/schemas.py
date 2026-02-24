@@ -276,6 +276,7 @@ class DeviceOut(DeviceBase):
     class_id:      Optional[int] = None
     model_id:      Optional[int] = None
     ports_per_row: Optional[int] = None   # resolved from switch_model
+    total_ports:   Optional[int] = None   # port cutoff: ports beyond this index are hidden
 
     class Config:
         from_attributes = True

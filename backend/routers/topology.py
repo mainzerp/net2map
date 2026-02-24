@@ -33,6 +33,7 @@ def get_topology(request: Request, db: Session = Depends(get_db)):
 
     # Build a lookup for ports_per_row from switch models
     model_ppr = {m.id: m.ports_per_row for m in models}
+    model_tp  = {m.id: m.total_ports   for m in models}
 
     # Build DeviceOut objects with resolved ports_per_row
     node_dicts = []
@@ -40,6 +41,8 @@ def get_topology(request: Request, db: Session = Depends(get_db)):
         dout = DeviceOut.model_validate(d)
         if d.model_id and d.model_id in model_ppr:
             dout.ports_per_row = model_ppr[d.model_id]
+        if d.model_id and d.model_id in model_tp:
+            dout.total_ports = model_tp[d.model_id]
         node_dicts.append(dout)
 
     result  = TopologyOut(nodes=node_dicts, links=links, racks=racks, classes=classes, models=models)
@@ -126,6 +129,7 @@ def update_device_meta(
         sm = db.query(SwitchModelModel).filter(SwitchModelModel.id == device.model_id).first()
         if sm:
             dout.ports_per_row = sm.ports_per_row
+            dout.total_ports   = sm.total_ports
     return dout
 
 
@@ -135,11 +139,14 @@ def list_all_devices(request: Request, db: Session = Depends(get_db)):
     devices = db.query(Device).order_by(Device.ip).all()
     models  = db.query(SwitchModelModel).all()
     model_ppr = {m.id: m.ports_per_row for m in models}
+    model_tp  = {m.id: m.total_ports   for m in models}
     result = []
     for d in devices:
         dout = DeviceOut.model_validate(d)
         if d.model_id and d.model_id in model_ppr:
             dout.ports_per_row = model_ppr[d.model_id]
+        if d.model_id and d.model_id in model_tp:
+            dout.total_ports = model_tp[d.model_id]
         result.append(dout)
     import json
     body = json.dumps([d.model_dump() for d in result], default=str)
