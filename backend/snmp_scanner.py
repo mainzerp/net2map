@@ -78,11 +78,23 @@ OID_DOT1D_BASE_PORT_IF_INDEX = "1.3.6.1.2.1.17.1.4.1.2"
 OID_QBRIDGE_FDB_PORT   = "1.3.6.1.2.1.17.7.1.2.2.1.2"  # MAC+VLAN -> bridge port
 OID_QBRIDGE_FDB_STATUS = "1.3.6.1.2.1.17.7.1.2.2.1.3"  # 3=learned, 5=self
 
+# IP-MIB unified neighbor table (IPv4 + IPv6, replaces legacy ARP table)
+# Particularly relevant for OPNsense/FreeBSD which tracks both address families.
+# Index: {ifIndex}.{addrType}.{addrLen}.{addr...}
+OID_IP_NET_TO_PHYSICAL_MAC  = "1.3.6.1.2.1.4.35.1.4"  # ipNetToPhysicalPhysAddress
+OID_IP_NET_TO_PHYSICAL_ADDR = "1.3.6.1.2.1.4.35.1.3"  # ipNetToPhysicalNetAddress
+OID_IP_NET_TO_PHYSICAL_TYPE = "1.3.6.1.2.1.4.35.1.7"  # 3=dynamic (learned), 4=static
+
+# Net-SNMP / OPNsense (FreeBSD) enterprise root
+# OPNsense reports sysObjectID = 1.3.6.1.4.1.8072.3.2.9 (net-snmp on FreeBSD)
+OID_NETSNMP_ENTERPRISE = "1.3.6.1.4.1.8072"
+
 # Per-vendor FDB walk strategy
 FDB_STRATEGY: Dict[str, str] = {
     "unifi":    "qbridge",  # dot1d returns NOSUCHINSTANCE on UniFi
     "aruba_cx": "dot1d",
     "fs":       "dot1d",
+    "opnsense": "dot1d",   # bridge(4) interfaces use dot1d; returns empty if no bridge configured
 }
 
 # --- Vendor enterprise OIDs ---------------------------------------------------
@@ -92,6 +104,7 @@ VENDOR_OIDS: Dict[str, str] = {
     "1.3.6.1.4.1.25506": "aruba_cx",  # H3C (some HPE rebrand)
     "1.3.6.1.4.1.52642": "fs",        # FS.COM (FSOS)
     "1.3.6.1.4.1.41112": "unifi",     # Ubiquiti / UniFi
+    "1.3.6.1.4.1.8072":  "opnsense",  # Net-SNMP (FreeBSD / OPNsense)
 }
 
 # sysDescr keywords per vendor (case-insensitive)
@@ -99,6 +112,7 @@ VENDOR_KEYWORDS: Dict[str, List[str]] = {
     "aruba_cx": ["arubaos-cx", "aruba cx", "arubacx"],
     "fs":       ["fsos", "fs s", "fs.com", " fss"],
     "unifi":    ["unifi", "ubiquiti", "usw-", "u7", "udm", "uxg"],
+    "opnsense": ["opnsense", "freebsd"],
 }
 
 
@@ -332,6 +346,10 @@ _VIRTUAL_GENERIC = ("loopback", "tunnel", "null", "vlan", "management", "mgmt",
 _VIRTUAL_ARUBA = ("loopback", "vlan", "tunnel", "mgmt", "oobm")
 _VIRTUAL_FS = ("loopback", "vlan", "mgmt", "null", "stack")
 _VIRTUAL_UNIFI = ("loopback", "vlan", "bridge", "cpu", "mgmt")
+# OPNsense / FreeBSD: lo*, vlan*, pppoe*, lagg*, enc*, pflog*, pfsync*, tun*, openvpn*, wg*
+_VIRTUAL_OPNSENSE = ("lo", "loopback", "vlan", "pppoe", "lagg", "enc", "pflog",
+                     "pfsync", "tun", "tap", "ovpn", "openvpn", "wg", "ng",
+                     "ipsec", "gif", "gre", "bridge", "vxlan", "carp")
 
 
 def is_virtual(if_descr: str, vendor: str) -> bool:
@@ -340,6 +358,7 @@ def is_virtual(if_descr: str, vendor: str) -> bool:
         "aruba_cx": _VIRTUAL_ARUBA,
         "fs":       _VIRTUAL_FS,
         "unifi":    _VIRTUAL_UNIFI,
+        "opnsense": _VIRTUAL_OPNSENSE,
     }.get(vendor, _VIRTUAL_GENERIC)
     return any(p in d for p in patterns)
 

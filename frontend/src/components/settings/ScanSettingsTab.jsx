@@ -15,6 +15,7 @@ function EngineTabContent() {
   const [macUpdateIntervalSec, setMacUpdateIntervalSec] = useState(30);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState("");
   const [activeJobId, setActiveJobId] = useState(null);
 
   // Discovery ranges state
@@ -72,6 +73,7 @@ function EngineTabContent() {
 
   const saveScanSettings = async () => {
     setSettingsSaving(true);
+    setSettingsError("");
     try {
       const payload = { 
         max_workers: Math.max(1, Math.min(128, Number(scanWorkers) || 1)),
@@ -95,6 +97,8 @@ function EngineTabContent() {
       setDiscoveryIntervalSec(nextDiscoveryInterval);
       setLinkUpdateIntervalSec(nextLinksInterval);
       setMacUpdateIntervalSec(nextMacsInterval);
+    } catch (err) {
+      setSettingsError(String(err));
     } finally {
       setSettingsSaving(false);
     }
@@ -294,16 +298,6 @@ function EngineTabContent() {
                 color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
               }}
             />
-            <button
-              onClick={saveScanSettings}
-              disabled={settingsLoading || settingsSaving || scanning}
-              style={{
-                border:"1px solid #1e293b", background:"#0f172a", color:"#94a3b8",
-                borderRadius:6, padding:"5px 10px", cursor:(settingsLoading || settingsSaving || scanning)?"default":"pointer",
-                fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
-                opacity:(settingsLoading || settingsSaving || scanning)?0.6:1,
-              }}
-            >{settingsSaving ? "Saving..." : "Save Scan Settings"}</button>
             <span style={{ color:"#334155", fontSize:10 }}>
               {settingsLoading ? "Loading settings..." : "1-128 workers"}
             </span>
@@ -386,6 +380,22 @@ function EngineTabContent() {
               current MAC schedule: {macsLabel}
             </span>
           </div>
+        </div>
+        {/* Save intervals button + error display */}
+        <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+          <button
+            onClick={saveScanSettings}
+            disabled={settingsLoading || settingsSaving || scanning}
+            style={{
+              border:"1px solid #1e293b", background:"#0f172a", color:"#94a3b8",
+              borderRadius:6, padding:"5px 10px", cursor:(settingsLoading || settingsSaving || scanning)?"default":"pointer",
+              fontFamily:"'Inter', system-ui, sans-serif", fontSize:11,
+              opacity:(settingsLoading || settingsSaving || scanning)?0.6:1,
+            }}
+          >{settingsSaving ? "Saving..." : "Save Scan Settings"}</button>
+          {settingsError && (
+            <span style={{ color:"#f87171", fontSize:10 }}>{settingsError}</span>
+          )}
         </div>
         {/* Discovery IP Ranges */}
         <div style={{
