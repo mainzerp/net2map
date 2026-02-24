@@ -1,20 +1,25 @@
 import { useState } from "react";
 
-export function useRackOrders(selectedRack) {
+export function useRackOrders() {
   const [rackOrders, setRackOrders] = useState(() => {
     try { return JSON.parse(localStorage.getItem("netmap_rack_orders") || "{}"); }
     catch { return {}; }
   });
 
-  const reorderDevice = (deviceId, direction, groupKey) => {
-    if (!selectedRack) return;
-    const rackDevices = Array.isArray(selectedRack.devices) ? selectedRack.devices : [];
-    const rackId = selectedRack.id;
-    const devs = rackDevices.filter(d =>
-      groupKey === "tor"    ? (d.class_id === 1 || (!d.class_id && d.vendor === "fs")) :
-      groupKey === "access" ? (d.class_id === 2 || (!d.class_id && d.vendor === "aruba_cx")) :
-      d.class_id == null && d.vendor !== "fs" && d.vendor !== "aruba_cx"
-    );
+  const reorderDevice = (deviceId, direction, groupKey, rackId, rackDevicesInput) => {
+    if (rackId == null) return;
+    const rackDevices = Array.isArray(rackDevicesInput) ? rackDevicesInput : [];
+    const parsedClassId = typeof groupKey === "string" && groupKey.startsWith("class:")
+      ? Number(groupKey.slice(6))
+      : null;
+    const devs = rackDevices.filter(d => {
+      if (parsedClassId != null && Number.isFinite(parsedClassId)) return d.class_id === parsedClassId;
+      if (groupKey === "unclassified") return d.class_id == null;
+      if (groupKey === "tor") return d.class_id === 1 || (!d.class_id && d.vendor === "fs");
+      if (groupKey === "access") return d.class_id === 2 || (!d.class_id && d.vendor === "aruba_cx");
+      if (groupKey === "other") return d.class_id == null && d.vendor !== "fs" && d.vendor !== "aruba_cx";
+      return false;
+    });
     const ids = devs.map(d => String(d.id));
     const targetId = String(deviceId);
     const storeKey = `${rackId}::${groupKey}`;

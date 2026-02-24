@@ -22,7 +22,7 @@ export default function MapPage() {
     return { ...selectedRack, devices };
   }, [selectedRack, topology.nodes]);
 
-  const { rackOrders, reorderDevice } = useRackOrders(selectedRackFull);
+  const { rackOrders, reorderDevice } = useRackOrders();
   const [filters, setFilters] = useState({ racks: null, classes: null });
   const [selectedLink, setSelectedLink] = useState(null);
 
@@ -102,6 +102,16 @@ export default function MapPage() {
   }, [selectedRackFull]);
   const links10g = topology.links.filter(l => ["10G","25G","40G","100G"].includes(l.speed_label)).length;
   const links1g  = topology.links.filter(l => l.speed_label === "1G").length;
+  const selectedRackOrders = useMemo(() => {
+    if (!selectedRackFull) return {};
+    const prefix = `${selectedRackFull.id}::`;
+    const out = {};
+    Object.entries(rackOrders || {}).forEach(([k, v]) => {
+      if (!k.startsWith(prefix)) return;
+      out[k.slice(prefix.length)] = v;
+    });
+    return out;
+  }, [rackOrders, selectedRackFull]);
 
   return (
     <div style={{ display:"flex", flexDirection:"column", height:"calc(100vh - 48px)", overflow:"hidden" }}>
@@ -190,12 +200,10 @@ export default function MapPage() {
               rackPairColorMap={rackPairColorMap}
               selectedLink={selectedLink}
               onLinkSelect={setSelectedLink}
-              deviceOrder={selectedRack ? Object.fromEntries(
-                ["tor","access","other"].map(g => [
-                  g, rackOrders[`${selectedRack.id}::${g}`]
-                ])
-              ) : {}}
-              onReorder={(deviceId, dir, groupKey) => reorderDevice(deviceId, dir, groupKey)}
+              deviceOrder={selectedRackOrders}
+              onReorder={(deviceId, dir, groupKey) =>
+                reorderDevice(deviceId, dir, groupKey, selectedRackFull.id, selectedRackFull.devices)
+              }
               onClose={() => setSelectedRack(null)}
               onRename={newName => renameRack(selectedRack, newName)}
               onMoveDevice={moveDevice}

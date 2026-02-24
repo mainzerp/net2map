@@ -1,5 +1,26 @@
 # Version History
 
+## v1.4.0 — Dynamic Rack Class Sections
+
+**Type:** MINOR (new feature)
+
+### Changes
+
+#### Rack Detail: Unlimited Class Groups
+- Removed hardcoded rack sections for only Top-of-Rack and Access.
+- Rack detail panel now renders a section for every class that is present in the selected rack (`class_id`-based grouping).
+- Unclassified devices remain visible in a dedicated `Other` section.
+- Reorder persistence now supports dynamic class keys (e.g. `class:<id>`) instead of only `tor/access/other`.
+
+### Files Modified
+| File | Change |
+|------|--------|
+| frontend/src/components/map/RackDetail.jsx | Dynamic per-class sections and render flow |
+| frontend/src/hooks/useRackOrders.js | Dynamic class-key reorder support |
+| frontend/src/pages/MapPage.jsx | Pass dynamic rack order groups to RackDetail |
+
+---
+
 ## v1.3.1 — Rack Detail Reorder Fix
 
 **Type:** PATCH (bug fix)

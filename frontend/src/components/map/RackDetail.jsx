@@ -6,6 +6,7 @@ import SwitchPanel from "../SwitchPanel.jsx";
 function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks, deviceOrder, onReorder, onClose, onRename, onMoveDevice, onUpdateDeviceMeta, rackPairColorMap, selectedLink, onLinkSelect }) {
   const [editing, setEditing] = useState(false);
   const [nameInput, setNameInput] = useState(rack.label);
+  const [localOrder, setLocalOrder] = useState({});
   // selectedLink is lifted to MapPage; fall back to local state if not provided
   const [localSelectedLink, setLocalSelectedLink] = useState(null);
   const resolvedSelectedLink = selectedLink !== undefined ? selectedLink : localSelectedLink;
@@ -19,8 +20,29 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
     setEditing(false);
   };
 
+  useEffect(() => {
+    setLocalOrder({});
+  }, [rack.id]);
+
+  const applyLocalReorder = useCallback((deviceId, direction, groupKey, devices) => {
+    const ids = devices.map(d => String(d.id));
+    if (!ids.length) return;
+    const current = ((localOrder[groupKey] || []).map(id => String(id)));
+    const base = current.length ? current : ids;
+    const merged = [
+      ...base.filter(id => ids.includes(id)),
+      ...ids.filter(id => !base.includes(id)),
+    ];
+    const idx = merged.indexOf(String(deviceId));
+    if (idx < 0) return;
+    const newIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (newIdx < 0 || newIdx >= merged.length) return;
+    [merged[idx], merged[newIdx]] = [merged[newIdx], merged[idx]];
+    setLocalOrder(prev => ({ ...prev, [groupKey]: merged }));
+  }, [localOrder]);
+
   const sortGroup = useCallback((devices, groupKey) => {
-    const order = ((deviceOrder || {})[groupKey] || []).map(id => String(id));
+    const order = (((localOrder || {})[groupKey] || (deviceOrder || {})[groupKey] || []).map(id => String(id)));
     if (!order.length) return devices;
     return [...devices].sort((a, b) => {
       const ai = order.indexOf(String(a.id)), bi = order.indexOf(String(b.id));
@@ -29,14 +51,58 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
       if (bi === -1) return -1;
       return ai - bi;
     });
-  }, [deviceOrder]);
-
-  const torDevices    = useMemo(() => sortGroup(rack.devices.filter(d => d.class_id === 1 || (!d.class_id && d.vendor === "fs")),    "tor"),    [rack.devices, sortGroup]);
-  const accessDevices = useMemo(() => sortGroup(rack.devices.filter(d => d.class_id === 2 || (!d.class_id && d.vendor === "aruba_cx")), "access"), [rack.devices, sortGroup]);
-  const otherDevices  = useMemo(() => rack.devices.filter(d => d.class_id == null && d.vendor !== "fs" && d.vendor !== "aruba_cx"), [rack.devices]);
+  }, [deviceOrder, localOrder]);
 
   const classMap = useMemo(() => Object.fromEntries((switchClasses || []).map(c => [c.id, c])), [switchClasses]);
   const modelMap = useMemo(() => Object.fromEntries((switchModels || []).map(m => [m.id, m])), [switchModels]);
+  const classOrderMap = useMemo(() => {
+    const m = {};
+    (switchClasses || []).forEach((c, idx) => { m[c.id] = idx; });
+    return m;
+  }, [switchClasses]);
+
+  const classSections = useMemo(() => {
+    const grouped = {};
+    const unclassified = [];
+
+    (rack.devices || []).forEach(d => {
+      if (d.class_id == null) {
+        unclassified.push(d);
+        return;
+      }
+      const key = `class:${d.class_id}`;
+      if (!grouped[key]) {
+        grouped[key] = {
+          key,
+          classId: d.class_id,
+          label: classMap[d.class_id]?.label || `Class ${d.class_id}`,
+          color: classMap[d.class_id]?.color || "#22d3ee",
+          devices: [],
+        };
+      }
+      grouped[key].devices.push(d);
+    });
+
+    const classGroups = Object.values(grouped)
+      .sort((a, b) => {
+        const ai = classOrderMap[a.classId] ?? (1000 + Number(a.classId || 0));
+        const bi = classOrderMap[b.classId] ?? (1000 + Number(b.classId || 0));
+        return ai - bi;
+      })
+      .map(g => ({ ...g, devices: sortGroup(g.devices, g.key) }));
+
+    if (!unclassified.length) return classGroups;
+    return [
+      ...classGroups,
+      {
+        key: "unclassified",
+        classId: null,
+        label: "Other",
+        color: "#64748b",
+        devices: sortGroup(unclassified, "unclassified"),
+      },
+    ];
+  }, [rack.devices, classMap, classOrderMap, sortGroup]);
 
   const { uplinks, trunks, external } = useMemo(() => {
     const rackIps  = new Set(rack.devices.map(d => d.ip));
@@ -163,7 +229,13 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
     <div key={d.id} style={{display:"flex",alignItems:"flex-start",gap:5,marginBottom:4}}>
       <div style={{display:"flex",flexDirection:"column",gap:2,paddingTop:8,flexShrink:0}}>
         <button
-          onClick={() => onReorder?.(d.id, "up", groupKey)}
+          type="button"
+          onPointerDown={e => {
+            e.preventDefault();
+            e.stopPropagation();
+            applyLocalReorder(d.id, "up", groupKey, devices);
+            onReorder?.(d.id, "up", groupKey);
+          }}
           disabled={idx === 0}
           style={{
             background:"none", border:"1px solid #1e293b",
@@ -174,7 +246,13 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
             alignItems:"center", justifyContent:"center",
           }}>^</button>
         <button
-          onClick={() => onReorder?.(d.id, "down", groupKey)}
+          type="button"
+          onPointerDown={e => {
+            e.preventDefault();
+            e.stopPropagation();
+            applyLocalReorder(d.id, "down", groupKey, devices);
+            onReorder?.(d.id, "down", groupKey);
+          }}
           disabled={idx === devices.length - 1}
           style={{
             background:"none", border:"1px solid #1e293b",
@@ -305,42 +383,26 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
       {/* Content */}
       <div ref={scrollRef} style={{flex:1,overflowY:"auto",overflowX:"hidden",padding:"12px 20px"}}>
 
-        {torDevices.length > 0 && (
-          <>
+        {classSections.map((section, idx) => (
+          <div key={section.key}>
             <div style={{
-              fontSize:10, color: classMap[1]?.color || "#22d3ee", marginBottom:6,
-              letterSpacing:"0.1em", textTransform:"uppercase",
-              display:"flex", alignItems:"center", gap:8,
+              fontSize:10,
+              color: section.color,
+              marginTop: idx === 0 ? 0 : 10,
+              marginBottom:6,
+              letterSpacing:"0.1em",
+              textTransform:"uppercase",
+              display:"flex",
+              alignItems:"center",
+              gap:8,
             }}>
-              <span style={{flex:1,borderBottom:`1px solid ${classMap[1]?.color ? classMap[1].color+"44" : "#164e63"}`,height:0,display:"inline-block"}}/>
-              {classMap[1]?.label || "Top-of-Rack"} ({torDevices.length})
-              <span style={{flex:1,borderBottom:`1px solid ${classMap[1]?.color ? classMap[1].color+"44" : "#164e63"}`,height:0,display:"inline-block"}}/>
+              <span style={{flex:1,borderBottom:`1px solid ${section.color}44`,height:0,display:"inline-block"}}/>
+              {section.label} ({section.devices.length})
+              <span style={{flex:1,borderBottom:`1px solid ${section.color}44`,height:0,display:"inline-block"}}/>
             </div>
-            {renderGroup(torDevices, "tor")}
-          </>
-        )}
-
-        {accessDevices.length > 0 && (
-          <>
-            <div style={{
-              fontSize:10, color: classMap[2]?.color || "#f59e0b", marginTop:10, marginBottom:6,
-              letterSpacing:"0.1em", textTransform:"uppercase",
-              display:"flex", alignItems:"center", gap:8,
-            }}>
-              <span style={{flex:1,borderBottom:`1px solid ${classMap[2]?.color ? classMap[2].color+"44" : "#78350f"}`,height:0,display:"inline-block"}}/>
-              {classMap[2]?.label || "Access"} ({accessDevices.length})
-              <span style={{flex:1,borderBottom:`1px solid ${classMap[2]?.color ? classMap[2].color+"44" : "#78350f"}`,height:0,display:"inline-block"}}/>
-            </div>
-            {renderGroup(accessDevices, "access")}
-          </>
-        )}
-
-        {otherDevices.length > 0 && (
-          <>
-            <div style={{fontSize:10,color:"#475569",marginTop:10,marginBottom:6,letterSpacing:"0.08em",textTransform:"uppercase"}}>Other</div>
-            {renderGroup(otherDevices, "other")}
-          </>
-        )}
+            {renderGroup(section.devices, section.key)}
+          </div>
+        ))}
 
         {uplinks.length > 0 && (
           <>
