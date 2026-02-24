@@ -1,5 +1,5 @@
 #!/bin/sh
-# entrypoint.sh — fixes /data ownership for Docker volume mounts, then:
+# entrypoint.sh â€” fixes /data ownership for Docker volume mounts, then:
 #   1. Waits for PostgreSQL to be ready
 #   2. Runs Alembic migrations (creates or migrates the schema)
 #   3. Drops privileges to appuser

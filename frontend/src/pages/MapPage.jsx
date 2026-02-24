@@ -87,7 +87,16 @@ export default function MapPage() {
   };
 
   const panelOpen = !!selectedRack;
-  const PANEL_W = 760;
+  // Panel width adapts to the widest switch in the rack.
+  // Port cell = 34px + 2px gap = 36px; overhead accounts for padding, reorder buttons, borders.
+  const panelWidth = useMemo(() => {
+    if (!selectedRackFull) return 760;
+    let maxPPR = 24;
+    (selectedRackFull.devices || []).forEach(d => {
+      if (d.ports_per_row && d.ports_per_row > maxPPR) maxPPR = d.ports_per_row;
+    });
+    return Math.max(520, maxPPR * 36 + 100);
+  }, [selectedRackFull]);
   const links10g = topology.links.filter(l => ["10G","25G","40G","100G"].includes(l.speed_label)).length;
   const links1g  = topology.links.filter(l => l.speed_label === "1G").length;
 
@@ -168,7 +177,7 @@ export default function MapPage() {
 
         {/* Right panel: inline, not fixed, so map shrinks gracefully */}
         {selectedRackFull && (
-          <div style={{ width: PANEL_W, flexShrink: 0, borderLeft:"1px solid #0f172a", overflow:"hidden", display:"flex", flexDirection:"column" }}>
+          <div style={{ width: panelWidth, flexShrink: 0, borderLeft:"1px solid #0f172a", overflow:"hidden", display:"flex", flexDirection:"column" }}>
             <RackDetail
               rack={selectedRackFull}
               allRacks={allRacks}

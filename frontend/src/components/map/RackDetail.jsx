@@ -14,16 +14,6 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
   const activePorts = rack.devices.reduce((s,d) => s + (d.ports || []).filter(p => p.oper_status === 1).length, 0);
   const otherRacks  = (allRacks || []).filter(r => r.id !== rack.id);
 
-  // Compute panel width based on max ports_per_row across devices
-  const maxPPR = useMemo(() => {
-    let m = 24;
-    rack.devices.forEach(d => { if (d.ports_per_row && d.ports_per_row > m) m = d.ports_per_row; });
-    return m;
-  }, [rack.devices]);
-  // Port = 34px + 2px gap = 36px per port column
-  // Chrome: content padding (40) + scrollbar (6) + reorder btns (23) + SwitchPanel border (2) + SwitchPanel padding (28) + extra (1) = 100px
-  const panelWidth = Math.max(520, maxPPR * 36 + 100);
-
   const commitRename = () => {
     if (nameInput.trim() && nameInput.trim() !== rack.label) onRename?.(nameInput.trim());
     setEditing(false);

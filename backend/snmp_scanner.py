@@ -74,6 +74,17 @@ OID_ARP_IP  = "1.3.6.1.2.1.4.22.1.3"
 OID_DOT1D_TP_FDB_PORT        = "1.3.6.1.2.1.17.4.3.1.2"
 OID_DOT1D_BASE_PORT_IF_INDEX = "1.3.6.1.2.1.17.1.4.1.2"
 
+# Q-Bridge-MIB (required for UniFi; OID index format: {VLAN}.{6 MAC bytes})
+OID_QBRIDGE_FDB_PORT   = "1.3.6.1.2.1.17.7.1.2.2.1.2"  # MAC+VLAN -> bridge port
+OID_QBRIDGE_FDB_STATUS = "1.3.6.1.2.1.17.7.1.2.2.1.3"  # 3=learned, 5=self
+
+# Per-vendor FDB walk strategy
+FDB_STRATEGY: Dict[str, str] = {
+    "unifi":    "qbridge",  # dot1d returns NOSUCHINSTANCE on UniFi
+    "aruba_cx": "dot1d",
+    "fs":       "dot1d",
+}
+
 # --- Vendor enterprise OIDs ---------------------------------------------------
 VENDOR_OIDS: Dict[str, str] = {
     "1.3.6.1.4.1.47196": "aruba_cx",  # Aruba Networks (CX)
@@ -188,7 +199,7 @@ async def snmp_get(ip: str, port: int, auth,
         for row in var_binds:
             # pysnmp-lextudio 5.x: each row is [ObjectType]; older versions: ObjectType
             vb = row[0] if isinstance(row, (list, tuple)) else row
-            result[str(vb[0])] = str(vb[1])
+            result[str(vb[0])] = _decode_snmp_str(vb[1])
     except Exception as exc:
         exc_type = type(exc).__name__
         if "Authentication" in exc_type or "auth" in str(exc).lower():
@@ -246,7 +257,7 @@ async def snmp_bulk_walk(ip: str, port: int, auth,
                 # row is either [ObjectType] or ObjectType depending on version
                 vb = row[0] if isinstance(row, (list, tuple)) else row
                 vb_oid = str(vb[0])
-                vb_val = str(vb[1])
+                vb_val = _decode_snmp_str(vb[1])
                 # Stop if we have left the requested subtree
                 if not vb_oid.startswith(oid + ".") and vb_oid != oid:
                     return rows
@@ -347,10 +358,45 @@ def speed_label(mbps: int) -> str:
     return "10M"
 
 
-# --- Helper: last N OID components -------------------------------------------
-
 def _last_n(oid_str: str, n: int = 1) -> List[str]:
     return oid_str.rstrip(".").split(".")[-n:]
+
+
+def _decode_snmp_str(val) -> str:
+    """Safely decode a pysnmp value to a clean Unicode string.
+
+    pysnmp OctetString.__str__() silently decodes bytes as Latin-1, which
+    produces garbage like '\u00ac\u00a9+\u00f2\u00ed' for non-ASCII byte
+    sequences.  We instead:
+      1. Extract raw bytes (bytes() works on OctetString; str() on anything else).
+      2. Try UTF-8 first, then Latin-1.
+      3. Strip non-printable control characters.
+      4. Return empty string if the result is all non-ASCII garbage.
+    """
+    try:
+        raw: bytes = bytes(val)  # works for OctetString; raises TypeError otherwise
+    except (TypeError, Exception):
+        return str(val).strip()
+
+    # Try UTF-8 first (strict), then Latin-1 as fallback
+    for enc in ("utf-8", "latin-1"):
+        try:
+            decoded = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        return ""  # can't decode at all
+
+    # Strip C0/C1 control characters (keep printable + common whitespace)
+    cleaned = "".join(c for c in decoded if c >= " " or c in "\t\n\r")
+    cleaned = cleaned.strip()
+
+    # If more than half the chars are non-ASCII, it's likely binary garbage
+    if cleaned and sum(ord(c) > 127 for c in cleaned) > len(cleaned) / 2:
+        return ""
+
+    return cleaned
 
 
 def _hex_to_mac(hex_str: str) -> str:
@@ -366,6 +412,19 @@ def _oid_to_mac(oid_str: str) -> str:
     """Extract MAC from last 6 OID components (decimal bytes)."""
     try:
         parts = oid_str.rstrip(".").split(".")
+        octets = [int(x) for x in parts[-6:]]
+        if len(octets) != 6 or any(o < 0 or o > 255 for o in octets):
+            return ""
+        return ":".join(f"{o:02x}" for o in octets)
+    except Exception:
+        return ""
+
+
+def _oid_to_mac_qbridge(oid_str: str) -> str:
+    """Extract MAC from Q-Bridge OID index: last 7 components are {VLAN}.{6 MAC bytes}."""
+    try:
+        parts = oid_str.rstrip(".").split(".")
+        # parts[-7] = VLAN id, parts[-6:] = 6 MAC octets
         octets = [int(x) for x in parts[-6:]]
         if len(octets) != 6 or any(o < 0 or o > 255 for o in octets):
             return ""
@@ -518,12 +577,16 @@ async def scan_switch(
 
     if wants_macs:
         # -- 5. ARP + BRIDGE-MIB in parallel ---------------------------------
+        fdb_strategy = FDB_STRATEGY.get(sw.vendor, "dot1d")
+        fdb_oid = OID_QBRIDGE_FDB_PORT if fdb_strategy == "qbridge" else OID_DOT1D_TP_FDB_PORT
+        log.debug("FDB strategy for %s (vendor=%s): %s", ip, sw.vendor, fdb_strategy)
+
         (arp_mac_rows, arp_ip_rows,
          base_port_rows, fdb_rows) = await asyncio.gather(
             snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_MAC, timeout=snmp_timeout, retries=snmp_retries),
             snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_IP, timeout=snmp_timeout, retries=snmp_retries),
             snmp_bulk_walk(ip, snmp_port, auth, OID_DOT1D_BASE_PORT_IF_INDEX, timeout=snmp_timeout, retries=snmp_retries),
-            snmp_bulk_walk(ip, snmp_port, auth, OID_DOT1D_TP_FDB_PORT, timeout=snmp_timeout, retries=snmp_retries),
+            snmp_bulk_walk(ip, snmp_port, auth, fdb_oid, timeout=snmp_timeout, retries=snmp_retries),
         )
 
         ip_by_suffix: Dict[str, str] = {}
@@ -545,8 +608,9 @@ async def scan_switch(
             except ValueError:
                 continue
 
+        mac_parser = _oid_to_mac_qbridge if fdb_strategy == "qbridge" else _oid_to_mac
         for oid_s, bridge_port_val in fdb_rows:
-            mac = _oid_to_mac(oid_s)
+            mac = mac_parser(oid_s)
             if not mac:
                 continue
             try:
