@@ -89,7 +89,9 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
   const devByIp = useMemo(() => Object.fromEntries(rack.devices.map(d => [d.ip, d])), [rack.devices]);
 
   const allIntraLinks = useMemo(() => [...uplinks, ...trunks], [uplinks, trunks]);
-  const portLinkMap   = useMemo(() => buildPortLinkMap(allIntraLinks), [allIntraLinks]);
+  // Include external links so inter-rack ports also appear in portLinkMap / linkColorMap
+  const allVisibleLinks = useMemo(() => [...allIntraLinks, ...external], [allIntraLinks, external]);
+  const portLinkMap   = useMemo(() => buildPortLinkMap(allVisibleLinks), [allVisibleLinks]);
 
   // Build ip -> rack_id map from all known racks
   const ipToRackId = useMemo(() => {
@@ -106,7 +108,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
     // with the SVG lines.  Fall back to per-switch-pair CABLE_COLORS.
     const pairColors = {};
     let colorIdx = 0;
-    allIntraLinks.forEach(l => {
+    allVisibleLinks.forEach(l => {
       const pairKey = [l.local_ip, l.remote_ip].sort().join("|");
       if (!(pairKey in pairColors)) {
         // Try to get the rack-pair color first
@@ -122,7 +124,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
       m[`${l.remote_ip}:${normPort(l.remote_port)}`] = c;
     });
     return m;
-  }, [allIntraLinks, ipToRackId, rackPairColorMap]);
+  }, [allVisibleLinks, ipToRackId, rackPairColorMap]);
   const selColor  = selectedLink ? (linkColorMap[`${selectedLink.local_ip}:${normPort(selectedLink.local_port)}`] || "#22d3ee") : null;
   const toggleLink = useCallback((l) =>
     setSelectedLink(p => p?.local_ip===l?.local_ip && p?.local_port===l?.local_port ? null : l),
