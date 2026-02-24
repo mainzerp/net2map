@@ -258,11 +258,10 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
   return (
     <>
     <div style={{
-      position:"fixed", right:0, top:48, bottom:0, width:panelWidth,
+      width:"100%", height:"100%",
       backgroundColor:"#020817", borderLeft:"1px solid #1e293b",
-      zIndex:100, display:"flex", flexDirection:"column",
+      display:"flex", flexDirection:"column",
       fontFamily:"'Inter', system-ui, sans-serif",
-      boxShadow:"-8px 0 40px rgba(0,0,0,0.6)",
       animation:"slideIn 0.2s ease",
     }}>
       <style>{`

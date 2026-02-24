@@ -10,7 +10,7 @@ function _isValidZoom(z) {
   );
 }
 
-function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSelectRack, selectedRackId, onPositionChange, mapBgUrl, mapBgOpacity, mapBgScale, mapBgNat, rackPairColorMap, selectedLink }) {
+function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSelectRack, selectedRackId, centerRackId, onPositionChange, mapBgUrl, mapBgOpacity, mapBgScale, mapBgNat, rackPairColorMap, selectedLink }) {
   const W = 900, H = 550;
   const svgRef = useRef(null);
   const [drag, setDrag] = useState(null);
@@ -36,6 +36,23 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
     nodes.forEach(n => { pos[n.id] = { x: n.map_x, y: n.map_y }; });
     setPositions(pos);
   }, [nodes]);
+
+  // Pan map to center the selected rack when centerRackId changes
+  useEffect(() => {
+    if (!centerRackId) return;
+    const rackDevices = nodes.filter(n => n.rack_id === centerRackId);
+    if (!rackDevices.length) return;
+    const xs = rackDevices.map(n => positions[n.id]?.x ?? n.map_x);
+    const ys = rackDevices.map(n => positions[n.id]?.y ?? n.map_y);
+    const cx = xs.reduce((a, b) => a + b, 0) / xs.length;
+    const cy = ys.reduce((a, b) => a + b, 0) / ys.length;
+    setZoom(z => ({
+      ...z,
+      tx: W / 2 - cx * z.scale,
+      ty: H / 2 - cy * z.scale,
+    }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [centerRackId]);
 
   useEffect(() => {
     const el = svgRef.current;
@@ -221,6 +238,7 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
     <svg
       ref={svgRef}
       width="100%"
+      height="100%"
       viewBox={`0 0 ${W} ${H}`}
       style={{ display:"block", cursor: drag ? "grabbing" : bgPan ? "grabbing" : "default" }}
       onMouseMove={onMouseMove}

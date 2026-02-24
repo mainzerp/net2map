@@ -87,11 +87,12 @@ export default function MapPage() {
   };
 
   const panelOpen = !!selectedRack;
+  const PANEL_W = 760;
   const links10g = topology.links.filter(l => ["10G","25G","40G","100G"].includes(l.speed_label)).length;
   const links1g  = topology.links.filter(l => l.speed_label === "1G").length;
 
   return (
-    <>
+    <div style={{ display:"flex", flexDirection:"column", height:"calc(100vh - 48px)", overflow:"hidden" }}>
       {loadError && (
         <div style={{ padding: 24, color: "#e74c3c", textAlign: "center" }}>
           Failed to load topology: {loadError}
@@ -122,61 +123,72 @@ export default function MapPage() {
         </div>
       </div>
 
-      <div style={{ padding: 24, marginRight: panelOpen ? 760 : 0, transition: "margin-right 0.25s ease" }}>
-        <FilterBar
-          racks={topology.racks || []}
-          classes={topology.classes || []}
-          filters={filters}
-          onFilterChange={setFilters}
-        />
-        <div style={{ border: "1px solid #0f172a", borderRadius: 12, overflow: "hidden" }}>
-          <TopologyMap
-            nodes={topology.nodes}
-            links={topology.links}
-            managedRacks={topology.racks || []}
-            switchClasses={topology.classes || []}
+      {/* Map area: flex row so panel sits inline and map fills the left */}
+      <div style={{ flex:1, display:"flex", overflow:"hidden" }}>
+        {/* Map content column */}
+        <div style={{
+          flex:1, display:"flex", flexDirection:"column", overflow:"hidden",
+          transition:"flex 0.25s ease",
+        }}>
+          <FilterBar
+            racks={topology.racks || []}
+            classes={topology.classes || []}
             filters={filters}
-            onSelectRack={handleSelectRack}
-            selectedRackId={selectedRack?.id}
-            onPositionChange={savePosition}
-            mapBgUrl={mapBgUrl}
-            mapBgOpacity={mapBgOpacity}
-            mapBgScale={mapBgScale}
-            mapBgNat={mapBgNat}
-            rackPairColorMap={rackPairColorMap}
-            selectedLink={selectedLink}
+            onFilterChange={setFilters}
           />
+          <div style={{ flex:1, overflow:"hidden", border:"1px solid #0f172a", borderRadius:12, margin:"8px 12px 12px" }}>
+            <TopologyMap
+              nodes={topology.nodes}
+              links={topology.links}
+              managedRacks={topology.racks || []}
+              switchClasses={topology.classes || []}
+              filters={filters}
+              onSelectRack={handleSelectRack}
+              selectedRackId={selectedRack?.id}
+              centerRackId={selectedRack?.id ?? null}
+              onPositionChange={savePosition}
+              mapBgUrl={mapBgUrl}
+              mapBgOpacity={mapBgOpacity}
+              mapBgScale={mapBgScale}
+              mapBgNat={mapBgNat}
+              rackPairColorMap={rackPairColorMap}
+              selectedLink={selectedLink}
+            />
+          </div>
+          {topology.nodes.length === 0 && (
+            <p style={{ textAlign: "center", color: "#334155", fontSize: 11, marginBottom: 8 }}>
+              No switches found - add credentials in Settings and run Scan
+            </p>
+          )}
         </div>
-        {topology.nodes.length === 0 && (
-          <p style={{ textAlign: "center", color: "#334155", fontSize: 11, marginTop: 12 }}>
-            No switches found - add credentials in Settings and run Scan
-          </p>
+
+        {/* Right panel: inline, not fixed, so map shrinks gracefully */}
+        {selectedRackFull && (
+          <div style={{ width: PANEL_W, flexShrink: 0, borderLeft:"1px solid #0f172a", overflow:"hidden", display:"flex", flexDirection:"column" }}>
+            <RackDetail
+              rack={selectedRackFull}
+              allRacks={allRacks}
+              switchClasses={topology.classes || []}
+              switchModels={topology.models || []}
+              topologyLinks={topology.links}
+              rackPairColorMap={rackPairColorMap}
+              selectedLink={selectedLink}
+              onLinkSelect={setSelectedLink}
+              deviceOrder={selectedRack ? Object.fromEntries(
+                ["tor","access","other"].map(g => [
+                  g, rackOrders[`${selectedRack.id}::${g}`]
+                ])
+              ) : {}}
+              onReorder={(deviceId, dir, groupKey) => reorderDevice(deviceId, dir, groupKey)}
+              onClose={() => setSelectedRack(null)}
+              onRename={newName => renameRack(selectedRack, newName)}
+              onMoveDevice={moveDevice}
+              onUpdateDeviceMeta={updateDeviceMeta}
+            />
+          </div>
         )}
       </div>
-
-      {selectedRackFull && (
-        <RackDetail
-          rack={selectedRackFull}
-          allRacks={allRacks}
-          switchClasses={topology.classes || []}
-          switchModels={topology.models || []}
-          topologyLinks={topology.links}
-          rackPairColorMap={rackPairColorMap}
-          selectedLink={selectedLink}
-          onLinkSelect={setSelectedLink}
-          deviceOrder={selectedRack ? Object.fromEntries(
-            ["tor","access","other"].map(g => [
-              g, rackOrders[`${selectedRack.id}::${g}`]
-            ])
-          ) : {}}
-          onReorder={(deviceId, dir, groupKey) => reorderDevice(deviceId, dir, groupKey)}
-          onClose={() => setSelectedRack(null)}
-          onRename={newName => renameRack(selectedRack, newName)}
-          onMoveDevice={moveDevice}
-          onUpdateDeviceMeta={updateDeviceMeta}
-        />
-      )}
-    </>
+    </div>
   );
 }
 
