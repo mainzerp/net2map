@@ -26,17 +26,13 @@ export default function MapPage() {
     (topology.racks || []).forEach(r => {
       rackMap[r.id] = { id: r.id, label: r.label, room: r.room, description: r.description, devices: [] };
     });
-    const unassigned = { id: "__unassigned__", label: "Unassigned", room: "", description: "", devices: [] };
     topology.nodes.forEach(n => {
       if (n.rack_id && rackMap[n.rack_id]) {
         rackMap[n.rack_id].devices.push(n);
-      } else {
-        unassigned.devices.push(n);
       }
+      // nodes without a rack are not shown on the map
     });
-    const result = Object.values(rackMap);
-    if (unassigned.devices.length > 0) result.push(unassigned);
-    return result;
+    return Object.values(rackMap);
   }, [topology.nodes, topology.racks]);
 
   // Derive the full selectedRack object (with up-to-date devices) directly from
@@ -53,7 +49,7 @@ export default function MapPage() {
   const rackPairColorMap = useMemo(() => {
     const ipToRack = {};
     topology.nodes.forEach(n => {
-      ipToRack[n.ip] = n.rack_id ? String(n.rack_id) : "__unassigned__";
+      if (n.rack_id) ipToRack[n.ip] = String(n.rack_id);
     });
     const seen = {};
     let idx = 0;
@@ -75,15 +71,13 @@ export default function MapPage() {
   };
 
   const renameRack = async (rack, newName) => {
-    if (rack.id === "__unassigned__") return;
     await api.put(`/api/racks/${rack.id}`, { label: newName });
     setSelectedRack(prev => prev ? { ...prev, label: newName } : null);
     loadTopology();
   };
 
   const moveDevice = async (device, newRackId) => {
-    const rId = newRackId === "__unassigned__" ? null : newRackId;
-    await api.patch(`/api/topology/devices/${device.id}/meta`, { rack_id: rId });
+    await api.patch(`/api/topology/devices/${device.id}/meta`, { rack_id: newRackId || null });
     loadTopology();
   };
 

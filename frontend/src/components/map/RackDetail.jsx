@@ -110,7 +110,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
   const ipToRackId = useMemo(() => {
     const m = {};
     (allRacks || []).forEach(r => {
-      (r.devices || []).forEach(d => { m[d.ip] = r.id ? String(r.id) : "__unassigned__"; });
+      if (r.id) (r.devices || []).forEach(d => { m[d.ip] = String(r.id); });
     });
     return m;
   }, [allRacks]);

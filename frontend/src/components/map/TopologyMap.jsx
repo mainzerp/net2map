@@ -61,14 +61,11 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
     (managedRacks || []).forEach(r => {
       map[r.id] = { id: r.id, label: r.label, location: `${r.label}${r.room ? " / " + r.room : ""}`, devices: [] };
     });
-    const unassignedKey = "__unassigned__";
     nodes.forEach(node => {
       if (node.rack_id && map[node.rack_id]) {
         map[node.rack_id].devices.push(node);
-      } else {
-        if (!map[unassignedKey]) map[unassignedKey] = { id: unassignedKey, label: "Unassigned", location: "Unassigned", devices: [] };
-        map[unassignedKey].devices.push(node);
       }
+      // nodes without a rack assignment are not shown on the map
     });
     let result = Object.values(map).filter(r => r.devices.length > 0);
     if (filters?.racks) {
@@ -101,8 +98,10 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
     (managedRacks || []).forEach(r => { rackForNode[r.id] = r.id; });
     const map = {};
     nodes.forEach(node => {
-      const rId = node.rack_id && rackForNode[node.rack_id] ? node.rack_id : "__unassigned__";
-      map[node.ip] = rId;
+      if (node.rack_id && rackForNode[node.rack_id]) {
+        map[node.ip] = node.rack_id;
+      }
+      // nodes without a rack assignment are not shown on the map
     });
     return map;
   }, [nodes, managedRacks]);
