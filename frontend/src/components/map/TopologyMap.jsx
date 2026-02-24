@@ -10,7 +10,7 @@ function _isValidZoom(z) {
   );
 }
 
-function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSelectRack, selectedRackId, onPositionChange, mapBgUrl, mapBgOpacity, mapBgScale, mapBgNat, rackPairColorMap }) {
+function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSelectRack, selectedRackId, onPositionChange, mapBgUrl, mapBgOpacity, mapBgScale, mapBgNat, rackPairColorMap, selectedLink }) {
   const W = 900, H = 550;
   const svgRef = useRef(null);
   const [drag, setDrag] = useState(null);
@@ -131,6 +131,15 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
       return { ...g, count: unique.length, speed: best.speed_label };
     });
   }, [links, ipToRackId]);
+
+  // Find which rack-pair the selected link belongs to
+  const activePairKey = useMemo(() => {
+    if (!selectedLink) return null;
+    const ra = ipToRackId[selectedLink.local_ip];
+    const rb = ipToRackId[selectedLink.remote_ip];
+    if (!ra || !rb || ra === rb) return null;
+    return [ra, rb].sort().join("|");
+  }, [selectedLink, ipToRackId]);
 
   const svgPoint = (e) => {
     const svg = svgRef.current;
@@ -260,13 +269,19 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
         const c = pairColor || speedFallback;
         const w = l.speed === "100G" ? 2.5 : 1.5;
         const label = l.count > 1 ? `${l.count}x ${l.speed}` : l.speed;
+        const isActive = activePairKey === pairKey;
         return (
           <g key={l.key}>
+            {isActive && (
+              <line x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
+                    stroke={c} strokeWidth={(w * Math.min(l.count, 4)) + 8} strokeOpacity={0.18}/>
+            )}
             <line x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
-                  stroke={c} strokeWidth={w * Math.min(l.count, 4)} strokeOpacity={0.55}/>
+                  stroke={c} strokeWidth={isActive ? w * Math.min(l.count, 4) + 2 : w * Math.min(l.count, 4)}
+                  strokeOpacity={isActive ? 0.9 : 0.55}/>
             <text x={(pa.x+pb.x)/2} y={(pa.y+pb.y)/2 - 6}
                   fill={c} fontSize={9} textAnchor="middle"
-                  opacity={0.85} fontFamily="monospace">{label}</text>
+                  opacity={isActive ? 1 : 0.85} fontFamily="monospace">{label}</text>
           </g>
         );
       })}

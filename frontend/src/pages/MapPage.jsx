@@ -13,6 +13,13 @@ export default function MapPage() {
   const { mapBgUrl, mapBgNat, mapBgOpacity, mapBgScale } = useMapBackground();
   const { rackOrders, reorderDevice } = useRackOrders(selectedRack);
   const [filters, setFilters] = useState({ racks: null, classes: null });
+  const [selectedLink, setSelectedLink] = useState(null);
+
+  // Clear selected link when switching racks
+  const handleSelectRack = (rack) => {
+    setSelectedLink(null);
+    setSelectedRack(p => p?.id === rack.id ? null : rack);
+  };
 
   const allRacks = useMemo(() => {
     const rackMap = {};
@@ -135,7 +142,7 @@ export default function MapPage() {
             managedRacks={topology.racks || []}
             switchClasses={topology.classes || []}
             filters={filters}
-            onSelectRack={rack => { setSelectedRack(p => p?.id === rack.id ? null : rack); }}
+            onSelectRack={handleSelectRack}
             selectedRackId={selectedRack?.id}
             onPositionChange={savePosition}
             mapBgUrl={mapBgUrl}
@@ -143,6 +150,7 @@ export default function MapPage() {
             mapBgScale={mapBgScale}
             mapBgNat={mapBgNat}
             rackPairColorMap={rackPairColorMap}
+            selectedLink={selectedLink}
           />
         </div>
         {topology.nodes.length === 0 && (
@@ -160,6 +168,8 @@ export default function MapPage() {
           switchModels={topology.models || []}
           topologyLinks={topology.links}
           rackPairColorMap={rackPairColorMap}
+          selectedLink={selectedLink}
+          onLinkSelect={setSelectedLink}
           deviceOrder={selectedRack ? Object.fromEntries(
             ["tor","access","other"].map(g => [
               g, rackOrders[`${selectedRack.id}::${g}`]

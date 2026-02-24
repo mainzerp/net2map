@@ -3,10 +3,13 @@ import { CABLE_COLORS, VENDOR_COLOR, VENDOR_ICON, buildPortLinkMap, normPort } f
 import SwitchPanel from "../SwitchPanel.jsx";
 
 // ── RackDetail ───────────────────────────────────────────────────────────────
-function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks, deviceOrder, onReorder, onClose, onRename, onMoveDevice, onUpdateDeviceMeta, rackPairColorMap }) {
+function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks, deviceOrder, onReorder, onClose, onRename, onMoveDevice, onUpdateDeviceMeta, rackPairColorMap, selectedLink, onLinkSelect }) {
   const [editing, setEditing] = useState(false);
   const [nameInput, setNameInput] = useState(rack.label);
-  const [selectedLink, setSelectedLink] = useState(null);
+  // selectedLink is lifted to MapPage; fall back to local state if not provided
+  const [localSelectedLink, setLocalSelectedLink] = useState(null);
+  const resolvedSelectedLink = selectedLink !== undefined ? selectedLink : localSelectedLink;
+  const setSelectedLink = onLinkSelect || setLocalSelectedLink;
   const totalPorts  = rack.devices.reduce((s,d) => s + (d.ports || []).length, 0);
   const activePorts = rack.devices.reduce((s,d) => s + (d.ports || []).filter(p => p.oper_status === 1).length, 0);
   const otherRacks  = (allRacks || []).filter(r => r.id !== rack.id);
@@ -93,6 +96,16 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
   const allVisibleLinks = useMemo(() => [...allIntraLinks, ...external], [allIntraLinks, external]);
   const portLinkMap   = useMemo(() => buildPortLinkMap(allVisibleLinks), [allVisibleLinks]);
 
+  // Set of port keys for ports connecting to other racks (used for prominent styling)
+  const interRackPortKeys = useMemo(() => {
+    const s = new Set();
+    external.forEach(l => {
+      s.add(`${l.local_ip}:${normPort(l.local_port)}`);
+      s.add(`${l.remote_ip}:${normPort(l.remote_port)}`);
+    });
+    return s;
+  }, [external]);
+
   // Build ip -> rack_id map from all known racks
   const ipToRackId = useMemo(() => {
     const m = {};
@@ -125,20 +138,20 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
     });
     return m;
   }, [allVisibleLinks, ipToRackId, rackPairColorMap]);
-  const selColor  = selectedLink ? (linkColorMap[`${selectedLink.local_ip}:${normPort(selectedLink.local_port)}`] || "#22d3ee") : null;
+  const selColor  = resolvedSelectedLink ? (linkColorMap[`${resolvedSelectedLink.local_ip}:${normPort(resolvedSelectedLink.local_port)}`] || "#22d3ee") : null;
   const toggleLink = useCallback((l) =>
     setSelectedLink(p => p?.local_ip===l?.local_ip && p?.local_port===l?.local_port ? null : l),
-  []);
+  [setSelectedLink]);
 
   const [linkLine, setLinkLine] = useState(null);
   const scrollRef = useRef(null);
   const panelHeaderRef = useRef(null);
 
   useEffect(() => {
-    if (!selectedLink) { setLinkLine(null); return; }
+    if (!resolvedSelectedLink) { setLinkLine(null); return; }
     const computeLine = () => {
-      const fromKey = `${selectedLink.local_ip}:${normPort(selectedLink.local_port)}`;
-      const toKey   = `${selectedLink.remote_ip}:${normPort(selectedLink.remote_port)}`;
+      const fromKey = `${resolvedSelectedLink.local_ip}:${normPort(resolvedSelectedLink.local_port)}`;
+      const toKey   = `${resolvedSelectedLink.remote_ip}:${normPort(resolvedSelectedLink.remote_port)}`;
       const a = document.querySelector(`[data-pkey="${fromKey}"]`);
       const b = document.querySelector(`[data-pkey="${toKey}"]`);
       if (!a || !b) { setLinkLine(null); return; }
@@ -154,7 +167,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
     const el = scrollRef.current;
     if (el) el.addEventListener("scroll", computeLine, { passive: true });
     return () => { if (el) el.removeEventListener("scroll", computeLine); };
-  }, [selectedLink]);
+  }, [resolvedSelectedLink]);
 
   const renderGroup = (devices, groupKey) => devices.map((d, idx) => (
     <div key={d.id} style={{display:"flex",alignItems:"flex-start",gap:5,marginBottom:4}}>
@@ -185,8 +198,9 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
       <div style={{flex:1,minWidth:0}}>
         <SwitchPanel device={d} otherRacks={otherRacks} onMove={onMoveDevice}
           onUpdateMeta={onUpdateDeviceMeta}
-          portLinkMap={portLinkMap} selectedLink={selectedLink}
+          portLinkMap={portLinkMap} selectedLink={resolvedSelectedLink}
           onPortClick={toggleLink} linkColorMap={linkColorMap}
+          interRackPortKeys={interRackPortKeys}
           switchClass={d.class_id ? classMap[d.class_id] : null}
           switchModel={d.model_id ? modelMap[d.model_id] : null}/>
       </div>
@@ -195,8 +209,8 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
 
   const renderLink = (l, i, accentColor) => {
     const a = devByIp[l.local_ip], b = devByIp[l.remote_ip];
-    const isSel = selectedLink?.local_ip===l.local_ip && selectedLink?.local_port===l.local_port
-               || selectedLink?.remote_ip===l.local_ip && selectedLink?.remote_port===l.local_port;
+    const isSel = resolvedSelectedLink?.local_ip===l.local_ip && resolvedSelectedLink?.local_port===l.local_port
+               || resolvedSelectedLink?.remote_ip===l.local_ip && resolvedSelectedLink?.remote_port===l.local_port;
     const bg = isSel ? `${accentColor}14` : "transparent";
     return (
       <div
@@ -426,7 +440,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
             <div style={{color:"#334155",fontSize:10,marginBottom:6,letterSpacing:1,textTransform:"uppercase"}}>Cable Map</div>
             {allIntraLinks.map((l, i) => {
               const c = linkColorMap[`${l.local_ip}:${normPort(l.local_port)}`] || CABLE_COLORS[i % CABLE_COLORS.length];
-              const isSel = selectedLink?.local_ip===l.local_ip && selectedLink?.local_port===l.local_port;
+              const isSel = resolvedSelectedLink?.local_ip===l.local_ip && resolvedSelectedLink?.local_port===l.local_port;
               return (
                 <div key={i} onClick={() => toggleLink(l)} style={{
                   display:"flex", alignItems:"center", gap:8, marginBottom:4,

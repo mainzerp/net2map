@@ -3,7 +3,7 @@ import { speedColor, normPort } from "../api.js";
 import Port from "./Port.jsx";
 
 // ── SwitchPanel ──────────────────────────────────────────────────────────────
-export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateMeta, portLinkMap, selectedLink, onPortClick, linkColorMap, switchClass, switchModel }) {
+export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateMeta, portLinkMap, selectedLink, onPortClick, linkColorMap, switchClass, switchModel, interRackPortKeys }) {
   const [open, setOpen] = useState(true);
   const [showMove, setShowMove] = useState(false);
   const panelRef = useRef(null);
@@ -112,7 +112,8 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
                       return (
                         <Port key={port.id} port={port} portKey={pKey}
                           portLinkMap={portLinkMap} selectedLink={selectedLink}
-                          onPortClick={onPortClick} cableColor={linkColorMap?.[pKey]}/>
+                          onPortClick={onPortClick} cableColor={linkColorMap?.[pKey]}
+                          interRack={interRackPortKeys?.has(pKey)}/>
                       );
                     })}
                   </div>
@@ -122,7 +123,8 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
                       return (
                         <Port key={port.id} port={port} portKey={pKey}
                           portLinkMap={portLinkMap} selectedLink={selectedLink}
-                          onPortClick={onPortClick} cableColor={linkColorMap?.[pKey]}/>
+                          onPortClick={onPortClick} cableColor={linkColorMap?.[pKey]}
+                          interRack={interRackPortKeys?.has(pKey)}/>
                       );
                     })}
                   </div>

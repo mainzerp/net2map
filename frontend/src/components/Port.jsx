@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { speedLabel, speedColor, normPort } from "../api.js";
 
 // ── Port ─────────────────────────────────────────────────────────────────────
-export default function Port({ port, portKey, portLinkMap, selectedLink, onPortClick, cableColor }) {
+export default function Port({ port, portKey, portLinkMap, selectedLink, onPortClick, cableColor, interRack }) {
   const [hov, setHov] = useState(false);
   const ref = useRef(null);
   const [pos, setPos] = useState({ top:0, left:0 });
@@ -69,19 +69,20 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
         style={{ flexShrink:0, opacity: hl==="dim" ? 0.22 : 1, transition:"opacity 0.18s", cursor: isLinked ? "pointer" : "default" }}
       >
         <div title={port.if_descr} style={{
-          width:34, height:20, borderRadius:2,
+          width:34, height: interRack ? 22 : 20, borderRadius:2,
           backgroundColor: bg,
           border:`1px solid ${border}`,
+          borderTop: interRack && isLinked ? `2px solid ${cc}` : `1px solid ${border}`,
           boxShadow: shadow,
           display:"flex", alignItems:"center", justifyContent:"center",
           transition:"all 0.13s", position:"relative",
         }}>
           {isLinked && (
             <div style={{
-              position:"absolute", top:-3, right:-3,
-              width:6, height:6, borderRadius:"50%",
+              position:"absolute", top: interRack ? -5 : -3, right: interRack ? -5 : -3,
+              width: interRack ? 9 : 6, height: interRack ? 9 : 6, borderRadius:"50%",
               backgroundColor: cc, border:"1px solid #020817",
-              boxShadow:`0 0 5px ${cc}`,
+              boxShadow: interRack ? `0 0 10px ${cc}, 0 0 4px ${cc}` : `0 0 5px ${cc}`,
             }}/>
           )}
           <span style={{
