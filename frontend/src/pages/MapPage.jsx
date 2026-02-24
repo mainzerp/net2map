@@ -11,7 +11,18 @@ import { useRackOrders } from "../hooks/useRackOrders.js";
 export default function MapPage() {
   const { topology, selectedRack, setSelectedRack, loadError, loadTopology } = useTopologyData();
   const { mapBgUrl, mapBgNat, mapBgOpacity, mapBgScale, mapBgColor } = useMapBackground();
-  const { rackOrders, reorderDevice } = useRackOrders(selectedRack);
+
+  // Derive the full selectedRack object (with up-to-date devices) directly from
+  // topology.nodes so RackDetail and reorderDevice always see fresh data after
+  // every loadTopology call.  Must be computed before useRackOrders so the hook
+  // receives a rack object that actually has a .devices array.
+  const selectedRackFull = useMemo(() => {
+    if (!selectedRack) return null;
+    const devices = topology.nodes.filter(n => n.rack_id === selectedRack.id);
+    return { ...selectedRack, devices };
+  }, [selectedRack, topology.nodes]);
+
+  const { rackOrders, reorderDevice } = useRackOrders(selectedRackFull);
   const [filters, setFilters] = useState({ racks: null, classes: null });
   const [selectedLink, setSelectedLink] = useState(null);
 
@@ -34,14 +45,6 @@ export default function MapPage() {
     });
     return Object.values(rackMap);
   }, [topology.nodes, topology.racks]);
-
-  // Derive the full selectedRack object (with up-to-date devices) directly from
-  // topology.nodes so RackDetail always sees fresh data after every loadTopology call.
-  const selectedRackFull = useMemo(() => {
-    if (!selectedRack) return null;
-    const devices = topology.nodes.filter(n => n.rack_id === selectedRack.id);
-    return { ...selectedRack, devices };
-  }, [selectedRack, topology.nodes]);
 
   // Assign a consistent CABLE_COLOR to each unique rack-pair so the SVG lines
   // in TopologyMap and the port dots in RackDetail share the same color.
