@@ -784,7 +784,13 @@ async def _execute_scan(
         port_lookup: Dict[str, Dict[str, str]] = {}
         port_suffix_lookup: Dict[str, Dict[str, str]] = {}
         for ip, sw in switch_data.items():
-            port_lookup[ip] = {_norm(iface.descr): iface.descr for iface in sw.interfaces.values()}
+            port_lookup[ip] = {}
+            for iface in sw.interfaces.values():
+                # Primary key: ifDescr (canonical)
+                port_lookup[ip][_norm(iface.descr)] = iface.descr
+                # Secondary key: ifAlias (e.g. OPNsense uses "lan" alias for "mlxen0")
+                if iface.alias:
+                    port_lookup[ip].setdefault(_norm(iface.alias), iface.descr)
             port_suffix_lookup[ip] = {}
             for iface in sw.interfaces.values():
                 sfx = _port_suffix(iface.descr)
@@ -823,6 +829,11 @@ async def _execute_scan(
                             canonical = port_lookup[remote_ip].get(_norm(m.group(1)))
                             if canonical:
                                 resolved_remote_port = canonical
+                    if resolved_remote_port == nbr.remote_port and nbr.remote_port_id:
+                        # Last resort: try the raw lldpRemPortId (e.g. 'mlxen0' on OPNsense)
+                        canonical = port_lookup[remote_ip].get(_norm(nbr.remote_port_id))
+                        if canonical:
+                            resolved_remote_port = canonical
 
                 db.add(TopologyLink(
                     local_ip=ip,

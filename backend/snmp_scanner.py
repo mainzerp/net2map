@@ -132,7 +132,8 @@ class LldpNeighbor:
     local_port_idx:  int
     local_port_desc: str = ""
     remote_sys:      str = ""
-    remote_port:     str = ""
+    remote_port:     str = ""  # resolved: lldpRemPortDesc preferred, else lldpRemPortId
+    remote_port_id:  str = ""  # raw lldpRemPortId (interface name, e.g. 'mlxen0')
     remote_ip:       str = ""
 
 
@@ -595,7 +596,8 @@ async def scan_switch(
         for oid_s, val in port_rows:
             k = _lldp_key(oid_s)
             if k and k in nbr_map:
-                nbr_map[k].remote_port = val  # lldpRemPortId — may be overridden below
+                nbr_map[k].remote_port = val    # lldpRemPortId — may be overridden below
+                nbr_map[k].remote_port_id = val  # keep raw portId as fallback
 
         for oid_s, val in pdesc_rows:
             k = _lldp_key(oid_s)
