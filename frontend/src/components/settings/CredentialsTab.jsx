@@ -166,6 +166,7 @@ function CredentialsTabContent({ profiles, newEntryTrigger }) {
                   <option value="aruba_cx">Aruba CX</option>
                   <option value="fs">FS</option>
                   <option value="unifi">UniFi</option>
+                  <option value="opnsense">OPNsense</option>
                   <option value="generic">Generic</option>
                 </select>
               </label>

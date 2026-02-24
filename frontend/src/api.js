@@ -69,9 +69,9 @@ export const speedColor = mbps =>
   mbps >= 10000 ? "#22d3ee" :
   mbps >= 1000  ? "#22c55e" : "#f59e0b";
 
-export const VENDOR_LABEL = { aruba_cx:"Aruba CX", fs:"FS.com", unifi:"UniFi", generic:"Generic" };
-export const VENDOR_COLOR = { aruba_cx:"#f59e0b", fs:"#22d3ee", unifi:"#60a5fa", generic:"#475569" };
-export const VENDOR_ICON  = { aruba_cx:"[AX]", fs:"[FS]", unifi:"[UF]", generic:"[--]" };
+export const VENDOR_LABEL = { aruba_cx:"Aruba CX", fs:"FS.com", unifi:"UniFi", opnsense:"OPNsense", generic:"Generic" };
+export const VENDOR_COLOR = { aruba_cx:"#f59e0b", fs:"#22d3ee", unifi:"#60a5fa", opnsense:"#e85d04", generic:"#475569" };
+export const VENDOR_ICON  = { aruba_cx:"[AX]", fs:"[FS]", unifi:"[UF]", opnsense:"[OP]", generic:"[--]" };
 
 export const AUTH_PROTOCOLS = ["MD5","SHA","SHA-224","SHA-256","SHA-384","SHA-512"];
 export const PRIV_PROTOCOLS = ["DES","3DES","AES-128","AES-192","AES-256"];

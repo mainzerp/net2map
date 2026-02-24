@@ -354,11 +354,15 @@ _VIRTUAL_OPNSENSE = ("lo", "loopback", "vlan", "pppoe", "lagg", "enc", "pflog",
 
 def is_virtual(if_descr: str, vendor: str) -> bool:
     d = if_descr.lower()
+    # OPNsense/FreeBSD interfaces always start with a fixed type prefix (lo0,
+    # vlan100, tun0 …).  Using startswith avoids false positives like "mxlen0"
+    # matching the substring "lo".
+    if vendor == "opnsense":
+        return any(d.startswith(p) for p in _VIRTUAL_OPNSENSE)
     patterns = {
         "aruba_cx": _VIRTUAL_ARUBA,
         "fs":       _VIRTUAL_FS,
         "unifi":    _VIRTUAL_UNIFI,
-        "opnsense": _VIRTUAL_OPNSENSE,
     }.get(vendor, _VIRTUAL_GENERIC)
     return any(p in d for p in patterns)
 
