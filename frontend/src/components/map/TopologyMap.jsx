@@ -10,7 +10,7 @@ function _isValidZoom(z) {
   );
 }
 
-function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSelectRack, selectedRackId, onPositionChange, mapBgUrl, mapBgOpacity, mapBgScale, mapBgNat }) {
+function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSelectRack, selectedRackId, onPositionChange, mapBgUrl, mapBgOpacity, mapBgScale, mapBgNat, rackPairColorMap }) {
   const W = 900, H = 550;
   const svgRef = useRef(null);
   const [drag, setDrag] = useState(null);
@@ -253,16 +253,20 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
         const ra = rackById(l.from), rb = rackById(l.to);
         if (!ra || !rb) return null;
         const pa = getRackCenter(ra), pb = getRackCenter(rb);
-        const c = l.speed === "100G" ? "#22d3ee" : l.speed === "10G" || l.speed === "25G" ? "#4ade80" : "#334155";
+        // Use rack-pair color from MapPage if available, otherwise fall back to speed color
+        const pairKey = [String(l.from), String(l.to)].sort().join("|");
+        const pairColor = rackPairColorMap?.[pairKey];
+        const speedFallback = l.speed === "100G" ? "#22d3ee" : l.speed === "10G" || l.speed === "25G" ? "#4ade80" : "#334155";
+        const c = pairColor || speedFallback;
         const w = l.speed === "100G" ? 2.5 : 1.5;
         const label = l.count > 1 ? `${l.count}x ${l.speed}` : l.speed;
         return (
           <g key={l.key}>
             <line x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
-                  stroke={c} strokeWidth={w * Math.min(l.count, 4)} strokeOpacity={0.45}/>
+                  stroke={c} strokeWidth={w * Math.min(l.count, 4)} strokeOpacity={0.55}/>
             <text x={(pa.x+pb.x)/2} y={(pa.y+pb.y)/2 - 6}
                   fill={c} fontSize={9} textAnchor="middle"
-                  opacity={0.75} fontFamily="monospace">{label}</text>
+                  opacity={0.85} fontFamily="monospace">{label}</text>
           </g>
         );
       })}

@@ -1,5 +1,5 @@
 ﻿import { useState, useMemo } from "react";
-import { api } from "../api.js";
+import { api, CABLE_COLORS } from "../api.js";
 import FilterBar from "../components/map/FilterBar.jsx";
 import TopologyMap from "../components/map/TopologyMap.jsx";
 import RackDetail from "../components/map/RackDetail.jsx";
@@ -39,6 +39,29 @@ export default function MapPage() {
     const devices = topology.nodes.filter(n => n.rack_id === selectedRack.id);
     return { ...selectedRack, devices };
   }, [selectedRack, topology.nodes]);
+
+  // Assign a consistent CABLE_COLOR to each unique rack-pair so the SVG lines
+  // in TopologyMap and the port dots in RackDetail share the same color.
+  // Key: "<rackIdA>|<rackIdB>" (sorted), Value: color string.
+  const rackPairColorMap = useMemo(() => {
+    const ipToRack = {};
+    topology.nodes.forEach(n => {
+      ipToRack[n.ip] = n.rack_id ? String(n.rack_id) : "__unassigned__";
+    });
+    const seen = {};
+    let idx = 0;
+    topology.links.forEach(l => {
+      const ra = ipToRack[l.local_ip];
+      const rb = ipToRack[l.remote_ip];
+      if (!ra || !rb || ra === rb) return;
+      const key = [ra, rb].sort().join("|");
+      if (!(key in seen)) {
+        seen[key] = CABLE_COLORS[idx % CABLE_COLORS.length];
+        idx++;
+      }
+    });
+    return seen;
+  }, [topology.nodes, topology.links]);
 
   const savePosition = (id, x, y) => {
     api.patch(`/api/topology/devices/${id}/position`, { map_x: x, map_y: y }).catch(console.error);
@@ -119,6 +142,7 @@ export default function MapPage() {
             mapBgOpacity={mapBgOpacity}
             mapBgScale={mapBgScale}
             mapBgNat={mapBgNat}
+            rackPairColorMap={rackPairColorMap}
           />
         </div>
         {topology.nodes.length === 0 && (
@@ -135,6 +159,7 @@ export default function MapPage() {
           switchClasses={topology.classes || []}
           switchModels={topology.models || []}
           topologyLinks={topology.links}
+          rackPairColorMap={rackPairColorMap}
           deviceOrder={selectedRack ? Object.fromEntries(
             ["tor","access","other"].map(g => [
               g, rackOrders[`${selectedRack.id}::${g}`]

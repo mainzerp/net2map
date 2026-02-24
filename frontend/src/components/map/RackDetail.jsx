@@ -3,7 +3,7 @@ import { CABLE_COLORS, VENDOR_COLOR, VENDOR_ICON, buildPortLinkMap, normPort } f
 import SwitchPanel from "../SwitchPanel.jsx";
 
 // ── RackDetail ───────────────────────────────────────────────────────────────
-function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks, deviceOrder, onReorder, onClose, onRename, onMoveDevice, onUpdateDeviceMeta }) {
+function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks, deviceOrder, onReorder, onClose, onRename, onMoveDevice, onUpdateDeviceMeta, rackPairColorMap }) {
   const [editing, setEditing] = useState(false);
   const [nameInput, setNameInput] = useState(rack.label);
   const [selectedLink, setSelectedLink] = useState(null);
@@ -90,24 +90,39 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
 
   const allIntraLinks = useMemo(() => [...uplinks, ...trunks], [uplinks, trunks]);
   const portLinkMap   = useMemo(() => buildPortLinkMap(allIntraLinks), [allIntraLinks]);
+
+  // Build ip -> rack_id map from all known racks
+  const ipToRackId = useMemo(() => {
+    const m = {};
+    (allRacks || []).forEach(r => {
+      (r.devices || []).forEach(d => { m[d.ip] = r.id ? String(r.id) : "__unassigned__"; });
+    });
+    return m;
+  }, [allRacks]);
+
   const linkColorMap  = useMemo(() => {
     const m = {};
-    // Assign a consistent color per switch-pair (sorted ip pair) so all links
-    // between the same two switches share the same color.
+    // Prefer rack-pair color from MapPage (rackPairColorMap) for consistent colors
+    // with the SVG lines.  Fall back to per-switch-pair CABLE_COLORS.
     const pairColors = {};
     let colorIdx = 0;
     allIntraLinks.forEach(l => {
       const pairKey = [l.local_ip, l.remote_ip].sort().join("|");
       if (!(pairKey in pairColors)) {
-        pairColors[pairKey] = CABLE_COLORS[colorIdx % CABLE_COLORS.length];
-        colorIdx++;
+        // Try to get the rack-pair color first
+        const ra = ipToRackId[l.local_ip];
+        const rb = ipToRackId[l.remote_ip];
+        const rackKey = ra && rb ? [ra, rb].sort().join("|") : null;
+        const rackColor = rackKey ? rackPairColorMap?.[rackKey] : null;
+        pairColors[pairKey] = rackColor || CABLE_COLORS[colorIdx % CABLE_COLORS.length];
+        if (!rackColor) colorIdx++;
       }
       const c = pairColors[pairKey];
       m[`${l.local_ip}:${normPort(l.local_port)}`]   = c;
       m[`${l.remote_ip}:${normPort(l.remote_port)}`] = c;
     });
     return m;
-  }, [allIntraLinks]);
+  }, [allIntraLinks, ipToRackId, rackPairColorMap]);
   const selColor  = selectedLink ? (linkColorMap[`${selectedLink.local_ip}:${normPort(selectedLink.local_port)}`] || "#22d3ee") : null;
   const toggleLink = useCallback((l) =>
     setSelectedLink(p => p?.local_ip===l?.local_ip && p?.local_port===l?.local_port ? null : l),
