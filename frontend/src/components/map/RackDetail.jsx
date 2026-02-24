@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { CABLE_COLORS, VENDOR_COLOR, VENDOR_ICON, buildPortLinkMap } from "../../api.js";
+import { CABLE_COLORS, VENDOR_COLOR, VENDOR_ICON, buildPortLinkMap, normPort } from "../../api.js";
 import SwitchPanel from "../SwitchPanel.jsx";
 
 // ── RackDetail ───────────────────────────────────────────────────────────────
@@ -7,8 +7,8 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
   const [editing, setEditing] = useState(false);
   const [nameInput, setNameInput] = useState(rack.label);
   const [selectedLink, setSelectedLink] = useState(null);
-  const totalPorts  = rack.devices.reduce((s,d) => s + d.ports.length, 0);
-  const activePorts = rack.devices.reduce((s,d) => s + d.ports.filter(p => p.oper_status === 1).length, 0);
+  const totalPorts  = rack.devices.reduce((s,d) => s + (d.ports || []).length, 0);
+  const activePorts = rack.devices.reduce((s,d) => s + (d.ports || []).filter(p => p.oper_status === 1).length, 0);
   const otherRacks  = (allRacks || []).filter(r => r.id !== rack.id);
 
   // Compute panel width based on max ports_per_row across devices
@@ -76,7 +76,8 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
 
     const uplinks = intraAll.filter(l => {
       const a = devByIp[l.local_ip], b = devByIp[l.remote_ip];
-      return a?.class_id !== b?.class_id;
+      // Different classes, or both unclassified → show as uplink
+      return a?.class_id !== b?.class_id || (a?.class_id == null && b?.class_id == null);
     });
     const trunks = intraAll.filter(l => {
       const a = devByIp[l.local_ip], b = devByIp[l.remote_ip];
@@ -91,14 +92,23 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
   const portLinkMap   = useMemo(() => buildPortLinkMap(allIntraLinks), [allIntraLinks]);
   const linkColorMap  = useMemo(() => {
     const m = {};
-    allIntraLinks.forEach((l, i) => {
-      const c = CABLE_COLORS[i % CABLE_COLORS.length];
-      m[`${l.local_ip}:${l.local_port}`]   = c;
-      m[`${l.remote_ip}:${l.remote_port}`] = c;
+    // Assign a consistent color per switch-pair (sorted ip pair) so all links
+    // between the same two switches share the same color.
+    const pairColors = {};
+    let colorIdx = 0;
+    allIntraLinks.forEach(l => {
+      const pairKey = [l.local_ip, l.remote_ip].sort().join("|");
+      if (!(pairKey in pairColors)) {
+        pairColors[pairKey] = CABLE_COLORS[colorIdx % CABLE_COLORS.length];
+        colorIdx++;
+      }
+      const c = pairColors[pairKey];
+      m[`${l.local_ip}:${normPort(l.local_port)}`]   = c;
+      m[`${l.remote_ip}:${normPort(l.remote_port)}`] = c;
     });
     return m;
   }, [allIntraLinks]);
-  const selColor  = selectedLink ? (linkColorMap[`${selectedLink.local_ip}:${selectedLink.local_port}`] || "#22d3ee") : null;
+  const selColor  = selectedLink ? (linkColorMap[`${selectedLink.local_ip}:${normPort(selectedLink.local_port)}`] || "#22d3ee") : null;
   const toggleLink = useCallback((l) =>
     setSelectedLink(p => p?.local_ip===l?.local_ip && p?.local_port===l?.local_port ? null : l),
   []);
@@ -110,8 +120,8 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
   useEffect(() => {
     if (!selectedLink) { setLinkLine(null); return; }
     const computeLine = () => {
-      const fromKey = `${selectedLink.local_ip}:${selectedLink.local_port}`;
-      const toKey   = `${selectedLink.remote_ip}:${selectedLink.remote_port}`;
+      const fromKey = `${selectedLink.local_ip}:${normPort(selectedLink.local_port)}`;
+      const toKey   = `${selectedLink.remote_ip}:${normPort(selectedLink.remote_port)}`;
       const a = document.querySelector(`[data-pkey="${fromKey}"]`);
       const b = document.querySelector(`[data-pkey="${toKey}"]`);
       if (!a || !b) { setLinkLine(null); return; }
@@ -324,7 +334,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
               <span style={{flex:1,borderBottom:"1px solid #14532d",height:0,display:"inline-block"}}/>
             </div>
             <div style={{backgroundColor:"#080d18",border:"1px solid #1e293b",borderRadius:8,overflow:"hidden"}}>
-              {uplinks.map((l, i) => renderLink(l, i, CABLE_COLORS[i % CABLE_COLORS.length]))}
+              {uplinks.map((l, i) => renderLink(l, i, linkColorMap[`${l.local_ip}:${normPort(l.local_port)}`] || CABLE_COLORS[i % CABLE_COLORS.length]))}
             </div>
           </>
         )}
@@ -341,7 +351,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
               <span style={{flex:1,borderBottom:"1px solid #164e63",height:0,display:"inline-block"}}/>
             </div>
             <div style={{backgroundColor:"#080d18",border:"1px solid #1e293b",borderRadius:8,overflow:"hidden"}}>
-              {trunks.map((l, i) => renderLink(l, i, "#22d3ee"))}
+              {trunks.map((l, i) => renderLink(l, i, linkColorMap[`${l.local_ip}:${normPort(l.local_port)}`] || "#22d3ee"))}
             </div>
           </>
         )}
@@ -398,7 +408,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
           }}>
             <div style={{color:"#334155",fontSize:10,marginBottom:6,letterSpacing:1,textTransform:"uppercase"}}>Cable Map</div>
             {allIntraLinks.map((l, i) => {
-              const c = CABLE_COLORS[i % CABLE_COLORS.length];
+              const c = linkColorMap[`${l.local_ip}:${normPort(l.local_port)}`] || CABLE_COLORS[i % CABLE_COLORS.length];
               const isSel = selectedLink?.local_ip===l.local_ip && selectedLink?.local_port===l.local_port;
               return (
                 <div key={i} onClick={() => toggleLink(l)} style={{

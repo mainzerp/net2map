@@ -185,7 +185,9 @@ async def snmp_get(ip: str, port: int, auth,
         )
         if error_indication or error_status:
             return result
-        for vb in var_binds:
+        for row in var_binds:
+            # pysnmp-lextudio 5.x: each row is [ObjectType]; older versions: ObjectType
+            vb = row[0] if isinstance(row, (list, tuple)) else row
             result[str(vb[0])] = str(vb[1])
     except Exception as exc:
         exc_type = type(exc).__name__
@@ -207,22 +209,55 @@ async def snmp_bulk_walk(ip: str, port: int, auth,
                          oid: str, max_rows: int = 500,
                          timeout: int = 3,
                          retries: int = 1) -> List[Tuple[str, str]]:
-    """Async SNMPv2c/v3 GETBULK walk. Returns [(oid_str, value_str)]."""
+    """Async SNMPv2c/v3 GETBULK walk. Returns [(oid_str, value_str)].
+
+    pysnmp-lextudio 5.x changed bulkCmd to return a single awaitable future
+    per call (not an async iterator). Each element in var_binds is a list
+    containing one ObjectType. We loop manually, advancing the start OID with
+    each successful response until we leave the requested subtree or reach
+    max_rows.
+    """
     rows: List[Tuple[str, str]] = []
+    current_oid = oid
+    bulk_size = 25
     engine = SnmpEngine()
     try:
-        async for error_indication, error_status, _, var_binds in bulkCmd(
-            engine, auth, _transport(ip, port, timeout, retries), ContextData(),
-            0, 25,
-            ObjectType(ObjectIdentity(oid)),
-            maxRows=max_rows, lexicographicMode=False,
-        ):
+        while len(rows) < max_rows:
+            try:
+                error_indication, error_status, _, var_binds = await bulkCmd(
+                    engine, auth, _transport(ip, port, timeout, retries), ContextData(),
+                    0, bulk_size,
+                    ObjectType(ObjectIdentity(current_oid)),
+                )
+            except Exception as exc:
+                log.debug("snmp_bulk_walk %s %s: %s", ip, oid, exc)
+                break
+
             if error_indication or error_status:
                 break
-            for vb in var_binds:
-                rows.append((str(vb[0]), str(vb[1])))
-    except Exception as exc:
-        log.debug("snmp_bulk_walk %s %s: %s", ip, oid, exc)
+
+            if not var_binds:
+                break
+
+            advanced = False
+            # In pysnmp-lextudio 5.x var_binds is a list of lists (one sub-list
+            # per repetition), each sub-list containing one ObjectType instance.
+            for row in var_binds:
+                # row is either [ObjectType] or ObjectType depending on version
+                vb = row[0] if isinstance(row, (list, tuple)) else row
+                vb_oid = str(vb[0])
+                vb_val = str(vb[1])
+                # Stop if we have left the requested subtree
+                if not vb_oid.startswith(oid + ".") and vb_oid != oid:
+                    return rows
+                rows.append((vb_oid, vb_val))
+                current_oid = vb_oid  # advance cursor to last received OID
+                advanced = True
+                if len(rows) >= max_rows:
+                    return rows
+
+            if not advanced:
+                break
     finally:
         try:
             engine.transportDispatcher.closeDispatcher()

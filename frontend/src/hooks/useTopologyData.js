@@ -8,16 +8,11 @@ export function useTopologyData() {
   const initializedRef = useRef(false);
 
   const loadTopology = useCallback(() => {
+    initializedRef.current = true;
     api.get("/api/topology").then(data => {
       setTopology(data);
-      // Keep selectedRack.devices in sync after reload
-      setSelectedRack(prev => {
-        if (!prev) return prev;
-        const freshDevices = data.nodes.filter(n => n.rack_id === prev.id);
-        return freshDevices.length > 0 ? { ...prev, devices: freshDevices } : prev;
-      });
     }).catch(e => setLoadError(e.message || "Failed to load topology"));
-  }, []);  // NOTE: no selectedRack dependency — uses functional setState
+  }, []);
 
   // Initial load + sessionStorage selectedRack restore
   useEffect(() => {

@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { speedLabel, speedColor } from "../api.js";
+import { speedLabel, speedColor, normPort } from "../api.js";
 
 // ── Port ─────────────────────────────────────────────────────────────────────
 export default function Port({ port, portKey, portLinkMap, selectedLink, onPortClick, cableColor }) {
@@ -33,8 +33,8 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
   const cc        = cableColor || "#22d3ee";
   let hl = null;
   if (selectedLink && portKey) {
-    const sKey = `${selectedLink.local_ip}:${selectedLink.local_port}`;
-    const dKey = `${selectedLink.remote_ip}:${selectedLink.remote_port}`;
+    const sKey = `${selectedLink.local_ip}:${normPort(selectedLink.local_port)}`;
+    const dKey = `${selectedLink.remote_ip}:${normPort(selectedLink.remote_port)}`;
     if (portKey === sKey) hl = "from";
     else if (portKey === dKey) hl = "to";
     else if (isLinked) hl = "dim";
@@ -49,7 +49,7 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
   const handleClick = () => {
     if (!isLinked || !onPortClick) return;
     const { link } = linkEntry;
-    const isSame = selectedLink?.local_ip===link.local_ip && selectedLink?.local_port===link.local_port;
+    const isSame = selectedLink?.local_ip===link.local_ip && normPort(selectedLink?.local_port)===normPort(link.local_port);
     onPortClick(isSame ? null : link);
   };
 

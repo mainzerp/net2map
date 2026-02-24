@@ -1,5 +1,38 @@
 # Version History
 
+## v1.2.1 — SNMP Scanner Fix + Topology Map Rendering Fixes
+
+**Type:** PATCH (critical bug fixes)
+
+### Changes
+
+#### Backend: pysnmp-lextudio 5.x API Fix
+- Fixed `snmp_bulk_walk` in `backend/snmp_scanner.py`: pysnmp-lextudio 5.x changed `bulkCmd` from an async iterator to a single awaitable Future. Rewrote the function to use a manual loop with repeated `await bulkCmd(...)` calls.
+- Fixed `var_binds` indexing: in v5.x each element of `var_binds` is `[ObjectType]` (a single-element list), not `ObjectType` directly. Added `vb = row[0] if isinstance(row, (list, tuple)) else row` unwrap in both `snmp_bulk_walk` and `snmp_get`.
+- Result: All 25 switches now return correct interface counts (e.g. 67 ifaces, 2 LLDP nbrs) and 907+ ports are populated in the database.
+
+#### Frontend: Topology Map Port/Link Display Fixes
+- `api.js`: Added `normPort()` export for case/whitespace-normalised port name comparison. Used in `buildPortLinkMap`. Added `structuredClone` for ETag cache to prevent reference aliasing.
+- `SwitchPanel.jsx`, `Port.jsx`, `RackDetail.jsx`: Import and use `normPort()` in all port key constructions.
+- `MapPage.jsx`: Added `selectedRackFull` memo so `RackDetail` always receives a fully-populated device list even after device moves.
+- `TopologyMap.jsx`: Build `ipToRackId` map from unfiltered nodes + managedRacks. Added null guards for `onMouseUp` and `d.ports`.
+- `useTopologyData.js`: Simplified `loadTopology` to prevent stale-device sync issues.
+
+### Files Modified
+| File | Change |
+|------|--------|
+| backend/snmp_scanner.py | Rewritten `snmp_bulk_walk` (manual loop); fixed `var_binds` indexing in `snmp_get` |
+| backend/scan_engine.py | `remote_port` normalization: suffix-based matching resolves LLDP abbreviations to canonical `if_descr` |
+| frontend/src/api.js | `normPort()` export; `structuredClone` ETag cache |
+| frontend/src/hooks/useTopologyData.js | Simplified `loadTopology` |
+| frontend/src/components/SwitchPanel.jsx | `normPort` in pKey |
+| frontend/src/components/Port.jsx | `normPort` in highlight keys |
+| frontend/src/components/map/RackDetail.jsx | `normPort` in `useEffect` for dotted-line lookup; unclassified links shown as uplinks |
+| frontend/src/pages/MapPage.jsx | `selectedRackFull` memo |
+| frontend/src/components/map/TopologyMap.jsx | `ipToRackId` from unfiltered nodes + guards |
+
+---
+
 ## v1.2.0 — Frontend Split + Alembic Migrations
 
 **Type:** MINOR (structural refactoring + new migration framework)

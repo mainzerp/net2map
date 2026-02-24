@@ -32,6 +32,14 @@ export default function MapPage() {
     return result;
   }, [topology.nodes, topology.racks]);
 
+  // Derive the full selectedRack object (with up-to-date devices) directly from
+  // topology.nodes so RackDetail always sees fresh data after every loadTopology call.
+  const selectedRackFull = useMemo(() => {
+    if (!selectedRack) return null;
+    const devices = topology.nodes.filter(n => n.rack_id === selectedRack.id);
+    return { ...selectedRack, devices };
+  }, [selectedRack, topology.nodes]);
+
   const savePosition = (id, x, y) => {
     api.patch(`/api/topology/devices/${id}/position`, { map_x: x, map_y: y }).catch(console.error);
   };
@@ -46,7 +54,6 @@ export default function MapPage() {
   const moveDevice = async (device, newRackId) => {
     const rId = newRackId === "__unassigned__" ? null : newRackId;
     await api.patch(`/api/topology/devices/${device.id}/meta`, { rack_id: rId });
-    setSelectedRack(prev => prev ? { ...prev, devices: prev.devices.filter(d => d.id !== device.id) } : null);
     loadTopology();
   };
 
@@ -121,9 +128,9 @@ export default function MapPage() {
         )}
       </div>
 
-      {selectedRack && (
+      {selectedRackFull && (
         <RackDetail
-          rack={selectedRack}
+          rack={selectedRackFull}
           allRacks={allRacks}
           switchClasses={topology.classes || []}
           switchModels={topology.models || []}

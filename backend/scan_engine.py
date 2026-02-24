@@ -766,6 +766,31 @@ async def _execute_scan(
             synchronize_session=False
         )
 
+        # Build a lookup: remote_ip -> { norm(if_descr) -> if_descr } for
+        # resolving LLDP remote_port abbreviations to the canonical if_descr.
+        def _norm(s: str) -> str:
+            return (s or "").strip().lower()
+
+        def _port_suffix(s: str) -> str:
+            """Return the numeric/slash suffix of a port name.
+            e.g. 'TenGigabitEthernet 1/0/1' -> '1/0/1', 'TF2/0/21' -> '2/0/21'
+            Strip all letters and leading spaces before the first digit group.
+            """
+            import re
+            m = re.search(r'(\d[\d/]+)$', (s or "").strip())
+            return m.group(1) if m else _norm(s)
+
+        port_lookup: Dict[str, Dict[str, str]] = {}
+        port_suffix_lookup: Dict[str, Dict[str, str]] = {}
+        for ip, sw in switch_data.items():
+            port_lookup[ip] = {_norm(iface.descr): iface.descr for iface in sw.interfaces.values()}
+            port_suffix_lookup[ip] = {}
+            for iface in sw.interfaces.values():
+                sfx = _port_suffix(iface.descr)
+                # Only store if the suffix is unique enough (contains /)
+                if "/" in sfx:
+                    port_suffix_lookup[ip][sfx] = iface.descr
+
         for ip, sw in switch_data.items():
             for nbr in sw.lldp_neighbors:
                 if not nbr.remote_sys:
@@ -773,12 +798,29 @@ async def _execute_scan(
                 remote_ip = _resolve_ip(nbr.remote_sys, switch_data)
                 spd_label = speed_label(sw.interfaces[nbr.local_port_idx].speed_mbps) \
                     if nbr.local_port_idx in sw.interfaces else "1G"
+
+                # Resolve remote_port to canonical if_descr when possible so the
+                # frontend can match LLDP port names to scanned port if_descr values.
+                resolved_remote_port = nbr.remote_port
+                if remote_ip and remote_ip in port_lookup:
+                    # First try exact normalized match
+                    canonical = port_lookup[remote_ip].get(_norm(nbr.remote_port))
+                    if canonical:
+                        resolved_remote_port = canonical
+                    else:
+                        # Fallback: match by numeric suffix (e.g. TF2/0/21 -> TFGigabitEthernet 2/0/21)
+                        sfx = _port_suffix(nbr.remote_port)
+                        if "/" in sfx:
+                            canonical = port_suffix_lookup[remote_ip].get(sfx)
+                            if canonical:
+                                resolved_remote_port = canonical
+
                 db.add(TopologyLink(
                     local_ip=ip,
                     local_port=nbr.local_port_desc or str(nbr.local_port_idx),
                     remote_ip=remote_ip,
                     remote_sys=nbr.remote_sys,
-                    remote_port=nbr.remote_port,
+                    remote_port=resolved_remote_port,
                     speed_label=spd_label,
                 ))
                 link_count += 1

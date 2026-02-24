@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { speedColor } from "../api.js";
+import { speedColor, normPort } from "../api.js";
 import Port from "./Port.jsx";
 
 // ── SwitchPanel ──────────────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
                 <div key={row} style={{marginBottom: row < rowCount - 1 ? 6 : 0}}>
                   <div style={{display:"flex",gap:2,alignItems:"flex-start"}}>
                     {topRow.map(port => {
-                      const pKey = `${device.ip}:${port.if_descr}`;
+                      const pKey = `${device.ip}:${normPort(port.if_descr)}`;
                       return (
                         <Port key={port.id} port={port} portKey={pKey}
                           portLinkMap={portLinkMap} selectedLink={selectedLink}
@@ -118,7 +118,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
                   </div>
                   <div style={{display:"flex",gap:2,alignItems:"flex-start",marginTop:1}}>
                     {botRow.map(port => {
-                      const pKey = `${device.ip}:${port.if_descr}`;
+                      const pKey = `${device.ip}:${normPort(port.if_descr)}`;
                       return (
                         <Port key={port.id} port={port} portKey={pKey}
                           portLinkMap={portLinkMap} selectedLink={selectedLink}

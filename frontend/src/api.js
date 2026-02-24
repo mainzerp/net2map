@@ -26,7 +26,7 @@ export const api = {
     if (_etagCache[path]) headers["If-None-Match"] = _etagCache[path].etag;
     const r = await fetch(`${API}${path}`, { headers });
     if (r.status === 304) {
-      if (_etagCache[path]) return _etagCache[path].data;
+      if (_etagCache[path]) return structuredClone(_etagCache[path].data);
       // Cache miss despite 304 - re-fetch without ETag
       const r2 = await fetch(`${API}${path}`, { headers: { ..._authHeader } });
       await _checkOk(r2);
@@ -37,7 +37,7 @@ export const api = {
     const etag = r.headers.get("ETag");
     const data = await r.json();
     if (etag) {
-      _etagCache[path] = { etag, data };
+      _etagCache[path] = { etag, data: structuredClone(data) };
       const keys = Object.keys(_etagCache);
       if (keys.length > 200) {
         delete _etagCache[keys[0]]; // evict oldest entry
@@ -76,11 +76,17 @@ export const PRIV_PROTOCOLS = ["DES","3DES","AES-128","AES-192","AES-256"];
 export const SEC_LEVELS     = ["noAuthNoPriv","authNoPriv","authPriv"];
 
 // ── Cable-link helpers ───────────────────────────────────────────────────────
+// Normalise a port identifier so LLDP port IDs and SNMP ifDescr values
+// can be compared case-insensitively after trimming whitespace.
+export function normPort(s) {
+  return (s || "").trim().toLowerCase();
+}
+
 export function buildPortLinkMap(links) {
   const m = {};
   links.forEach(l => {
-    m[`${l.local_ip}:${l.local_port}`]   = { link: l, role: "from" };
-    m[`${l.remote_ip}:${l.remote_port}`] = { link: l, role: "to"   };
+    m[`${l.local_ip}:${normPort(l.local_port)}`]   = { link: l, role: "from" };
+    m[`${l.remote_ip}:${normPort(l.remote_port)}`] = { link: l, role: "to"   };
   });
   return m;
 }

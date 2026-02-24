@@ -94,11 +94,18 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
     };
   }, [positions]);
 
+  // Build from unfiltered nodes so class/rack filters do not silently drop link routes.
+  // Links are only rendered when both rack endpoints are visible (rackById guard below).
   const ipToRackId = useMemo(() => {
+    const rackForNode = {};
+    (managedRacks || []).forEach(r => { rackForNode[r.id] = r.id; });
     const map = {};
-    racks.forEach(rack => rack.devices.forEach(d => { map[d.ip] = rack.id; }));
+    nodes.forEach(node => {
+      const rId = node.rack_id && rackForNode[node.rack_id] ? node.rack_id : "__unassigned__";
+      map[node.ip] = rId;
+    });
     return map;
-  }, [racks]);
+  }, [nodes, managedRacks]);
 
   const rackLinks = useMemo(() => {
     const grouped = {};
@@ -172,6 +179,7 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
   const onMouseUp = (e, rack) => {
     if (bgPan) { setBgPan(null); return; }
     if (!drag) return;
+    if (!rack) { setDrag(null); return; }
     if (!drag.moved) {
       onSelectRack(rack);
     } else {
@@ -262,8 +270,8 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
       {racks.map(rack => {
         const pos  = getRackCenter(rack);
         const sel  = selectedRackId === rack.id;
-        const totalPorts  = rack.devices.reduce((s,d) => s + d.ports.length, 0);
-        const activePorts = rack.devices.reduce((s,d) => s + d.ports.filter(p => p.oper_status === 1).length, 0);
+        const totalPorts  = rack.devices.reduce((s,d) => s + (d.ports || []).length, 0);
+        const activePorts = rack.devices.reduce((s,d) => s + (d.ports || []).filter(p => p.oper_status === 1).length, 0);
         const RW = 110, RH = 88;
         const classMap = switchClasses ? Object.fromEntries((switchClasses || []).map(c => [c.id, c])) : {};
         const classIds = [...new Set(rack.devices.map(d => d.class_id).filter(Boolean))];
