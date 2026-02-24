@@ -1,5 +1,52 @@
 # Version History
 
+## v1.3.0 — PostgreSQL Migration + Device Ignore Flag
+
+**Type:** MINOR (new infrastructure + new feature)
+
+### Changes
+
+#### PostgreSQL Migration
+- Replaced SQLite with PostgreSQL 16-alpine for improved concurrency and write performance.
+- `docker-compose.yml`: added `postgres:16-alpine` service with TCP healthcheck and `netmap-pgdata` named volume.
+- `backend/database.py`: PostgreSQL engine with connection pooling (`pool_size=10`, `max_overflow=20`, `pool_pre_ping=True`, `pool_recycle=300`). Fixed `INSERT OR IGNORE` → `INSERT ... ON CONFLICT (key) DO NOTHING` for PostgreSQL compatibility.
+- `backend/requirements.txt`: `psycopg2-binary>=2.9.9` added.
+- `backend/Dockerfile`: `libpq5` runtime dependency added; removed SQLite `DATABASE_URL` ENV default.
+- `backend/entrypoint.sh`: replaced SQLite stamp-head detection with PostgreSQL TCP readiness wait loop (up to 60 seconds on port 5432).
+- `backend/alembic/env.py`: removed SQLite-only `render_as_batch=True` and `compare_type=False` workarounds.
+- `backend/alembic/versions/002_add_device_ignored.py`: `server_default="false"` (was `"0"` for SQLite Boolean).
+- `backend/scan_engine.py`: port inserts use `bulk_insert_mappings` instead of individual `db.add()` calls.
+- `migrate_sqlite_to_pg.py`: one-shot data migration script (SQLite → PostgreSQL, column-for-column copy with boolean casting and sequence reset).
+
+#### Device Ignore Flag
+- Added `ignored BOOLEAN NOT NULL DEFAULT false` column to `devices` table via Alembic migration `002`.
+- `GET /api/topology`: filters out ignored devices (`Device.ignored == False`).
+- `GET /api/devices`: new endpoint returning all devices including ignored ones.
+- `PATCH /api/devices/{id}/meta`: supports `ignored` field.
+- `CredentialsTab.jsx`: shows "ignored" badge per device row; Ignore/Re-enable button per row.
+
+#### Assign Dropdown Fixes
+- ETag cache invalidation (`api.invalidate()`) called before `refreshAll()` after assign/unassign in settings tabs.
+- Assign dropdowns: only show unassigned devices with `ports.length > 0` (successfully scanned).
+
+### Files Modified
+| File | Change |
+|------|--------|
+| docker-compose.yml | PostgreSQL service, pgdata volume |
+| backend/database.py | PostgreSQL engine, connection pooling, INSERT ON CONFLICT fix |
+| backend/requirements.txt | psycopg2-binary |
+| backend/Dockerfile | libpq5, remove SQLite ENV |
+| backend/entrypoint.sh | PostgreSQL readiness wait |
+| backend/alembic/env.py | Remove SQLite workarounds |
+| backend/alembic/versions/002_add_device_ignored.py | NEW — devices.ignored column |
+| backend/scan_engine.py | bulk_insert_mappings for ports |
+| backend/routers/topology.py | Filter ignored devices; GET /api/devices endpoint |
+| frontend/src/api.js | api.invalidate() method |
+| frontend/src/components/settings/CredentialsTab.jsx | Ignore/Re-enable button, ignored badge |
+| migrate_sqlite_to_pg.py | NEW — one-shot SQLite→PostgreSQL data migration |
+
+---
+
 ## v1.2.1 — SNMP Scanner Fix + Topology Map Rendering Fixes
 
 **Type:** PATCH (critical bug fixes)
