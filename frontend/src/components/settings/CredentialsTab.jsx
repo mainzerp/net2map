@@ -19,6 +19,7 @@ function CredentialsTabContent({ profiles, newEntryTrigger }) {
   const [devices, setDevices]   = useState([]);
   const [racks, setRacks]       = useState([]);
   const [classes, setClasses]   = useState([]);
+  const [models, setModels]     = useState([]);
   const [loading, setLoading]   = useState(true);
   const [editState, setEditState] = useState({ id: null, open: false });
   const [form, setForm]         = useState({ ...EMPTY_FORM });
@@ -39,8 +40,9 @@ function CredentialsTabContent({ profiles, newEntryTrigger }) {
       api.get("/api/devices"),
       api.get("/api/racks"),
       api.get("/api/switch-classes"),
+      api.get("/api/switch-models"),
     ])
-      .then(([credsRes, topoRes, racksRes, classesRes]) => {
+      .then(([credsRes, topoRes, racksRes, classesRes, modelsRes]) => {
         if (credsRes.status === "fulfilled") setCreds(credsRes.value);
         else setCreds([]);
         if (topoRes.status === "fulfilled") setDevices(Array.isArray(topoRes.value) ? topoRes.value : (topoRes.value?.nodes || []));
@@ -49,6 +51,8 @@ function CredentialsTabContent({ profiles, newEntryTrigger }) {
         else setRacks([]);
         if (classesRes.status === "fulfilled") setClasses(classesRes.value || []);
         else setClasses([]);
+        if (modelsRes.status === "fulfilled") setModels(modelsRes.value || []);
+        else setModels([]);
         setLoading(false);
       });
   };
@@ -165,19 +169,12 @@ function CredentialsTabContent({ profiles, newEntryTrigger }) {
                   <option value="generic">Generic</option>
                 </select>
               </label>
-              <label style={lbl()}>Model
-                <input value={F.model || ""} onChange={e=>set("model",e.target.value)} placeholder="e.g. UniFi USW-24" style={{...inp,marginTop:3}}/>
-              </label>
-              <label style={lbl()}>Rack (optional)
-                <select value={F.rack_id ?? ""} onChange={e=>set("rack_id", e.target.value ? +e.target.value : null)} style={{...sel,marginTop:3}}>
-                  <option value="">-- No rack --</option>
-                  {racks.map(r=><option key={r.id} value={r.id}>{r.label}{r.room ? ` / ${r.room}` : ""}</option>)}
-                </select>
-              </label>
-              <label style={lbl()}>Class (optional)
-                <select value={F.class_id ?? ""} onChange={e=>set("class_id", e.target.value ? +e.target.value : null)} style={{...sel,marginTop:3}}>
-                  <option value="">-- No class --</option>
-                  {classes.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}
+              <label style={lbl()}>Model (optional)
+                <select value={F.model || ""} onChange={e=>set("model", e.target.value)} style={{...sel,marginTop:3}}>
+                  <option value="">-- No model --</option>
+                  {[...models].sort((a,b)=>a.name.localeCompare(b.name)).map(m=>(
+                    <option key={m.id} value={m.name}>{m.name}</option>
+                  ))}
                 </select>
               </label>
             </div>
