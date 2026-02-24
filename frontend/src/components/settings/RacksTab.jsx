@@ -52,12 +52,14 @@ function RacksTabContent() {
     const devId = assignSel[rackId];
     if (!devId) return;
     await api.patch(`/api/topology/devices/${devId}/meta`, { rack_id: rackId });
+    api.invalidate("/api/topology", "/api/racks");
     setAssignSel(prev => ({ ...prev, [rackId]: "" }));
     refreshAll();
   };
 
   const unassignDevice = async (devId) => {
     await api.patch(`/api/topology/devices/${devId}/meta`, { rack_id: null });
+    api.invalidate("/api/topology", "/api/racks");
     refreshAll();
   };
 
@@ -90,7 +92,7 @@ function RacksTabContent() {
         <div style={{ color:"#475569", fontSize:11, textAlign:"center", marginTop:20 }}>No racks defined yet</div>
       ) : racks.map(rack => {
         const assigned  = devices.filter(d => d.rack_id === rack.id);
-        const available = devices.filter(d => d.rack_id !== rack.id);
+        const available = devices.filter(d => d.rack_id !== rack.id && (d.ports || []).length > 0);
         const selVal    = assignSel[rack.id] || "";
         return (
           <div key={rack.id} style={{ backgroundColor:"#0a0e18", border:"1px solid #1e293b", borderRadius:8, padding:"12px 14px" }}>

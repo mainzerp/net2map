@@ -52,12 +52,14 @@ function ClassesTabContent() {
     const devId = assignSel[classId];
     if (!devId) return;
     await api.patch(`/api/topology/devices/${devId}/meta`, { class_id: classId });
+    api.invalidate("/api/topology");
     setAssignSel(prev => ({ ...prev, [classId]: "" }));
     refreshAll();
   };
 
   const unassignDevice = async (devId) => {
     await api.patch(`/api/topology/devices/${devId}/meta`, { class_id: null });
+    api.invalidate("/api/topology");
     refreshAll();
   };
 
@@ -97,7 +99,7 @@ function ClassesTabContent() {
         <div style={{ color:"#475569", fontSize:11, textAlign:"center", marginTop:20 }}>No classes defined yet</div>
       ) : classes.map(sc => {
         const assigned  = devices.filter(d => d.class_id === sc.id);
-        const available = devices.filter(d => d.class_id !== sc.id);
+        const available = devices.filter(d => d.class_id !== sc.id && (d.ports || []).length > 0);
         const selVal    = assignSel[sc.id] || "";
         return (
           <div key={sc.id} style={{ backgroundColor:"#0a0e18", border:`1px solid ${sc.color}44`, borderRadius:8, padding:"12px 14px", position:"relative", overflow:"hidden" }}>

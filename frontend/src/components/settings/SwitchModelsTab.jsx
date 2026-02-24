@@ -64,12 +64,14 @@ function ModelsTabContent() {
     const devId = assignSel[modelId];
     if (!devId) return;
     await api.patch(`/api/topology/devices/${devId}/meta`, { model_id: modelId });
+    api.invalidate("/api/topology");
     setAssignSel(prev => ({ ...prev, [modelId]: "" }));
     refreshAll();
   };
 
   const unassignDevice = async (devId) => {
     await api.patch(`/api/topology/devices/${devId}/meta`, { model_id: null });
+    api.invalidate("/api/topology");
     refreshAll();
   };
 
@@ -114,7 +116,7 @@ function ModelsTabContent() {
         <div style={{ color:"#475569", fontSize:11, textAlign:"center", marginTop:20 }}>No models defined yet</div>
       ) : models.map(sm => {
         const assigned  = devices.filter(d => d.model_id === sm.id);
-        const available = devices.filter(d => d.model_id !== sm.id);
+        const available = devices.filter(d => d.model_id !== sm.id && (d.ports || []).length > 0);
         const selVal    = assignSel[sm.id] || "";
         return (
           <div key={sm.id} style={{ backgroundColor:"#0a0e18", border:"1px solid #1e293b", borderRadius:8, padding:"12px 14px", position:"relative", overflow:"hidden" }}>

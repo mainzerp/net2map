@@ -19,7 +19,7 @@ router = APIRouter()
 
 @router.get("/api/topology")
 def get_topology(request: Request, db: Session = Depends(get_db)):
-    nodes   = db.query(Device).all()
+    nodes   = db.query(Device).filter(Device.ignored == False).all()
     links   = db.query(TopologyLink).all()
     racks   = db.query(RackModel).order_by(RackModel.id).all()
     classes = db.query(SwitchClassModel).order_by(SwitchClassModel.id).all()
@@ -109,6 +109,8 @@ def update_device_meta(
         if model_id is not None and not db.query(SwitchModelModel).filter(SwitchModelModel.id == model_id).first():
             raise HTTPException(404, "Switch model not found")
         device.model_id = model_id
+    if "ignored" in payload and payload["ignored"] is not None:
+        device.ignored = payload["ignored"]
 
     db.commit()
     db.refresh(device)
@@ -119,3 +121,23 @@ def update_device_meta(
         if sm:
             dout.ports_per_row = sm.ports_per_row
     return dout
+
+
+@router.get("/api/devices")
+def list_all_devices(request: Request, db: Session = Depends(get_db)):
+    """Returns all devices including ignored ones (for the settings UI)."""
+    devices = db.query(Device).order_by(Device.ip).all()
+    models  = db.query(SwitchModelModel).all()
+    model_ppr = {m.id: m.ports_per_row for m in models}
+    result = []
+    for d in devices:
+        dout = DeviceOut.model_validate(d)
+        if d.model_id and d.model_id in model_ppr:
+            dout.ports_per_row = model_ppr[d.model_id]
+        result.append(dout)
+    import json
+    body = json.dumps([d.model_dump() for d in result], default=str)
+    etag = f'"{hashlib.md5(body.encode()).hexdigest()}"'
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304)
+    return Response(content=body, media_type="application/json", headers={"ETag": etag, "Cache-Control": "no-cache"})

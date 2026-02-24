@@ -248,6 +248,7 @@ class DeviceBase(BaseModel):
     ping_rtt_ms: int = 0
     map_x:     float = 100.0
     map_y:     float = 100.0
+    ignored:   bool  = False
 
 
 class DeviceOut(DeviceBase):
@@ -280,6 +281,7 @@ class DeviceMetaUpdate(BaseModel):
     rack_id:  Optional[int] = None
     class_id: Optional[int] = None
     model_id: Optional[int] = None
+    ignored:  Optional[bool] = None
 
 
 # ─── Topology Link ────────────────────────────────────────────────────────────

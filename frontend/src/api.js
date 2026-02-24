@@ -49,6 +49,8 @@ export const api = {
   put:   (path, body) => fetch(`${API}${path}`, { method:"PUT",    headers:{"Content-Type":"application/json", ..._authHeader}, body: JSON.stringify(body) }).then(_checkOk).then(r => r.json()),
   patch: (path, body) => fetch(`${API}${path}`, { method:"PATCH",  headers:{"Content-Type":"application/json", ..._authHeader}, body: JSON.stringify(body) }).then(_checkOk).then(r => r.json()),
   del:   (path)       => fetch(`${API}${path}`, { method:"DELETE", headers:{ ..._authHeader } }).then(_checkOk),
+  /** Invalidate one or more ETag cache entries so the next GET fetches fresh data. */
+  invalidate: (...paths) => { paths.forEach(p => { delete _etagCache[p]; }); },
 };
 
 // ── Visual constants ─────────────────────────────────────────────────────────

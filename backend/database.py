@@ -161,6 +161,7 @@ class Device(Base):
     map_x        = Column(Float, default=100.0)
     map_y        = Column(Float, default=100.0)
     last_seen    = Column(DateTime, default=datetime.utcnow)
+    ignored      = Column(Boolean, default=False, nullable=False)
 
     # Optional assignment to a managed rack and switch class
     rack_id      = Column(Integer, ForeignKey("racks.id"), nullable=True)

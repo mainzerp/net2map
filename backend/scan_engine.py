@@ -257,8 +257,8 @@ async def _execute_scan(
     scan_mode = scan_type if scan_type in {"discovery", "ports", "links", "macs", "full"} else "full"
 
     if scan_mode in {"ports", "links", "macs"}:
-        # Only scan credentials that are already in the Device table
-        known_ips = {d.ip for d in db.query(Device.ip).all()}
+        # Only scan credentials that are already in the Device table and not ignored
+        known_ips = {d.ip for d in db.query(Device.ip).filter(Device.ignored == False).all()}
         credentials = db.query(Credential).filter(Credential.enabled == True, Credential.ip.in_(known_ips)).all()
     else:
         credentials = db.query(Credential).filter(Credential.enabled == True).all()
@@ -713,6 +713,8 @@ async def _execute_scan(
         for ip, sw in switch_data.items():
             device = db.query(Device).filter(Device.ip == ip).first()
             if not device:
+                continue
+            if device.ignored:
                 continue
 
             peers_by_ifindex: Dict[int, List[tuple[str, str, str]]] = {}

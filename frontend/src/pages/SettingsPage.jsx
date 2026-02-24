@@ -9,6 +9,7 @@ import EngineTabContent       from "../components/settings/ScanSettingsTab.jsx";
 import DnsSettingsTabContent  from "../components/settings/DnsTab.jsx";
 import MapSettingsTabContent  from "../components/settings/MapSettingsTab.jsx";
 import DataImportExportTabContent from "../components/settings/ImportExportTab.jsx";
+import DevicesTabContent          from "../components/settings/DevicesTab.jsx";
 // ===== SettingsPage (main export) =================================================
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState("switches");
@@ -71,6 +72,7 @@ export default function SettingsPage() {
       group: "INFRASTRUCTURE",
       items: [
         { tab:"switches", label:"Switches",  desc:"Credentials" },
+        { tab:"devices",  label:"Devices",   desc:"Ignore / manage discovered devices" },
         { tab:"racks",    label:"Racks",     desc:"Rack definitions" },
         { tab:"classes",  label:"Classes",   desc:"Device roles / classes" },
         { tab:"models",   label:"Models",    desc:"Switch models & port layout" },
@@ -165,6 +167,7 @@ export default function SettingsPage() {
         <div style={{flex:1, overflow:"hidden", display:"flex", maxWidth:900, width:"100%", padding:"0 32px 20px"}}>
           {activeTab === "switches" && <CredentialsTabContent profiles={profiles} />}
           {activeTab === "profiles" && <SnmpProfilesTabContent profiles={profiles} loading={profLoading} onChanged={refreshProfiles} />}
+          {activeTab === "devices"  && <DevicesTabContent />}
           {activeTab === "data"     && <DataImportExportTabContent onProfilesChanged={refreshProfiles} />}
           {activeTab === "racks"    && <RacksTabContent />}
           {activeTab === "classes"  && <ClassesTabContent />}
