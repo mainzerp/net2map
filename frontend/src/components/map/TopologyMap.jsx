@@ -257,9 +257,12 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
         )}
       </defs>
       <rect width={W} height={H} fill={mapBgColor || "#020817"} rx={12}
+            opacity={mapBgUrl ? (mapBgOpacity ?? 0.3) : 1}
             onMouseDown={onBgMouseDown} style={{cursor: bgPan ? "grabbing" : "grab"}}/>
-      <rect width={W} height={H} fill="url(#grid)" rx={12} opacity={0.4}
-            onMouseDown={onBgMouseDown} style={{cursor: bgPan ? "grabbing" : "grab", pointerEvents:"none"}}/>
+      {!mapBgUrl && (
+        <rect width={W} height={H} fill="url(#grid)" rx={12} opacity={0.4}
+              onMouseDown={onBgMouseDown} style={{cursor: bgPan ? "grabbing" : "grab", pointerEvents:"none"}}/>
+      )}
 
       {mapBgUrl && (
         <g transform={`translate(${zoom.tx},${zoom.ty}) scale(${zoom.scale})`}
