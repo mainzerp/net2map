@@ -293,52 +293,52 @@ function CredentialsTabContent({ profiles }) {
       ) : creds.length === 0 ? (
         <div style={{color:"#64748b",fontSize:11,textAlign:"center",padding:20}}>No entries yet</div>
       ) : (
-        creds.map(c => {
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:8,marginBottom:20}}>
+        {[...creds].sort((a,b) => (a.label||"").localeCompare(b.label||"")).map(c => {
           const v3 = c.snmp_version === "v3";
           const assignedProfile = c.profile_id ? profiles.find(p => p.id === c.profile_id) : null;
           const matchedDevice = devices.find(d => d.ip === c.ip);
           return (
             <div key={c.id} style={{
-              display:"flex", alignItems:"flex-start", justifyContent:"space-between",
-              padding:"10px 12px", marginBottom:6,
-              backgroundColor: editState.id === c.id ? "#0c1220" : "#0a0e18",
-              border:`1px solid ${editState.id === c.id ? "#164e63" : (c.enabled ? "#1e293b" : "#0f172a")}`,
+              display:"flex", flexDirection:"column",
+              padding:"10px 12px",
+              backgroundColor: "#0a0e18",
+              border:`1px solid ${c.enabled ? "#1e293b" : "#0f172a"}`,
               borderRadius:8, opacity: c.enabled ? 1 : 0.5,
-              boxShadow: editState.id === c.id ? "0 0 0 1px #083344" : "none",
             }}>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{display:"flex",alignItems:"center",gap:6}}>
-                  <div style={{width:6,height:6,borderRadius:"50%",backgroundColor:c.enabled?"#22c55e":"#64748b",flexShrink:0}}/>
-                  <span style={{color:"#e2e8f0",fontWeight:600,fontSize:12}}>{c.label}</span>
-                  <span style={{
-                    fontSize:10,padding:"1px 5px",borderRadius:3,
-                    backgroundColor:v3?"#1e0b3a":"#0a0e18",
-                    border:`1px solid ${v3?"#6d28d9":"#1e293b"}`,
-                    color:v3?"#a78bfa":"#64748b",
-                  }}>{c.snmp_version}</span>
-                  {v3 && <span style={{fontSize:10,color:"#94a3b8"}}>{c.v3_security_level}</span>}
-                  {matchedDevice && <span style={{
-                    fontSize:10,padding:"1px 5px",borderRadius:3,
-                    backgroundColor:"#052e16",border:"1px solid #166534",color:"#4ade80",
-                  }}>discovered</span>}
-                  {matchedDevice?.ignored && <span style={{
-                    fontSize:10,padding:"1px 5px",borderRadius:3,
-                    backgroundColor:"#450a0a",border:"1px solid #7f1d1d",color:"#f87171",
-                  }}>ignored</span>}
-                </div>
-                <div style={{color:"#64748b",fontSize:10,marginTop:3,paddingLeft:14}}>
-                  {c.ip}:{c.snmp_port}
-                  {assignedProfile
-                    ? <> - <span style={{color:"#7dd3fc"}}>{assignedProfile.label}</span></>
-                    : !v3
-                      ? <> - community: <span style={{color:"#64748b"}}>{c.community}</span></>
-                      : <> - user: <span style={{color:"#64748b"}}>{c.v3_username}</span> - {c.v3_auth_protocol}/{c.v3_priv_protocol}</>
-                  }
-                  {c.location && <> - {c.location}</>}
-                  {matchedDevice && matchedDevice.model && <> - <span style={{color:"#64748b"}}>{matchedDevice.model}</span></>}
+              <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:6}}>
+                <div style={{minWidth:0,flex:1}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                    <div style={{width:6,height:6,borderRadius:"50%",backgroundColor:c.enabled?"#22c55e":"#64748b",flexShrink:0}}/>
+                    <span style={{color:"#e2e8f0",fontWeight:600,fontSize:12}}>{c.label}</span>
+                    <span style={{
+                      fontSize:10,padding:"1px 5px",borderRadius:3,
+                      backgroundColor:v3?"#1e0b3a":"#0a0e18",
+                      border:`1px solid ${v3?"#6d28d9":"#1e293b"}`,
+                      color:v3?"#a78bfa":"#64748b",
+                    }}>{c.snmp_version}</span>
+                    {matchedDevice && <span style={{
+                      fontSize:10,padding:"1px 5px",borderRadius:3,
+                      backgroundColor:"#052e16",border:"1px solid #166534",color:"#4ade80",
+                    }}>discovered</span>}
+                    {matchedDevice?.ignored && <span style={{
+                      fontSize:10,padding:"1px 5px",borderRadius:3,
+                      backgroundColor:"#450a0a",border:"1px solid #7f1d1d",color:"#f87171",
+                    }}>ignored</span>}
+                  </div>
+                  <div style={{color:"#64748b",fontSize:10,marginTop:3,paddingLeft:14}}>
+                    {c.ip}:{c.snmp_port}
+                    {assignedProfile
+                      ? <> - <span style={{color:"#7dd3fc"}}>{assignedProfile.label}</span></>
+                      : !v3
+                        ? <> - <span style={{color:"#64748b"}}>{c.community}</span></>
+                        : <> - <span style={{color:"#64748b"}}>{c.v3_username}</span></>
+                    }
+                    {c.location && <> - {c.location}</>}
+                  </div>
                 </div>
               </div>
-              <div style={{display:"flex",gap:6,flexShrink:0,marginLeft:8}}>
+              <div style={{display:"flex",gap:5,justifyContent:"flex-end"}}>
                 {matchedDevice && (
                   <button
                     disabled={togglingIgnoreId === matchedDevice.id}
@@ -367,26 +367,28 @@ function CredentialsTabContent({ profiles }) {
               </div>
             </div>
           );
-        })
+        })}
+        </div>
       )}
       {(() => {
         const credIps = new Set(creds.map(c => c.ip));
         const unassigned = devices.filter(d => !credIps.has(d.ip));
         if (unassigned.length === 0) return null;
         return (
-          <div style={{marginTop:20}}>
+          <div style={{marginTop:4}}>
             <div style={{color:"#e2e8f0",fontSize:10,letterSpacing:2,marginBottom:10}}>
               DISCOVERED WITHOUT CREDENTIALS ({unassigned.length})
             </div>
-            {unassigned.map(d => (
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:8}}>
+            {[...unassigned].sort((a,b) => (a.sys_name||a.ip).localeCompare(b.sys_name||b.ip)).map(d => (
               <div key={d.id} style={{
-                display:"flex", alignItems:"flex-start", justifyContent:"space-between",
-                padding:"10px 12px", marginBottom:6,
+                display:"flex", flexDirection:"column",
+                padding:"10px 12px",
                 backgroundColor:"#0a0e18", border:"1px solid #1e293b",
                 borderRadius:8,
               }}>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <div style={{marginBottom:6}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                     <div style={{width:6,height:6,borderRadius:"50%",backgroundColor:"#eab308",flexShrink:0}}/>
                     <span style={{color:"#e2e8f0",fontWeight:600,fontSize:12}}>{d.sys_name || d.ip}</span>
                     <span style={{
@@ -405,7 +407,7 @@ function CredentialsTabContent({ profiles }) {
                     {d.ports && <> - {d.ports.filter(p => p.oper_status === 1).length}/{d.ports.length} ports</>}
                   </div>
                 </div>
-                <div style={{display:"flex",gap:6,flexShrink:0,marginLeft:8}}>
+                <div style={{display:"flex",gap:5,justifyContent:"flex-end"}}>
                   <button
                     disabled={togglingIgnoreId === d.id}
                     onClick={() => toggleIgnored(d)}
@@ -435,6 +437,7 @@ function CredentialsTabContent({ profiles }) {
                 </div>
               </div>
             ))}
+            </div>
           </div>
         );
       })()}

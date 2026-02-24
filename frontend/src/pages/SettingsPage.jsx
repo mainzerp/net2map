@@ -163,7 +163,7 @@ export default function SettingsPage() {
           <div style={{height:1,backgroundColor:"#0f172a",marginTop:14}}/>
         </div>
 
-        <div style={{flex:1, overflow:"hidden", display:"flex", maxWidth:900, width:"100%", padding:"0 32px 20px"}}>
+        <div style={{flex:1, overflow:"hidden", display:"flex", width:"100%", padding:"0 32px 20px"}}>
           {activeTab === "switches" && <CredentialsTabContent profiles={profiles} />}
           {activeTab === "profiles" && <SnmpProfilesTabContent profiles={profiles} loading={profLoading} onChanged={refreshProfiles} />}
           {activeTab === "devices"  && <DevicesTabContent />}
