@@ -256,12 +256,15 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
           </clipPath>
         )}
       </defs>
-      {/* Layer 1: solid background color fills the entire map */}
-      <rect x={0} y={0} width="100%" height="100%" fill={mapBgColor || "#020817"}
-            onMouseDown={onBgMouseDown} style={{cursor: bgPan ? "grabbing" : "grab"}}/>
+      {/* Layer 1: grid (only when no background image) */}
       {!mapBgUrl && (
         <rect x={0} y={0} width="100%" height="100%" fill="url(#grid)" opacity={0.4}
               onMouseDown={onBgMouseDown} style={{cursor: bgPan ? "grabbing" : "grab", pointerEvents:"none"}}/>
+      )}
+      {/* Invisible panning target when image is present */}
+      {mapBgUrl && (
+        <rect x={0} y={0} width="100%" height="100%" fill="transparent"
+              onMouseDown={onBgMouseDown} style={{cursor: bgPan ? "grabbing" : "grab"}}/>
       )}
 
       {/* Layer 2: background image at full opacity */}
@@ -274,7 +277,7 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
         </g>
       )}
 
-      {/* Layer 3: opacity overlay on top of color + image */}
+      {/* Layer 3: opacity overlay (dims image to blend with background color) */}
       {mapBgUrl && (
         <rect x={0} y={0} width="100%" height="100%"
               fill={mapBgColor || "#020817"}
