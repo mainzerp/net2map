@@ -1,5 +1,24 @@
 # Version History
 
+## v1.3.1 — Rack Detail Reorder Fix
+
+**Type:** PATCH (bug fix)
+
+### Changes
+
+#### Rack Detail: Switch Reorder Buttons
+- Fixed non-functional reorder behavior in rack detail panel (`^` / `v`) caused by ID type mismatches (`number` vs `string`) in localStorage order comparisons.
+- `frontend/src/hooks/useRackOrders.js`: normalized all compared/stored device IDs via `String(id)` and added a safe guard for missing `selectedRack.devices`.
+- `frontend/src/components/map/RackDetail.jsx`: normalized `deviceOrder` IDs to strings before sorting, so persisted order is applied reliably.
+
+### Files Modified
+| File | Change |
+|------|--------|
+| frontend/src/hooks/useRackOrders.js | Normalize reorder IDs and guard missing devices |
+| frontend/src/components/map/RackDetail.jsx | Normalize sort comparison IDs |
+
+---
+
 ## v1.3.0 — PostgreSQL Migration + Device Ignore Flag
 
 **Type:** MINOR (new infrastructure + new feature)

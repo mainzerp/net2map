@@ -8,15 +8,17 @@ export function useRackOrders(selectedRack) {
 
   const reorderDevice = (deviceId, direction, groupKey) => {
     if (!selectedRack) return;
+    const rackDevices = Array.isArray(selectedRack.devices) ? selectedRack.devices : [];
     const rackId = selectedRack.id;
-    const devs = selectedRack.devices.filter(d =>
+    const devs = rackDevices.filter(d =>
       groupKey === "tor"    ? (d.class_id === 1 || (!d.class_id && d.vendor === "fs")) :
       groupKey === "access" ? (d.class_id === 2 || (!d.class_id && d.vendor === "aruba_cx")) :
       d.class_id == null && d.vendor !== "fs" && d.vendor !== "aruba_cx"
     );
-    const ids = devs.map(d => d.id);
+    const ids = devs.map(d => String(d.id));
+    const targetId = String(deviceId);
     const storeKey = `${rackId}::${groupKey}`;
-    const order = (rackOrders[storeKey]) || [];
+    const order = ((rackOrders[storeKey]) || []).map(id => String(id));
     const sorted = [...ids].sort((a, b) => {
       const ai = order.indexOf(a), bi = order.indexOf(b);
       if (ai === -1 && bi === -1) return 0;
@@ -24,7 +26,7 @@ export function useRackOrders(selectedRack) {
       if (bi === -1) return -1;
       return ai - bi;
     });
-    const idx = sorted.indexOf(deviceId);
+    const idx = sorted.indexOf(targetId);
     if (idx < 0) return;
     const newIdx = direction === "up" ? idx - 1 : idx + 1;
     if (newIdx < 0 || newIdx >= sorted.length) return;

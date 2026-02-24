@@ -20,10 +20,10 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
   };
 
   const sortGroup = useCallback((devices, groupKey) => {
-    const order = (deviceOrder || {})[groupKey] || [];
+    const order = ((deviceOrder || {})[groupKey] || []).map(id => String(id));
     if (!order.length) return devices;
     return [...devices].sort((a, b) => {
-      const ai = order.indexOf(a.id), bi = order.indexOf(b.id);
+      const ai = order.indexOf(String(a.id)), bi = order.indexOf(String(b.id));
       if (ai === -1 && bi === -1) return 0;
       if (ai === -1) return 1;
       if (bi === -1) return -1;
