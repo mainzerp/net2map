@@ -72,7 +72,6 @@ export default function SettingsPage() {
       group: "INFRASTRUCTURE",
       items: [
         { tab:"switches", label:"Switches",  desc:"Credentials" },
-        { tab:"devices",  label:"Devices",   desc:"Ignore / manage discovered devices" },
         { tab:"racks",    label:"Racks",     desc:"Rack definitions" },
         { tab:"classes",  label:"Classes",   desc:"Device roles / classes" },
         { tab:"models",   label:"Models",    desc:"Switch models & port layout" },

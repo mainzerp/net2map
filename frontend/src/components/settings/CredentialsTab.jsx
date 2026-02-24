@@ -25,6 +25,7 @@ function CredentialsTabContent({ profiles }) {
   const [form, setForm]         = useState({ ...EMPTY_FORM });
   const [err, setErr]           = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [togglingIgnoreId, setTogglingIgnoreId] = useState(null);
   const formRef = useRef(null);
   const rowRefs = useRef({});
 
@@ -32,14 +33,14 @@ function CredentialsTabContent({ profiles }) {
     setLoading(true);
     Promise.allSettled([
       api.get("/api/credentials"),
-      api.get("/api/topology"),
+      api.get("/api/devices"),
       api.get("/api/racks"),
       api.get("/api/switch-classes"),
     ])
       .then(([credsRes, topoRes, racksRes, classesRes]) => {
         if (credsRes.status === "fulfilled") setCreds(credsRes.value);
         else setCreds([]);
-        if (topoRes.status === "fulfilled") setDevices(topoRes.value?.nodes || []);
+        if (topoRes.status === "fulfilled") setDevices(Array.isArray(topoRes.value) ? topoRes.value : (topoRes.value?.nodes || []));
         else setDevices([]);
         if (racksRes.status === "fulfilled") setRacks(racksRes.value || []);
         else setRacks([]);
@@ -51,6 +52,17 @@ function CredentialsTabContent({ profiles }) {
   useEffect(() => { refresh(); }, []);
 
   const resetForm = () => { setForm({ ...EMPTY_FORM }); setEditState(s => ({ ...s, id: null })); setErr(""); };
+
+  const toggleIgnored = async (dev) => {
+    setTogglingIgnoreId(dev.id);
+    try {
+      await api.patch(`/api/topology/devices/${dev.id}/meta`, { ignored: !dev.ignored });
+      api.invalidate("/api/topology", "/api/devices");
+      refresh();
+    } finally {
+      setTogglingIgnoreId(null);
+    }
+  };
 
   const startEdit = (c, e) => {
     const rect = rowRefs.current[c.id]?.getBoundingClientRect?.() || e?.currentTarget?.getBoundingClientRect?.();
@@ -344,6 +356,10 @@ function CredentialsTabContent({ profiles }) {
                       fontSize:10,padding:"1px 5px",borderRadius:3,
                       backgroundColor:"#052e16",border:"1px solid #166534",color:"#4ade80",
                     }}>discovered</span>}
+                    {matchedDevice?.ignored && <span style={{
+                      fontSize:10,padding:"1px 5px",borderRadius:3,
+                      backgroundColor:"#450a0a",border:"1px solid #7f1d1d",color:"#f87171",
+                    }}>ignored</span>}
                   </div>
                   <div style={{color:"#64748b",fontSize:10,marginTop:3,paddingLeft:14}}>
                     {c.ip}:{c.snmp_port}
@@ -358,6 +374,22 @@ function CredentialsTabContent({ profiles }) {
                   </div>
                 </div>
                 <div style={{display:"flex",gap:6,flexShrink:0,marginLeft:8}}>
+                  {matchedDevice && (
+                    <button
+                      disabled={togglingIgnoreId === matchedDevice.id}
+                      onClick={() => toggleIgnored(matchedDevice)}
+                      title={matchedDevice.ignored ? "Re-enable: scan this device and show on map" : "Ignore: skip scan and hide from map"}
+                      style={{
+                        background:"none",
+                        border: matchedDevice.ignored ? "1px solid #164e63" : "1px solid #475569",
+                        color: matchedDevice.ignored ? "#22d3ee" : "#64748b",
+                        borderRadius:4,padding:"2px 8px",cursor:"pointer",fontSize:10,
+                        opacity: togglingIgnoreId === matchedDevice.id ? 0.5 : 1,
+                      }}
+                    >
+                      {togglingIgnoreId === matchedDevice.id ? "..." : matchedDevice.ignored ? "Re-enable" : "Ignore"}
+                    </button>
+                  )}
                   <button onClick={(e) => startEdit(c, e)} style={{background:"none",border:"1px solid #1e293b",color:"#64748b",borderRadius:4,padding:"2px 8px",cursor:"pointer",fontSize:10}}>Edit</button>
                   {confirmDeleteId === c.id ? (
                     <span style={{display:"flex",gap:4}}>
