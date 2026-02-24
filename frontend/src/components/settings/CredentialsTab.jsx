@@ -14,7 +14,7 @@ const EMPTY_FORM = {
   v3_priv_protocol:"AES-128", v3_priv_password:"",
 };
 
-function CredentialsTabContent({ profiles }) {
+function CredentialsTabContent({ profiles, newEntryTrigger }) {
   const [creds, setCreds]       = useState([]);
   const [devices, setDevices]   = useState([]);
   const [racks, setRacks]       = useState([]);
@@ -25,6 +25,12 @@ function CredentialsTabContent({ profiles }) {
   const [err, setErr]           = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [togglingIgnoreId, setTogglingIgnoreId] = useState(null);
+
+  // Open the new-entry form whenever the parent increments the trigger
+  useEffect(() => {
+    if (newEntryTrigger > 0) { startNew(); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newEntryTrigger]);
 
   const refresh = () => {
     setLoading(true);
@@ -275,18 +281,6 @@ function CredentialsTabContent({ profiles }) {
           </form>
         </div>
       )}
-
-      {/* Top bar with NEW ENTRY button */}
-      <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}>
-        <button
-          onClick={startNew}
-          style={{
-            backgroundColor:"#083344", border:"1px solid #164e63", color:"#22d3ee",
-            borderRadius:6, padding:"7px 16px", cursor:"pointer",
-            fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, fontWeight:600,
-          }}
-        >+ New Entry</button>
-      </div>
 
       {loading ? (
         <div style={{color:"#64748b",fontSize:11,textAlign:"center",padding:20}}>Loading...</div>

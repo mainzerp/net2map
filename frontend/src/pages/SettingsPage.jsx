@@ -15,6 +15,7 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState("switches");
   const [profiles, setProfiles]   = useState([]);
   const [profLoading, setProfLoading] = useState(true);
+  const [newEntryTrigger, setNewEntryTrigger] = useState(0);
 
   // Map background state
   const [mapBgUrl, setMapBgUrl]   = useState(null);
@@ -154,17 +155,31 @@ export default function SettingsPage() {
         backgroundColor:"#020917",
       }}>
         <div style={{padding:"20px 32px 0",flexShrink:0}}>
-          <div style={{color:"#e2e8f0",fontWeight:700,fontSize:18}}>
-            {allNavItems.find(n=>n.tab===activeTab)?.label}
-          </div>
-          <div style={{color:"#64748b",fontSize:12,marginTop:3}}>
-            {allNavItems.find(n=>n.tab===activeTab)?.desc}
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div>
+              <div style={{color:"#e2e8f0",fontWeight:700,fontSize:18}}>
+                {allNavItems.find(n=>n.tab===activeTab)?.label}
+              </div>
+              <div style={{color:"#64748b",fontSize:12,marginTop:3}}>
+                {allNavItems.find(n=>n.tab===activeTab)?.desc}
+              </div>
+            </div>
+            {activeTab === "switches" && (
+              <button
+                onClick={() => setNewEntryTrigger(t => t + 1)}
+                style={{
+                  backgroundColor:"#083344", border:"1px solid #164e63", color:"#22d3ee",
+                  borderRadius:6, padding:"7px 16px", cursor:"pointer",
+                  fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, fontWeight:600,
+                }}
+              >+ New Entry</button>
+            )}
           </div>
           <div style={{height:1,backgroundColor:"#0f172a",marginTop:14}}/>
         </div>
 
         <div style={{flex:1, overflow:"hidden", display:"flex", width:"100%", padding:"0 32px 20px"}}>
-          {activeTab === "switches" && <CredentialsTabContent profiles={profiles} />}
+          {activeTab === "switches" && <CredentialsTabContent profiles={profiles} newEntryTrigger={newEntryTrigger} />}
           {activeTab === "profiles" && <SnmpProfilesTabContent profiles={profiles} loading={profLoading} onChanged={refreshProfiles} />}
           {activeTab === "devices"  && <DevicesTabContent />}
           {activeTab === "data"     && <DataImportExportTabContent onProfilesChanged={refreshProfiles} />}
