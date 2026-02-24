@@ -33,7 +33,7 @@ def _clear_bg_files():
 # ─── Map Settings ──────────────────────────────────────────────────────────────
 
 MAP_SETTINGS_PATH = os.path.join(MAP_BG_DIR, "map-settings.json")
-DEFAULT_MAP_SETTINGS = {"opacity": 0.3, "scale": 1.0}
+DEFAULT_MAP_SETTINGS = {"opacity": 0.3, "scale": 1.0, "bg_color": "#020817"}
 
 
 def _read_map_settings():

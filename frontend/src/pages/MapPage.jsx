@@ -10,7 +10,7 @@ import { useRackOrders } from "../hooks/useRackOrders.js";
 // â”€â”€ MapPage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function MapPage() {
   const { topology, selectedRack, setSelectedRack, loadError, loadTopology } = useTopologyData();
-  const { mapBgUrl, mapBgNat, mapBgOpacity, mapBgScale } = useMapBackground();
+  const { mapBgUrl, mapBgNat, mapBgOpacity, mapBgScale, mapBgColor } = useMapBackground();
   const { rackOrders, reorderDevice } = useRackOrders(selectedRack);
   const [filters, setFilters] = useState({ racks: null, classes: null });
   const [selectedLink, setSelectedLink] = useState(null);
@@ -151,6 +151,7 @@ export default function MapPage() {
               mapBgOpacity={mapBgOpacity}
               mapBgScale={mapBgScale}
               mapBgNat={mapBgNat}
+              mapBgColor={mapBgColor}
               rackPairColorMap={rackPairColorMap}
               selectedLink={selectedLink}
             />

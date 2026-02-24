@@ -1,7 +1,7 @@
 import { useRef } from "react";
 
 // ── MapSettingsTabContent ───────────────────────────────────────────────────
-function MapSettingsTabContent({ url, opacity, scale, fileRef, onUpload, onRemove, onChangeOpacity, onChangeScale }) {
+function MapSettingsTabContent({ url, opacity, scale, bgColor, fileRef, onUpload, onRemove, onChangeOpacity, onChangeScale, onChangeBgColor }) {
   const btnStyle = {
     border:"1px solid #1e293b", background:"#0f172a", color:"#94a3b8",
     borderRadius:6, padding:"6px 14px", cursor:"pointer",
@@ -12,6 +12,29 @@ function MapSettingsTabContent({ url, opacity, scale, fileRef, onUpload, onRemov
 
   return (
     <div style={{paddingTop:20, display:"flex", flexDirection:"column", gap:20, width:"100%"}}>
+      <div style={{backgroundColor:"#0a0e18", border:"1px solid #1e293b", borderRadius:10, padding:16, width:"100%", boxSizing:"border-box"}}>
+        <div style={{...labelStyle, fontWeight:700, marginBottom:10}}>Map Background Color</div>
+        <div style={{display:"flex", alignItems:"center", gap:12}}>
+          <input
+            type="color"
+            value={bgColor || "#020817"}
+            onChange={e => onChangeBgColor(e.target.value)}
+            style={{ width:40, height:32, border:"1px solid #1e293b", borderRadius:4, cursor:"pointer", padding:2, backgroundColor:"transparent" }}
+          />
+          <span style={{...valStyle, fontFamily:"monospace"}}>{bgColor || "#020817"}</span>
+          <button
+            onClick={() => onChangeBgColor("#020817")}
+            style={{...btnStyle, fontSize:10, padding:"4px 10px"}}
+          >Reset dark</button>
+          <button
+            onClick={() => onChangeBgColor("#ffffff")}
+            style={{...btnStyle, fontSize:10, padding:"4px 10px"}}
+          >White</button>
+        </div>
+        <div style={{...labelStyle, fontSize:10, color:"#475569", marginTop:8}}>
+          Set to match your floor plan or office background for a seamless look.
+        </div>
+      </div>
       <div style={{backgroundColor:"#0a0e18", border:"1px solid #1e293b", borderRadius:10, padding:16, width:"100%", boxSizing:"border-box"}}>
         <div style={{...labelStyle, fontWeight:700, marginBottom:10}}>Background Image</div>
         <div style={{display:"flex", alignItems:"center", gap:10, flexWrap:"wrap"}}>

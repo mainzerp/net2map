@@ -21,6 +21,7 @@ export default function SettingsPage() {
   const [mapBgUrl, setMapBgUrl]   = useState(null);
   const [mapBgOpacity, setMapBgOpacity] = useState(0.3);
   const [mapBgScale, setMapBgScale] = useState(1);
+  const [mapBgColor, setMapBgColor] = useState("#020817");
   const bgFileRef = useRef(null);
 
   const refreshProfiles = () => {
@@ -37,6 +38,7 @@ export default function SettingsPage() {
     api.get("/api/map-settings").then(s => {
       if (s.opacity != null) setMapBgOpacity(s.opacity);
       if (s.scale != null) setMapBgScale(s.scale);
+      if (s.bg_color != null) setMapBgColor(s.bg_color);
     }).catch(() => {});
   }, []);
 
@@ -60,6 +62,11 @@ export default function SettingsPage() {
   const changeBgScale = (val) => {
     setMapBgScale(val);
     api.put("/api/map-settings", { scale: val }).catch(console.error);
+  };
+
+  const changeBgColor = (val) => {
+    setMapBgColor(val);
+    api.put("/api/map-settings", { bg_color: val }).catch(console.error);
   };
 
   const NAV_GROUPS = [
@@ -193,11 +200,13 @@ export default function SettingsPage() {
               url={mapBgUrl}
               opacity={mapBgOpacity}
               scale={mapBgScale}
+              bgColor={mapBgColor}
               fileRef={bgFileRef}
               onUpload={uploadMapBg}
               onRemove={removeMapBg}
               onChangeOpacity={changeBgOpacity}
               onChangeScale={changeBgScale}
+              onChangeBgColor={changeBgColor}
             />
           )}
         </div>

@@ -78,4 +78,6 @@ async def update_map_settings(request: Request):
         allowed["opacity"] = float(body["opacity"])
     if "scale" in body:
         allowed["scale"] = float(body["scale"])
+    if "bg_color" in body:
+        allowed["bg_color"] = str(body["bg_color"])[:20]
     return _write_map_settings(allowed)

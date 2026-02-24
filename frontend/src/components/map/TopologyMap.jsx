@@ -10,7 +10,7 @@ function _isValidZoom(z) {
   );
 }
 
-function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSelectRack, selectedRackId, centerRackId, onPositionChange, mapBgUrl, mapBgOpacity, mapBgScale, mapBgNat, rackPairColorMap, selectedLink }) {
+function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSelectRack, selectedRackId, centerRackId, onPositionChange, mapBgUrl, mapBgOpacity, mapBgScale, mapBgNat, mapBgColor, rackPairColorMap, selectedLink }) {
   const W = 900, H = 550;
   const svgRef = useRef(null);
   const [drag, setDrag] = useState(null);
@@ -247,11 +247,8 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
     >
       <defs>
         <filter id="glow"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-        <radialGradient id="bg" cx="50%" cy="50%" r="70%">
-          <stop offset="0%" stopColor="#0f172a"/><stop offset="100%" stopColor="#020817"/>
-        </radialGradient>
         <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#0f172a" strokeWidth="1"/>
+          <path d="M 40 0 L 0 0 0 40" fill="none" stroke={mapBgColor && mapBgColor !== "#020817" ? "rgba(0,0,0,0.08)" : "#0f172a"} strokeWidth="1"/>
         </pattern>
         {mapBgUrl && (
           <clipPath id="bgClip">
@@ -259,9 +256,9 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
           </clipPath>
         )}
       </defs>
-      <rect width={W} height={H} fill="url(#bg)" rx={12}
+      <rect width={W} height={H} fill={mapBgColor || "#020817"} rx={12}
             onMouseDown={onBgMouseDown} style={{cursor: bgPan ? "grabbing" : "grab"}}/>
-      <rect width={W} height={H} fill="url(#grid)" rx={12} opacity={0.6}
+      <rect width={W} height={H} fill="url(#grid)" rx={12} opacity={0.4}
             onMouseDown={onBgMouseDown} style={{cursor: bgPan ? "grabbing" : "grab", pointerEvents:"none"}}/>
 
       {mapBgUrl && (

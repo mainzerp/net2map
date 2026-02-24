@@ -6,6 +6,7 @@ export function useMapBackground() {
   const [mapBgNat, setMapBgNat] = useState(null);
   const [mapBgOpacity, setMapBgOpacity] = useState(0.3);
   const [mapBgScale, setMapBgScale] = useState(1);
+  const [mapBgColor, setMapBgColor] = useState("#020817");
 
   const loadMapBg = useCallback(() => {
     fetch(`${API}/api/map-background`, { method: "GET" })
@@ -29,11 +30,12 @@ export function useMapBackground() {
     api.get("/api/map-settings").then(s => {
       if (s.opacity != null) setMapBgOpacity(s.opacity);
       if (s.scale != null) setMapBgScale(s.scale);
+      if (s.bg_color != null) setMapBgColor(s.bg_color);
     }).catch(console.error);
   }, []);
 
   useEffect(() => { loadMapBg(); }, []);
   useEffect(() => { loadMapSettings(); }, []);
 
-  return { mapBgUrl, mapBgNat, mapBgOpacity, mapBgScale };
+  return { mapBgUrl, mapBgNat, mapBgOpacity, mapBgScale, mapBgColor };
 }
