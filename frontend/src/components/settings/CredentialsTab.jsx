@@ -177,6 +177,18 @@ function CredentialsTabContent({ profiles, newEntryTrigger }) {
                   ))}
                 </select>
               </label>
+              <label style={lbl()}>Rack
+                <select value={F.rack_id ?? ""} onChange={e=>set("rack_id", e.target.value ? +e.target.value : null)} style={{...sel,marginTop:3}}>
+                  <option value="">-- No rack --</option>
+                  {racks.map(r=><option key={r.id} value={r.id}>{r.label}{r.room ? ` / ${r.room}` : ""}</option>)}
+                </select>
+              </label>
+              <label style={lbl()}>Class
+                <select value={F.class_id ?? ""} onChange={e=>set("class_id", e.target.value ? +e.target.value : null)} style={{...sel,marginTop:3}}>
+                  <option value="">-- No class --</option>
+                  {classes.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}
+                </select>
+              </label>
             </div>
             <div style={{marginBottom:10}}>
               <div style={{fontSize:10,color:"#94a3b8",marginBottom:4}}>Credential profile (optional)</div>
