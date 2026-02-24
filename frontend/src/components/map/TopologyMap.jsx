@@ -256,22 +256,30 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
           </clipPath>
         )}
       </defs>
+      {/* Layer 1: solid background color fills the entire map */}
       <rect width={W} height={H} fill={mapBgColor || "#020817"} rx={12}
-            opacity={mapBgUrl ? (mapBgOpacity ?? 0.3) : 1}
             onMouseDown={onBgMouseDown} style={{cursor: bgPan ? "grabbing" : "grab"}}/>
       {!mapBgUrl && (
         <rect width={W} height={H} fill="url(#grid)" rx={12} opacity={0.4}
               onMouseDown={onBgMouseDown} style={{cursor: bgPan ? "grabbing" : "grab", pointerEvents:"none"}}/>
       )}
 
+      {/* Layer 2: background image at full opacity */}
       {mapBgUrl && (
         <g transform={`translate(${zoom.tx},${zoom.ty}) scale(${zoom.scale})`}
            clipPath="url(#bgClip)">
           <image href={mapBgUrl} x={bgX} y={bgY} width={bgW} height={bgH}
-                 opacity={mapBgOpacity ?? 0.3}
                  preserveAspectRatio="xMidYMid meet"
                  style={{pointerEvents:"none"}}/>
         </g>
+      )}
+
+      {/* Layer 3: opacity overlay on top of color + image */}
+      {mapBgUrl && (
+        <rect width={W} height={H} rx={12}
+              fill={mapBgColor || "#020817"}
+              opacity={1 - (mapBgOpacity ?? 0.3)}
+              style={{pointerEvents:"none"}}/>
       )}
 
       <g transform={`translate(${zoom.tx},${zoom.ty}) scale(${zoom.scale})`}>
