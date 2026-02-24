@@ -815,6 +815,14 @@ async def _execute_scan(
                             canonical = port_suffix_lookup[remote_ip].get(sfx)
                             if canonical:
                                 resolved_remote_port = canonical
+                    if resolved_remote_port == nbr.remote_port:
+                        # Fallback: lldpd on FreeBSD/OPNsense formats portDesc as
+                        # "Description (ifname)" – extract the ifname from parens.
+                        m = re.search(r'\(([^)]+)\)\s*$', nbr.remote_port)
+                        if m:
+                            canonical = port_lookup[remote_ip].get(_norm(m.group(1)))
+                            if canonical:
+                                resolved_remote_port = canonical
 
                 db.add(TopologyLink(
                     local_ip=ip,
