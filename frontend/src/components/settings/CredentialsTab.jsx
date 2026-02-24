@@ -298,6 +298,7 @@ function CredentialsTabContent({ profiles }) {
           const v3 = c.snmp_version === "v3";
           const assignedProfile = c.profile_id ? profiles.find(p => p.id === c.profile_id) : null;
           const matchedDevice = devices.find(d => d.ip === c.ip);
+          const assignedRack = c.rack_id ? racks.find(r => r.id === c.rack_id) : null;
           return (
             <div key={c.id} style={{
               display:"flex", flexDirection:"column",
@@ -317,6 +318,20 @@ function CredentialsTabContent({ profiles }) {
                       border:`1px solid ${v3?"#6d28d9":"#1e293b"}`,
                       color:v3?"#a78bfa":"#64748b",
                     }}>{c.snmp_version}</span>
+                    {assignedRack ? (
+                      <span title={`Rack: ${assignedRack.label}${assignedRack.room ? ` / ${assignedRack.room}` : ""}`} style={{
+                        fontSize:10,padding:"1px 6px",borderRadius:3,
+                        backgroundColor:"#0c1a2e",border:"1px solid #1e3a5f",color:"#7dd3fc",
+                        maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                      }}>
+                        {assignedRack.label}{assignedRack.room ? ` / ${assignedRack.room}` : ""}
+                      </span>
+                    ) : (
+                      <span title="No rack assigned" style={{
+                        fontSize:10,padding:"1px 6px",borderRadius:3,
+                        backgroundColor:"#0c0f18",border:"1px solid #1e293b",color:"#334155",
+                      }}>no rack</span>
+                    )}
                     {matchedDevice && <span style={{
                       fontSize:10,padding:"1px 5px",borderRadius:3,
                       backgroundColor:"#052e16",border:"1px solid #166534",color:"#4ade80",
