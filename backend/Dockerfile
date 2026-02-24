@@ -3,7 +3,8 @@ FROM python:3.12-slim
 # iputils-ping is required by _ping_host_async() in main.py.
 # The ping flags used (-c, -W) are Linux-specific.
 # gosu enables privilege dropping from root to appuser at container start (needed for volume chown).
-RUN apt-get update && apt-get install -y iputils-ping gosu && rm -rf /var/lib/apt/lists/*
+# libpq-dev is required to build psycopg2 from source if needed (psycopg2-binary covers most cases).
+RUN apt-get update && apt-get install -y iputils-ping gosu libpq5 && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -11,8 +12,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-
-ENV DATABASE_URL=sqlite:////data/netmap.db
 
 # Create unprivileged user; /data ownership is fixed at container start by entrypoint.sh
 # because Docker volume mounts happen after build-time chown.

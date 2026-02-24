@@ -7,23 +7,16 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./netmap.db")
+DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://netmap:netmap_pw@postgres/netmap")
 
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    # Enable WAL mode via connect event for better read/write concurrency
+    pool_size=10,
+    max_overflow=20,
+    pool_pre_ping=True,       # reconnect after idle timeout
+    pool_recycle=300,         # recycle connections every 5 minutes
 )
 
-from sqlalchemy import event as _sa_event
-
-@_sa_event.listens_for(engine, "connect")
-def _set_sqlite_pragma(dbapi_conn, connection_record):
-    cursor = dbapi_conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA synchronous=NORMAL")
-    cursor.execute("PRAGMA busy_timeout=10000")
-    cursor.close()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -270,7 +263,10 @@ def _seed_default_settings():
         ]
         for key, value in defaults:
             conn.execute(
-                text("INSERT OR IGNORE INTO app_settings (key, value) VALUES (:key, :value)"),
+                text(
+                    "INSERT INTO app_settings (key, value) VALUES (:key, :value)"
+                    " ON CONFLICT (key) DO NOTHING"
+                ),
                 {"key": key, "value": value},
             )
 

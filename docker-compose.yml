@@ -1,27 +1,48 @@
 services:
 
-  # ─── FastAPI Backend ─────────────────────────────────────────────────────────
+  # ─── PostgreSQL Database ──────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: netmap-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: netmap
+      POSTGRES_USER: netmap
+      POSTGRES_PASSWORD: netmap_pw
+    volumes:
+      - netmap-pgdata:/var/lib/postgresql/data
+    networks:
+      - netmap
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U netmap"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ─── FastAPI Backend ──────────────────────────────────────────────────────────
   backend:
     build: ./backend
     container_name: netmap-backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: "sqlite:////data/netmap.db"
+      DATABASE_URL: "postgresql://netmap:netmap_pw@postgres/netmap"
       CORS_ORIGIN: "http://localhost:3000"
       SECRET_TOKEN: ""
     volumes:
-      - netmap-data:/data          # persistent SQLite file
-    # SNMP requires access to your LAN – use host network or expose nothing
-    # (SNMP queries originate FROM this container, no inbound ports needed)
+      - netmap-data:/data          # persistent storage for map background images etc.
     networks:
       - netmap
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
-  # ─── React/Nginx Frontend ────────────────────────────────────────────────────
+      start_period: 15s
+
+  # ─── React/Nginx Frontend ─────────────────────────────────────────────────────
   frontend:
     build:
       context: ./frontend
@@ -41,6 +62,7 @@ services:
 
 volumes:
   netmap-data:
+  netmap-pgdata:
 
 networks:
   netmap:

@@ -726,6 +726,7 @@ async def _execute_scan(
                 peers_by_ifindex.setdefault(ifindex, []).append((mac, peer_ip, peer_host))
 
             db.query(Port).filter(Port.device_id == device.id).delete()
+            port_rows = []
             for iface in sw.interfaces.values():
                 if is_virtual(iface.descr, sw.vendor):
                     continue
@@ -739,27 +740,25 @@ async def _execute_scan(
                     peer_mac, peer_ip, peer_host = endpoint_entries[0]
 
                 endpoint_details = [
-                    {
-                        "mac": mac,
-                        "ip": ip_addr,
-                        "host": host,
-                    }
+                    {"mac": mac, "ip": ip_addr, "host": host}
                     for mac, ip_addr, host in endpoint_entries
                 ]
 
-                db.add(Port(
-                    device_id=device.id,
-                    if_index=iface.index,
-                    if_descr=iface.descr,
-                    if_alias=iface.alias,
-                    speed_mbps=iface.speed_mbps,
-                    oper_status=iface.oper_status,
-                    peer_mac=peer_mac,
-                    peer_ip=peer_ip,
-                    peer_host=peer_host,
-                    endpoint_count=len(endpoint_details),
-                    endpoint_details_json=json.dumps(endpoint_details),
-                ))
+                port_rows.append({
+                    "device_id": device.id,
+                    "if_index": iface.index,
+                    "if_descr": iface.descr,
+                    "if_alias": iface.alias,
+                    "speed_mbps": iface.speed_mbps,
+                    "oper_status": iface.oper_status,
+                    "peer_mac": peer_mac,
+                    "peer_ip": peer_ip,
+                    "peer_host": peer_host,
+                    "endpoint_count": len(endpoint_details),
+                    "endpoint_details_json": json.dumps(endpoint_details),
+                })
+            if port_rows:
+                db.bulk_insert_mappings(Port, port_rows)
             db.commit()
 
     if update_links:
