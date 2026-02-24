@@ -257,10 +257,10 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
         )}
       </defs>
       {/* Layer 1: solid background color fills the entire map */}
-      <rect width={W} height={H} fill={mapBgColor || "#020817"} rx={12}
+      <rect x={0} y={0} width="100%" height="100%" fill={mapBgColor || "#020817"}
             onMouseDown={onBgMouseDown} style={{cursor: bgPan ? "grabbing" : "grab"}}/>
       {!mapBgUrl && (
-        <rect width={W} height={H} fill="url(#grid)" rx={12} opacity={0.4}
+        <rect x={0} y={0} width="100%" height="100%" fill="url(#grid)" opacity={0.4}
               onMouseDown={onBgMouseDown} style={{cursor: bgPan ? "grabbing" : "grab", pointerEvents:"none"}}/>
       )}
 
@@ -276,7 +276,7 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
 
       {/* Layer 3: opacity overlay on top of color + image */}
       {mapBgUrl && (
-        <rect width={W} height={H} rx={12}
+        <rect x={0} y={0} width="100%" height="100%"
               fill={mapBgColor || "#020817"}
               opacity={1 - (mapBgOpacity ?? 0.3)}
               style={{pointerEvents:"none"}}/>

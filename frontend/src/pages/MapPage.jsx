@@ -136,7 +136,7 @@ export default function MapPage() {
             filters={filters}
             onFilterChange={setFilters}
           />
-          <div style={{ flex:1, overflow:"hidden", border:"1px solid #0f172a", borderRadius:12, margin:"8px 12px 12px" }}>
+          <div style={{ flex:1, overflow:"hidden", borderRadius:12, margin:"0 12px 12px" }}>
             <TopologyMap
               nodes={topology.nodes}
               links={topology.links}
