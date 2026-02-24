@@ -3,10 +3,11 @@ import { CABLE_COLORS, VENDOR_COLOR, VENDOR_ICON, buildPortLinkMap, normPort } f
 import SwitchPanel from "../SwitchPanel.jsx";
 
 // ── RackDetail ───────────────────────────────────────────────────────────────
-function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks, deviceOrder, onReorder, onClose, onRename, onMoveDevice, onUpdateDeviceMeta, rackPairColorMap, selectedLink, onLinkSelect }) {
+function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks, deviceOrder, onReorder, onReorderClass, onClose, onRename, onMoveDevice, onUpdateDeviceMeta, rackPairColorMap, selectedLink, onLinkSelect }) {
   const [editing, setEditing] = useState(false);
   const [nameInput, setNameInput] = useState(rack.label);
   const [localOrder, setLocalOrder] = useState({});
+  const [localSectionOrder, setLocalSectionOrder] = useState([]);
   // selectedLink is lifted to MapPage; fall back to local state if not provided
   const [localSelectedLink, setLocalSelectedLink] = useState(null);
   const resolvedSelectedLink = selectedLink !== undefined ? selectedLink : localSelectedLink;
@@ -22,6 +23,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
 
   useEffect(() => {
     setLocalOrder({});
+    setLocalSectionOrder([]);
   }, [rack.id]);
 
   const applyLocalReorder = useCallback((deviceId, direction, groupKey, devices) => {
@@ -40,6 +42,22 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
     [merged[idx], merged[newIdx]] = [merged[newIdx], merged[idx]];
     setLocalOrder(prev => ({ ...prev, [groupKey]: merged }));
   }, [localOrder]);
+
+  const applyLocalSectionReorder = useCallback((sectionKey, direction, sectionKeys) => {
+    const keys = Array.isArray(sectionKeys) ? sectionKeys.map(k => String(k)) : [];
+    if (!keys.length) return;
+    const base = localSectionOrder.length ? localSectionOrder : keys;
+    const merged = [
+      ...base.filter(k => keys.includes(k)),
+      ...keys.filter(k => !base.includes(k)),
+    ];
+    const idx = merged.indexOf(String(sectionKey));
+    if (idx < 0) return;
+    const newIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (newIdx < 0 || newIdx >= merged.length) return;
+    [merged[idx], merged[newIdx]] = [merged[newIdx], merged[idx]];
+    setLocalSectionOrder(merged);
+  }, [localSectionOrder]);
 
   const sortGroup = useCallback((devices, groupKey) => {
     const order = (((localOrder || {})[groupKey] || (deviceOrder || {})[groupKey] || []).map(id => String(id)));
@@ -91,8 +109,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
       })
       .map(g => ({ ...g, devices: sortGroup(g.devices, g.key) }));
 
-    if (!unclassified.length) return classGroups;
-    return [
+    const withUnclassified = !unclassified.length ? classGroups : [
       ...classGroups,
       {
         key: "unclassified",
@@ -102,7 +119,21 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
         devices: sortGroup(unclassified, "unclassified"),
       },
     ];
-  }, [rack.devices, classMap, classOrderMap, sortGroup]);
+
+    const savedOrder = ((deviceOrder || {}).__class_sections__ || []).map(k => String(k));
+    const baseOrder = localSectionOrder.length ? localSectionOrder : savedOrder;
+    if (!baseOrder.length) return withUnclassified;
+
+    const sectionMap = Object.fromEntries(withUnclassified.map(s => [String(s.key), s]));
+    const ordered = [];
+    baseOrder.forEach(k => {
+      if (sectionMap[k]) ordered.push(sectionMap[k]);
+    });
+    withUnclassified.forEach(s => {
+      if (!ordered.find(x => x.key === s.key)) ordered.push(s);
+    });
+    return ordered;
+  }, [rack.devices, classMap, classOrderMap, sortGroup, deviceOrder, localSectionOrder]);
 
   const { uplinks, trunks, external } = useMemo(() => {
     const rackIps  = new Set(rack.devices.map(d => d.ip));
@@ -399,6 +430,46 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
               <span style={{flex:1,borderBottom:`1px solid ${section.color}44`,height:0,display:"inline-block"}}/>
               {section.label} ({section.devices.length})
               <span style={{flex:1,borderBottom:`1px solid ${section.color}44`,height:0,display:"inline-block"}}/>
+              <div style={{display:"flex",gap:2,marginLeft:4}}>
+                <button
+                  type="button"
+                  onPointerDown={e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const sectionKeys = classSections.map(s => String(s.key));
+                    applyLocalSectionReorder(section.key, "up", sectionKeys);
+                    onReorderClass?.(section.key, "up", sectionKeys);
+                  }}
+                  disabled={idx === 0}
+                  style={{
+                    background:"none", border:"1px solid #1e293b",
+                    color: idx === 0 ? "#1e293b" : "#475569",
+                    borderRadius:3, width:16, height:16,
+                    cursor: idx === 0 ? "default" : "pointer",
+                    fontSize:9, lineHeight:1, padding:0, display:"flex",
+                    alignItems:"center", justifyContent:"center",
+                  }}
+                >^</button>
+                <button
+                  type="button"
+                  onPointerDown={e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const sectionKeys = classSections.map(s => String(s.key));
+                    applyLocalSectionReorder(section.key, "down", sectionKeys);
+                    onReorderClass?.(section.key, "down", sectionKeys);
+                  }}
+                  disabled={idx === classSections.length - 1}
+                  style={{
+                    background:"none", border:"1px solid #1e293b",
+                    color: idx === classSections.length - 1 ? "#1e293b" : "#475569",
+                    borderRadius:3, width:16, height:16,
+                    cursor: idx === classSections.length - 1 ? "default" : "pointer",
+                    fontSize:9, lineHeight:1, padding:0, display:"flex",
+                    alignItems:"center", justifyContent:"center",
+                  }}
+                >v</button>
+              </div>
             </div>
             {renderGroup(section.devices, section.key)}
           </div>

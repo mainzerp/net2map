@@ -23,7 +23,7 @@ export default function MapPage() {
     return { ...selectedRack, devices };
   }, [selectedRack, topology.nodes]);
 
-  const { rackOrders, reorderDevice } = useRackOrders();
+  const { rackOrders, reorderDevice, reorderClassSection } = useRackOrders();
   const [filters, setFilters] = useState({ racks: null, classes: null });
   const [selectedLink, setSelectedLink] = useState(null);
 
@@ -204,6 +204,9 @@ export default function MapPage() {
               deviceOrder={selectedRackOrders}
               onReorder={(deviceId, dir, groupKey) =>
                 reorderDevice(deviceId, dir, groupKey, selectedRackFull.id, selectedRackFull.devices)
+              }
+              onReorderClass={(sectionKey, dir, sectionKeys) =>
+                reorderClassSection(sectionKey, dir, selectedRackFull.id, sectionKeys)
               }
               onClose={() => setSelectedRack(null)}
               onRename={newName => renameRack(selectedRack, newName)}

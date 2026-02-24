@@ -41,5 +41,31 @@ export function useRackOrders() {
     localStorage.setItem("netmap_rack_orders", JSON.stringify(newOrders));
   };
 
-  return { rackOrders, reorderDevice };
+  const reorderClassSection = (sectionKey, direction, rackId, currentSectionKeysInput) => {
+    if (rackId == null) return;
+    const currentSectionKeys = Array.isArray(currentSectionKeysInput)
+      ? currentSectionKeysInput.map(k => String(k))
+      : [];
+    if (!currentSectionKeys.length) return;
+
+    const storeKey = `${rackId}::__class_sections__`;
+    const saved = ((rackOrders[storeKey]) || []).map(k => String(k));
+    const base = saved.length ? saved : currentSectionKeys;
+    const merged = [
+      ...base.filter(k => currentSectionKeys.includes(k)),
+      ...currentSectionKeys.filter(k => !base.includes(k)),
+    ];
+
+    const idx = merged.indexOf(String(sectionKey));
+    if (idx < 0) return;
+    const newIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (newIdx < 0 || newIdx >= merged.length) return;
+
+    [merged[idx], merged[newIdx]] = [merged[newIdx], merged[idx]];
+    const newOrders = { ...rackOrders, [storeKey]: merged };
+    setRackOrders(newOrders);
+    localStorage.setItem("netmap_rack_orders", JSON.stringify(newOrders));
+  };
+
+  return { rackOrders, reorderDevice, reorderClassSection };
 }

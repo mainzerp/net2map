@@ -1,5 +1,25 @@
 # Version History
 
+## v1.5.0 — Rack Class Section Reorder
+
+**Type:** MINOR (new feature)
+
+### Changes
+
+#### Rack Detail: Class Section Order Controls
+- Added `^` / `v` controls on each class section header in rack detail panel.
+- Class section order is now reorderable per rack and persisted in `localStorage`.
+- Works for dynamic class sections (`class:<id>`) plus `Other` (unclassified).
+
+### Files Modified
+| File | Change |
+|------|--------|
+| frontend/src/components/map/RackDetail.jsx | Class header reorder controls + local immediate ordering |
+| frontend/src/hooks/useRackOrders.js | Persist class-section order per rack (`__class_sections__`) |
+| frontend/src/pages/MapPage.jsx | Wire class-section reorder callback into rack detail |
+
+---
+
 ## v1.4.0 — Dynamic Rack Class Sections
 
 **Type:** MINOR (new feature)
