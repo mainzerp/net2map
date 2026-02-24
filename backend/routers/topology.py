@@ -9,6 +9,7 @@ from database import Device, TopologyLink, get_db
 from database import Rack as RackModel
 from database import SwitchClass as SwitchClassModel
 from database import SwitchModel as SwitchModelModel
+from database import Credential
 from schemas import (
     DeviceMetaUpdate, DeviceOut, DevicePositionUpdate,
     RackOut, RackPositionUpdate, TopologyOut,
@@ -19,7 +20,12 @@ router = APIRouter()
 
 @router.get("/api/topology")
 def get_topology(request: Request, db: Session = Depends(get_db)):
-    nodes   = db.query(Device).filter(Device.ignored == False).all()
+    # Only show devices that have a matching credential entry (assigned switches)
+    cred_ips = {c.ip for c in db.query(Credential.ip).all()}
+    nodes   = db.query(Device).filter(
+        Device.ignored == False,
+        Device.ip.in_(cred_ips),
+    ).all()
     links   = db.query(TopologyLink).all()
     racks   = db.query(RackModel).order_by(RackModel.id).all()
     classes = db.query(SwitchClassModel).order_by(SwitchClassModel.id).all()
