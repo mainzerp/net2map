@@ -1,5 +1,46 @@
 # Version History
 
+## v1.6.0 — Class-Based Outside-Rack Placement
+
+**Type:** MINOR (new feature)
+
+### Changes
+
+#### Backend: Class Policy + Validation
+- Added `allow_outside_rack` to switch classes (ORM + Alembic revision `003`).
+- Extended switch class API schemas to expose and update `allow_outside_rack`.
+- `PATCH /api/topology/devices/{id}/meta` now enforces valid combinations:
+  - unracked device requires a class with `allow_outside_rack=true`.
+- `PUT /api/credentials/{id}` now uses `exclude_unset=True` and validates rack/class transitions for matching discovered devices.
+- `PUT /api/switch-classes/{id}` blocks disabling outside-rack placement if unracked devices are still assigned to that class (`409`).
+- Scan engine sync now skips invalid credential-to-device rack/class applications and logs structured warnings.
+
+#### Frontend: Switch Classes + Map Rendering
+- `SwitchClasses` settings tab now includes an `Allow outside rack placement` toggle.
+- Added class status indicator badge (`Outside allowed` / `Rack required`) on class cards.
+- Map now renders eligible outside-rack devices as standalone draggable nodes.
+- Outside-rack nodes are now selectable and open the existing detail panel with per-port visibility.
+- Outside-rack node drag behavior is preserved (drag persists position, click opens details).
+- Link rendering now supports mixed endpoint pairs:
+  - rack-to-rack
+  - rack-to-outside
+  - outside-to-outside
+- Rack filters continue to target rack groups; outside nodes remain controlled by class filter.
+
+### Files Modified
+| File | Change |
+|------|--------|
+| backend/alembic/versions/003_add_switch_class_allow_outside_rack.py | NEW — add `switch_classes.allow_outside_rack` |
+| backend/database.py | `SwitchClass.allow_outside_rack` ORM column |
+| backend/schemas.py | Switch class schemas include `allow_outside_rack` |
+| backend/routers/topology.py | Device meta rack/class validation for unracked policy |
+| backend/routers/credentials.py | `exclude_unset` update semantics + rack/class guardrails |
+| backend/routers/switch_classes.py | Block disabling outside-rack on in-use unracked classes |
+| backend/scan_engine.py | Scan sync safeguards for invalid rack/class combinations |
+| frontend/src/components/settings/SwitchClassesTab.jsx | Toggle + class status indicator + assignment error surfacing |
+| frontend/src/pages/MapPage.jsx | Endpoint pair color mapping for rack/outside links |
+| frontend/src/components/map/TopologyMap.jsx | Outside-rack node rendering/drag + mixed endpoint link rendering |
+
 ## v1.5.0 — Rack Class Section Reorder
 
 **Type:** MINOR (new feature)

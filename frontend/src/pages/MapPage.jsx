@@ -26,11 +26,19 @@ export default function MapPage() {
   const { rackOrders, reorderDevice, reorderClassSection } = useRackOrders();
   const [filters, setFilters] = useState({ racks: null, classes: null });
   const [selectedLink, setSelectedLink] = useState(null);
+  const [selectedOutsideNode, setSelectedOutsideNode] = useState(null);
 
   // Clear selected link when switching racks
   const handleSelectRack = (rack) => {
     setSelectedLink(null);
+    setSelectedOutsideNode(null);
     setSelectedRack(p => p?.id === rack.id ? null : rack);
+  };
+
+  const handleSelectOutside = (node) => {
+    setSelectedLink(null);
+    setSelectedRack(null);
+    setSelectedOutsideNode(p => p?.id === node.id ? null : node);
   };
 
   const allRacks = useMemo(() => {
@@ -47,28 +55,49 @@ export default function MapPage() {
     return Object.values(rackMap);
   }, [topology.nodes, topology.racks]);
 
-  // Assign a consistent CABLE_COLOR to each unique rack-pair so the SVG lines
+  const selectedOutsideDetail = useMemo(() => {
+    if (!selectedOutsideNode) return null;
+    const node = topology.nodes.find(n => n.id === selectedOutsideNode.id) || selectedOutsideNode;
+    return {
+      id: `outside:${node.id}`,
+      label: node.sys_name || node.ip,
+      location: "Outside rack",
+      devices: [node],
+    };
+  }, [selectedOutsideNode, topology.nodes]);
+
+  const selectedDetail = selectedRackFull || selectedOutsideDetail;
+
+  // Assign a consistent CABLE_COLOR to each unique endpoint pair so the SVG lines
   // in TopologyMap and the port dots in RackDetail share the same color.
-  // Key: "<rackIdA>|<rackIdB>" (sorted), Value: color string.
+  // Rack endpoints keep historical keys ("<rackIdA>|<rackIdB>").
+  // Outside endpoints use "outside:<deviceId>".
   const rackPairColorMap = useMemo(() => {
-    const ipToRack = {};
+    const classAllowsOutside = Object.fromEntries(
+      (topology.classes || []).map(c => [c.id, !!c.allow_outside_rack])
+    );
+    const ipToEndpoint = {};
     topology.nodes.forEach(n => {
-      if (n.rack_id) ipToRack[n.ip] = String(n.rack_id);
+      if (n.rack_id) {
+        ipToEndpoint[n.ip] = String(n.rack_id);
+      } else if (n.class_id && classAllowsOutside[n.class_id]) {
+        ipToEndpoint[n.ip] = `outside:${n.id}`;
+      }
     });
     const seen = {};
     let idx = 0;
     topology.links.forEach(l => {
-      const ra = ipToRack[l.local_ip];
-      const rb = ipToRack[l.remote_ip];
-      if (!ra || !rb || ra === rb) return;
-      const key = [ra, rb].sort().join("|");
+      const a = ipToEndpoint[l.local_ip];
+      const b = ipToEndpoint[l.remote_ip];
+      if (!a || !b || a === b) return;
+      const key = [a, b].sort().join("|");
       if (!(key in seen)) {
         seen[key] = CABLE_COLORS[idx % CABLE_COLORS.length];
         idx++;
       }
     });
     return seen;
-  }, [topology.nodes, topology.links]);
+  }, [topology.nodes, topology.links, topology.classes]);
 
   const savePosition = (id, x, y) => {
     api.patch(`/api/topology/devices/${id}/position`, { map_x: x, map_y: y }).catch(console.error);
@@ -90,7 +119,6 @@ export default function MapPage() {
     loadTopology();
   };
 
-  const panelOpen = !!selectedRack;
   // Panel width adapts to the widest switch in the rack.
   // Layout breakdown per switch row:
   //   port cell : 34px width + 2px gap = 36px per pair-column
@@ -101,27 +129,27 @@ export default function MapPage() {
   //   scrollbar reserve             : 15px
   //   total overhead                : 28 + 2 + 23 + 40 + 15 = 108px
   const panelWidth = useMemo(() => {
-    if (!selectedRackFull) return 760;
+    if (!selectedDetail) return 760;
     let maxPPR = 0;
-    (selectedRackFull.devices || []).forEach(d => {
+    (selectedDetail.devices || []).forEach(d => {
       const ppr = d.ports_per_row || 24;
       if (ppr > maxPPR) maxPPR = ppr;
     });
     if (maxPPR === 0) maxPPR = 24;
     return Math.max(520, maxPPR * 36 + 108);
-  }, [selectedRackFull]);
+  }, [selectedDetail]);
   const links10g = topology.links.filter(l => ["10G","25G","40G","100G"].includes(l.speed_label)).length;
   const links1g  = topology.links.filter(l => l.speed_label === "1G").length;
   const selectedRackOrders = useMemo(() => {
-    if (!selectedRackFull) return {};
-    const prefix = `${selectedRackFull.id}::`;
+    if (!selectedDetail) return {};
+    const prefix = `${selectedDetail.id}::`;
     const out = {};
     Object.entries(rackOrders || {}).forEach(([k, v]) => {
       if (!k.startsWith(prefix)) return;
       out[k.slice(prefix.length)] = v;
     });
     return out;
-  }, [rackOrders, selectedRackFull]);
+  }, [rackOrders, selectedDetail]);
 
   return (
     <div style={{ display:"flex", flexDirection:"column", height:"calc(100vh - 48px)", overflow:"hidden" }}>
@@ -179,7 +207,9 @@ export default function MapPage() {
               switchClasses={topology.classes || []}
               filters={filters}
               onSelectRack={handleSelectRack}
+              onSelectOutside={handleSelectOutside}
               selectedRackId={selectedRack?.id}
+              selectedOutsideId={selectedOutsideNode?.id ?? null}
               centerRackId={selectedRack?.id ?? null}
               onPositionChange={savePosition}
               mapBgUrl={mapBgUrl}
@@ -199,10 +229,10 @@ export default function MapPage() {
         </div>
 
         {/* Right panel: inline, not fixed, so map shrinks gracefully */}
-        {selectedRackFull && (
+        {selectedDetail && (
           <div style={{ width: panelWidth, flexShrink: 0, borderLeft:"1px solid #0f172a", overflow:"hidden", display:"flex", flexDirection:"column" }}>
             <RackDetail
-              rack={selectedRackFull}
+              rack={selectedDetail}
               allRacks={allRacks}
               switchClasses={topology.classes || []}
               switchModels={topology.models || []}
@@ -212,13 +242,16 @@ export default function MapPage() {
               onLinkSelect={setSelectedLink}
               deviceOrder={selectedRackOrders}
               onReorder={(deviceId, dir, groupKey) =>
-                reorderDevice(deviceId, dir, groupKey, selectedRackFull.id, selectedRackFull.devices)
+                reorderDevice(deviceId, dir, groupKey, selectedDetail.id, selectedDetail.devices)
               }
               onReorderClass={(sectionKey, dir, sectionKeys) =>
-                reorderClassSection(sectionKey, dir, selectedRackFull.id, sectionKeys)
+                reorderClassSection(sectionKey, dir, selectedDetail.id, sectionKeys)
               }
-              onClose={() => setSelectedRack(null)}
-              onRename={newName => renameRack(selectedRack, newName)}
+              onClose={() => {
+                setSelectedRack(null);
+                setSelectedOutsideNode(null);
+              }}
+              onRename={selectedRack ? (newName => renameRack(selectedRack, newName)) : undefined}
               onMoveDevice={moveDevice}
               onUpdateDeviceMeta={updateDeviceMeta}
             />

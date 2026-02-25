@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { api } from "../../api.js";
 
 // ── ClassesTabContent ────────────────────────────────────────────────────────
-const EMPTY_CLASS_FORM = { label: "", description: "", color: "#3b82f6" };
+const EMPTY_CLASS_FORM = { label: "", description: "", color: "#3b82f6", allow_outside_rack: false };
 
 function ClassesTabContent() {
   const [classes, setClasses]   = useState([]);
@@ -28,7 +28,16 @@ function ClassesTabContent() {
   useEffect(() => { refreshAll(); }, []);
 
   const resetForm = () => { setForm({ ...EMPTY_CLASS_FORM }); setEditId(null); setErr(""); };
-  const startEdit = (sc) => { setEditId(sc.id); setForm({ label: sc.label, description: sc.description, color: sc.color }); setErr(""); };
+  const startEdit = (sc) => {
+    setEditId(sc.id);
+    setForm({
+      label: sc.label,
+      description: sc.description,
+      color: sc.color,
+      allow_outside_rack: !!sc.allow_outside_rack,
+    });
+    setErr("");
+  };
 
   const submit = async (e) => {
     e.preventDefault(); setErr("");
@@ -51,16 +60,26 @@ function ClassesTabContent() {
   const assignDevice = async (classId) => {
     const devId = assignSel[classId];
     if (!devId) return;
-    await api.patch(`/api/topology/devices/${devId}/meta`, { class_id: classId });
-    api.invalidate("/api/topology");
-    setAssignSel(prev => ({ ...prev, [classId]: "" }));
-    refreshAll();
+    setErr("");
+    try {
+      await api.patch(`/api/topology/devices/${devId}/meta`, { class_id: classId });
+      api.invalidate("/api/topology");
+      setAssignSel(prev => ({ ...prev, [classId]: "" }));
+      refreshAll();
+    } catch (ex) {
+      setErr(String(ex));
+    }
   };
 
   const unassignDevice = async (devId) => {
-    await api.patch(`/api/topology/devices/${devId}/meta`, { class_id: null });
-    api.invalidate("/api/topology");
-    refreshAll();
+    setErr("");
+    try {
+      await api.patch(`/api/topology/devices/${devId}/meta`, { class_id: null });
+      api.invalidate("/api/topology");
+      refreshAll();
+    } catch (ex) {
+      setErr(String(ex));
+    }
   };
 
   const INPUT = { width:"100%", backgroundColor:"#020817", border:"1px solid #1e293b", borderRadius:4, padding:"5px 8px", color:"#e2e8f0", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, boxSizing:"border-box" };
@@ -86,6 +105,14 @@ function ClassesTabContent() {
         </div>
         <div><label style={LBL}>Description</label>
           <input style={INPUT} value={form.description} onChange={e => setForm(f => ({...f, description:e.target.value}))} placeholder="optional" /></div>
+        <label style={{ display:"flex", alignItems:"center", gap:6, color:"#94a3b8", fontSize:11, cursor:"pointer" }}>
+          <input
+            type="checkbox"
+            checked={!!form.allow_outside_rack}
+            onChange={e => setForm(f => ({ ...f, allow_outside_rack: e.target.checked }))}
+          />
+          Allow outside rack placement
+        </label>
         {err && <div style={{ color:"#f87171", fontSize:11 }}>{err}</div>}
         <div style={{ display:"flex", gap:6 }}>
           <button type="submit" style={{ ...BTNP, flex:1 }}>{editId ? "Save" : "Create class"}</button>
@@ -110,6 +137,16 @@ function ClassesTabContent() {
                   <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                     <div style={{ width:9, height:9, borderRadius:"50%", backgroundColor:sc.color, flexShrink:0 }} />
                     <span style={{ color:"#e2e8f0", fontWeight:600, fontSize:13 }}>{sc.label}</span>
+                    <span style={{
+                      fontSize:10,
+                      padding:"1px 6px",
+                      borderRadius:4,
+                      border:`1px solid ${sc.allow_outside_rack ? "#14532d" : "#1e293b"}`,
+                      backgroundColor: sc.allow_outside_rack ? "#052e16" : "#0a0e18",
+                      color: sc.allow_outside_rack ? "#4ade80" : "#64748b",
+                    }}>
+                      {sc.allow_outside_rack ? "Outside allowed" : "Rack required"}
+                    </span>
                   </div>
                   {sc.description && <div style={{ color:"#475569", fontSize:10, marginTop:2, marginLeft:17 }}>{sc.description}</div>}
                 </div>

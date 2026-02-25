@@ -30,7 +30,22 @@ def update_switch_class(class_id: int, body: SwitchClassUpdate, db: Session = De
     sc = db.query(SwitchClassModel).filter(SwitchClassModel.id == class_id).first()
     if not sc:
         raise HTTPException(404, "Switch class not found")
-    for k, v in body.model_dump(exclude_none=True).items():
+    payload = body.model_dump(exclude_unset=True)
+    if (
+        "allow_outside_rack" in payload
+        and payload["allow_outside_rack"] is False
+        and sc.allow_outside_rack
+    ):
+        unracked_count = db.query(Device).filter(
+            Device.class_id == class_id,
+            Device.rack_id.is_(None),
+        ).count()
+        if unracked_count > 0:
+            raise HTTPException(
+                409,
+                "Cannot disable outside-rack placement while unracked devices are assigned to this class",
+            )
+    for k, v in payload.items():
         setattr(sc, k, v)
     db.commit()
     db.refresh(sc)

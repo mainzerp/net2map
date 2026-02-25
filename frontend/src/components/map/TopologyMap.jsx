@@ -10,7 +10,7 @@ function _isValidZoom(z) {
   );
 }
 
-function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSelectRack, selectedRackId, centerRackId, onPositionChange, mapBgUrl, mapBgOpacity, mapBgScale, mapBgNat, mapBgColor, rackPairColorMap, selectedLink }) {
+function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSelectRack, onSelectOutside, selectedRackId, selectedOutsideId, centerRackId, onPositionChange, mapBgUrl, mapBgOpacity, mapBgScale, mapBgNat, mapBgColor, rackPairColorMap, selectedLink }) {
   const W = 900, H = 550;
   const svgRef = useRef(null);
   const [drag, setDrag] = useState(null);
@@ -97,6 +97,23 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
     return result;
   }, [nodes, managedRacks, filters]);
 
+  const classMap = useMemo(
+    () => Object.fromEntries((switchClasses || []).map(c => [c.id, c])),
+    [switchClasses],
+  );
+  const classAllowsOutside = useMemo(
+    () => Object.fromEntries((switchClasses || []).map(c => [c.id, !!c.allow_outside_rack])),
+    [switchClasses],
+  );
+
+  const outsideNodes = useMemo(() => {
+    let result = nodes.filter(node => node.rack_id == null && node.class_id && classAllowsOutside[node.class_id]);
+    if (filters?.classes) {
+      result = result.filter(node => node.class_id && filters.classes.has(node.class_id));
+    }
+    return result;
+  }, [nodes, filters, classAllowsOutside]);
+
   const getRackCenter = useCallback((rack) => {
     const devs = rack.devices;
     if (!devs.length) return { x: 100, y: 100 };
@@ -108,29 +125,38 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
     };
   }, [positions]);
 
-  // Build from unfiltered nodes so class/rack filters do not silently drop link routes.
-  // Links are only rendered when both rack endpoints are visible (rackById guard below).
-  const ipToRackId = useMemo(() => {
+  const endpointByIp = useMemo(() => {
     const rackForNode = {};
-    (managedRacks || []).forEach(r => { rackForNode[r.id] = r.id; });
+    (managedRacks || []).forEach(r => { rackForNode[String(r.id)] = true; });
     const map = {};
     nodes.forEach(node => {
-      if (node.rack_id && rackForNode[node.rack_id]) {
-        map[node.ip] = node.rack_id;
+      const rackKey = node.rack_id != null ? String(node.rack_id) : null;
+      if (rackKey && rackForNode[rackKey]) {
+        map[node.ip] = rackKey;
+      } else if (node.class_id && classAllowsOutside[node.class_id]) {
+        map[node.ip] = `outside:${node.id}`;
       }
-      // nodes without a rack assignment are not shown on the map
     });
     return map;
-  }, [nodes, managedRacks]);
+  }, [nodes, managedRacks, classAllowsOutside]);
 
-  const rackLinks = useMemo(() => {
+  const visibleEndpointIds = useMemo(() => {
+    const visible = new Set(racks.map(r => String(r.id)));
+    outsideNodes.forEach(node => {
+      visible.add(`outside:${node.id}`);
+    });
+    return visible;
+  }, [racks, outsideNodes]);
+
+  const endpointLinks = useMemo(() => {
     const grouped = {};
     links.forEach(l => {
-      const ra = ipToRackId[l.local_ip];
-      const rb = ipToRackId[l.remote_ip];
-      if (!ra || !rb || ra === rb) return;
-      const key = [ra, rb].sort().join("|");
-      if (!grouped[key]) grouped[key] = { key, from: ra, to: rb, individual: [] };
+      const endpointA = endpointByIp[l.local_ip];
+      const endpointB = endpointByIp[l.remote_ip];
+      if (!endpointA || !endpointB || endpointA === endpointB) return;
+      if (!visibleEndpointIds.has(endpointA) || !visibleEndpointIds.has(endpointB)) return;
+      const key = [endpointA, endpointB].sort().join("|");
+      if (!grouped[key]) grouped[key] = { key, from: endpointA, to: endpointB, individual: [] };
       grouped[key].individual.push(l);
     });
     return Object.values(grouped).map(g => {
@@ -146,16 +172,16 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
       const best = unique.reduce((a, b) => (speedOrder[b.speed_label] || 0) > (speedOrder[a.speed_label] || 0) ? b : a, unique[0]);
       return { ...g, count: unique.length, speed: best.speed_label };
     });
-  }, [links, ipToRackId]);
+  }, [links, endpointByIp, visibleEndpointIds]);
 
-  // Find which rack-pair the selected link belongs to
+  // Find which endpoint-pair the selected link belongs to
   const activePairKey = useMemo(() => {
     if (!selectedLink) return null;
-    const ra = ipToRackId[selectedLink.local_ip];
-    const rb = ipToRackId[selectedLink.remote_ip];
-    if (!ra || !rb || ra === rb) return null;
-    return [ra, rb].sort().join("|");
-  }, [selectedLink, ipToRackId]);
+    const endpointA = endpointByIp[selectedLink.local_ip];
+    const endpointB = endpointByIp[selectedLink.remote_ip];
+    if (!endpointA || !endpointB || endpointA === endpointB) return null;
+    return [endpointA, endpointB].sort().join("|");
+  }, [selectedLink, endpointByIp]);
 
   const svgPoint = (e) => {
     const svg = svgRef.current;
@@ -165,11 +191,18 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
   };
   const toContent = (vp) => ({ x: (vp.x - zoom.tx) / zoom.scale, y: (vp.y - zoom.ty) / zoom.scale });
 
-  const onMouseDown = (e, rack) => {
+  const onRackMouseDown = (e, rack) => {
     e.stopPropagation();
     const p = toContent(svgPoint(e));
     const center = getRackCenter(rack);
-    setDrag({ rackId: rack.id, devices: rack.devices, ox: p.x - center.x, oy: p.y - center.y, moved: false });
+    setDrag({ kind: "rack", rackId: rack.id, rack, devices: rack.devices, ox: p.x - center.x, oy: p.y - center.y, moved: false });
+  };
+
+  const onOutsideMouseDown = (e, node) => {
+    e.stopPropagation();
+    const p = toContent(svgPoint(e));
+    const current = positions[node.id] || { x: node.map_x, y: node.map_y };
+    setDrag({ kind: "outside", nodeId: node.id, ox: p.x - current.x, oy: p.y - current.y, moved: false });
   };
 
   const onBgMouseDown = (e) => {
@@ -185,38 +218,74 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
     }
     if (!drag) return;
     const p = toContent(svgPoint(e));
-    const newCx = p.x - drag.ox;
-    const newCy = p.y - drag.oy;
-    const devs = drag.devices;
-    const oldCx = devs.reduce((s,d) => s + (positions[d.id]?.x ?? d.map_x), 0) / devs.length;
-    const oldCy = devs.reduce((s,d) => s + (positions[d.id]?.y ?? d.map_y), 0) / devs.length;
-    const dx = newCx - oldCx, dy = newCy - oldCy;
-    setPositions(prev => {
-      const next = { ...prev };
-      devs.forEach(d => {
-        next[d.id] = { x: (prev[d.id]?.x ?? d.map_x) + dx, y: (prev[d.id]?.y ?? d.map_y) + dy };
+    if (drag.kind === "rack") {
+      const newCx = p.x - drag.ox;
+      const newCy = p.y - drag.oy;
+      const devs = drag.devices;
+      const oldCx = devs.reduce((s,d) => s + (positions[d.id]?.x ?? d.map_x), 0) / devs.length;
+      const oldCy = devs.reduce((s,d) => s + (positions[d.id]?.y ?? d.map_y), 0) / devs.length;
+      const dx = newCx - oldCx, dy = newCy - oldCy;
+      setPositions(prev => {
+        const next = { ...prev };
+        devs.forEach(d => {
+          next[d.id] = { x: (prev[d.id]?.x ?? d.map_x) + dx, y: (prev[d.id]?.y ?? d.map_y) + dy };
+        });
+        return next;
       });
-      return next;
-    });
+    }
+    if (drag.kind === "outside") {
+      const newX = p.x - drag.ox;
+      const newY = p.y - drag.oy;
+      setPositions(prev => ({ ...prev, [drag.nodeId]: { x: newX, y: newY } }));
+    }
     setDrag(prev => ({ ...prev, moved: true }));
   };
 
-  const onMouseUp = (e, rack) => {
+  const onMouseUp = () => {
     if (bgPan) { setBgPan(null); return; }
     if (!drag) return;
-    if (!rack) { setDrag(null); return; }
-    if (!drag.moved) {
-      onSelectRack(rack);
-    } else {
-      rack.devices.forEach(d => {
-        const pos = positions[d.id];
-        if (pos) onPositionChange(d.id, pos.x, pos.y);
-      });
+    if (drag.kind === "rack") {
+      if (!drag.moved) {
+        onSelectRack(drag.rack);
+      } else {
+        drag.devices.forEach(d => {
+          const pos = positions[d.id];
+          if (pos) onPositionChange(d.id, pos.x, pos.y);
+        });
+      }
+    }
+    if (drag.kind === "outside") {
+      if (drag.moved) {
+        const pos = positions[drag.nodeId];
+        if (pos) onPositionChange(drag.nodeId, pos.x, pos.y);
+      } else {
+        const node = outsideNodes.find(n => n.id === drag.nodeId);
+        if (node) onSelectOutside?.(node);
+      }
     }
     setDrag(null);
   };
 
-  const rackById = (id) => racks.find(r => r.id === id);
+  const rackById = useMemo(
+    () => Object.fromEntries(racks.map(r => [String(r.id), r])),
+    [racks],
+  );
+  const outsideByEndpointId = useMemo(
+    () => Object.fromEntries(outsideNodes.map(node => [`outside:${node.id}`, node])),
+    [outsideNodes],
+  );
+
+  const getEndpointCenter = useCallback((endpointId) => {
+    if (endpointId.startsWith("outside:")) {
+      const node = outsideByEndpointId[endpointId];
+      if (!node) return null;
+      const pos = positions[node.id] || { x: node.map_x, y: node.map_y };
+      return { x: pos.x, y: pos.y };
+    }
+    const rack = rackById[endpointId];
+    if (!rack) return null;
+    return getRackCenter(rack);
+  }, [outsideByEndpointId, positions, rackById, getRackCenter]);
 
   const bgS  = mapBgScale ?? 1;
   const bgW  = W * bgS, bgH = H * bgS;
@@ -242,7 +311,7 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
       viewBox={`0 0 ${W} ${H}`}
       style={{ display:"block", cursor: drag ? "grabbing" : bgPan ? "grabbing" : "default" }}
       onMouseMove={onMouseMove}
-      onMouseUp={() => { setDrag(null); setBgPan(null); }}
+      onMouseUp={onMouseUp}
       onMouseLeave={() => { setDrag(null); setBgPan(null); }}
     >
       <defs>
@@ -263,8 +332,11 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
       )}
       {/* Invisible panning target when image is present */}
       {mapBgUrl && (
-        <rect x={0} y={0} width="100%" height="100%" fill="transparent"
-              onMouseDown={onBgMouseDown} style={{cursor: bgPan ? "grabbing" : "grab"}}/>
+        <g transform={`translate(${zoom.tx},${zoom.ty}) scale(${zoom.scale})`}
+           clipPath="url(#bgClip)">
+          <rect x={bgFit.x} y={bgFit.y} width={bgFit.w} height={bgFit.h} fill="transparent"
+          onMouseDown={onBgMouseDown} style={{cursor: bgPan ? "grabbing" : "grab", pointerEvents: "all"}}/>
+        </g>
       )}
 
       {/* Layer 2: background image at full opacity */}
@@ -286,10 +358,10 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
       )}
 
       <g transform={`translate(${zoom.tx},${zoom.ty}) scale(${zoom.scale})`}>
-      {rackLinks.map(l => {
-        const ra = rackById(l.from), rb = rackById(l.to);
-        if (!ra || !rb) return null;
-        const pa = getRackCenter(ra), pb = getRackCenter(rb);
+      {endpointLinks.map(l => {
+        const pa = getEndpointCenter(l.from);
+        const pb = getEndpointCenter(l.to);
+        if (!pa || !pb) return null;
         // Use rack-pair color from MapPage if available, otherwise fall back to speed color
         const pairKey = [String(l.from), String(l.to)].sort().join("|");
         const pairColor = rackPairColorMap?.[pairKey];
@@ -320,15 +392,13 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
         const totalPorts  = rack.devices.reduce((s,d) => s + (d.ports || []).length, 0);
         const activePorts = rack.devices.reduce((s,d) => s + (d.ports || []).filter(p => p.oper_status === 1).length, 0);
         const RW = 110, RH = 88;
-        const classMap = switchClasses ? Object.fromEntries((switchClasses || []).map(c => [c.id, c])) : {};
         const classIds = [...new Set(rack.devices.map(d => d.class_id).filter(Boolean))];
         const classColors = classIds.map(id => classMap[id]?.color).filter(Boolean);
         return (
           <g key={rack.id}
              transform={`translate(${pos.x},${pos.y})`}
-             onMouseDown={e => onMouseDown(e, rack)}
-             onMouseUp={e => onMouseUp(e, rack)}
-             style={{ cursor: drag?.rackId === rack.id ? "grabbing" : "grab" }}
+             onMouseDown={e => onRackMouseDown(e, rack)}
+             style={{ cursor: drag?.kind === "rack" && drag?.rackId === rack.id ? "grabbing" : "grab" }}
              filter={sel ? "url(#glow)" : undefined}
           >
             <rect x={-RW/2-8} y={-RH/2-8} width={RW+16} height={RH+16} rx={12}
@@ -365,7 +435,32 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
         );
       })}
 
-      {racks.length === 0 && (
+      {outsideNodes.map(node => {
+        const pos = positions[node.id] || { x: node.map_x, y: node.map_y };
+        const classColor = node.class_id ? (classMap[node.class_id]?.color || "#22d3ee") : "#22d3ee";
+        const label = node.sys_name || node.ip;
+        const isOutsideSelected = selectedOutsideId === node.id;
+        return (
+          <g
+            key={`outside:${node.id}`}
+            transform={`translate(${pos.x},${pos.y})`}
+            onMouseDown={e => onOutsideMouseDown(e, node)}
+            style={{ cursor: drag?.kind === "outside" && drag?.nodeId === node.id ? "grabbing" : "grab" }}
+            filter={isOutsideSelected ? "url(#glow)" : undefined}
+          >
+            <circle r={20} fill={isOutsideSelected ? "#0a1e36" : "#0a0e18"} stroke={isOutsideSelected ? "#22d3ee" : classColor} strokeWidth={isOutsideSelected ? 2.5 : 1.5} />
+            <circle r={4} cy={-10} fill={classColor} opacity={0.9} />
+            <text textAnchor="middle" dominantBaseline="central" y={2} fill="#e2e8f0" fontSize={10} fontFamily="monospace" fontWeight="bold">
+              {label.length > 16 ? `${label.slice(0, 16)}…` : label}
+            </text>
+            <text textAnchor="middle" dominantBaseline="central" y={13} fill="#475569" fontSize={8} fontFamily="monospace">
+              {node.ip}
+            </text>
+          </g>
+        );
+      })}
+
+      {racks.length === 0 && outsideNodes.length === 0 && (
         <text x={W/2} y={H/2} textAnchor="middle" fill="#1e293b"
               fontSize={13} fontFamily="monospace">
           No switches found - add credentials and run scan

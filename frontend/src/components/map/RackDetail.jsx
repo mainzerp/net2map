@@ -6,6 +6,7 @@ import SwitchPanel from "../SwitchPanel.jsx";
 function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks, deviceOrder, onReorder, onReorderClass, onClose, onRename, onMoveDevice, onUpdateDeviceMeta, rackPairColorMap, selectedLink, onLinkSelect }) {
   const [editing, setEditing] = useState(false);
   const [nameInput, setNameInput] = useState(rack.label);
+  const canRename = typeof onRename === "function";
   const [localOrder, setLocalOrder] = useState({});
   const [localSectionOrder, setLocalSectionOrder] = useState([]);
   // selectedLink is lifted to MapPage; fall back to local state if not provided
@@ -17,6 +18,10 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
   const otherRacks  = (allRacks || []).filter(r => r.id !== rack.id);
 
   const commitRename = () => {
+    if (!canRename) {
+      setEditing(false);
+      return;
+    }
     if (nameInput.trim() && nameInput.trim() !== rack.label) onRename?.(nameInput.trim());
     setEditing(false);
   };
@@ -374,7 +379,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
         display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0,
       }}>
         <div style={{flex:1,minWidth:0}}>
-          {editing ? (
+          {editing && canRename ? (
             <div style={{display:"flex",alignItems:"center",gap:6}}>
               <input
                 autoFocus value={nameInput}
@@ -396,11 +401,13 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
           ) : (
             <div style={{display:"flex",alignItems:"center",gap:8}}>
               <div style={{color:"#e2e8f0",fontWeight:700,fontSize:16}}>{rack.label}</div>
-              <button
-                onClick={() => { setNameInput(rack.label); setEditing(true); }}
-                title="Rename rack"
-                style={{background:"none",border:"1px solid #1e293b",color:"#475569",borderRadius:4,padding:"2px 6px",cursor:"pointer",fontSize:11}}
-              >Edit</button>
+              {canRename && (
+                <button
+                  onClick={() => { setNameInput(rack.label); setEditing(true); }}
+                  title="Rename rack"
+                  style={{background:"none",border:"1px solid #1e293b",color:"#475569",borderRadius:4,padding:"2px 6px",cursor:"pointer",fontSize:11}}
+                >Edit</button>
+              )}
             </div>
           )}
           <div style={{color:"#475569",fontSize:11,marginTop:2,display:"flex",gap:10}}>

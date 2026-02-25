@@ -58,6 +58,7 @@ class SwitchClassBase(BaseModel):
     label:       str
     description: str = ""
     color:       str = "#64748b"
+    allow_outside_rack: bool = False
 
 
 class SwitchClassCreate(SwitchClassBase):
@@ -68,6 +69,7 @@ class SwitchClassUpdate(BaseModel):
     label:       Optional[str] = None
     description: Optional[str] = None
     color:       Optional[str] = None
+    allow_outside_rack: Optional[bool] = None
 
 
 class SwitchClassOut(SwitchClassBase):

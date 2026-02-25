@@ -95,6 +95,24 @@ def update_device_meta(
 
     payload = body.model_dump(exclude_unset=True)
 
+    target_rack_id = payload["rack_id"] if "rack_id" in payload else device.rack_id
+    target_class_id = payload["class_id"] if "class_id" in payload else device.class_id
+
+    if target_rack_id is not None and not db.query(RackModel).filter(RackModel.id == target_rack_id).first():
+        raise HTTPException(404, "Rack not found")
+
+    target_class = None
+    if target_class_id is not None:
+        target_class = db.query(SwitchClassModel).filter(SwitchClassModel.id == target_class_id).first()
+        if not target_class:
+            raise HTTPException(404, "Switch class not found")
+
+    if target_rack_id is None:
+        if target_class_id is None:
+            raise HTTPException(400, "Unracked devices require a switch class that allows outside-rack placement")
+        if not target_class.allow_outside_rack:
+            raise HTTPException(400, "Selected switch class requires rack assignment")
+
     if "location" in payload:
         device.location = payload["location"]
     if "sys_name" in payload:
@@ -104,15 +122,9 @@ def update_device_meta(
     if "model" in payload:
         device.model = payload["model"]
     if "rack_id" in payload:
-        rack_id = payload["rack_id"]
-        if rack_id is not None and not db.query(RackModel).filter(RackModel.id == rack_id).first():
-            raise HTTPException(404, "Rack not found")
-        device.rack_id = rack_id
+        device.rack_id = payload["rack_id"]
     if "class_id" in payload:
-        class_id = payload["class_id"]
-        if class_id is not None and not db.query(SwitchClassModel).filter(SwitchClassModel.id == class_id).first():
-            raise HTTPException(404, "Switch class not found")
-        device.class_id = class_id
+        device.class_id = payload["class_id"]
     if "model_id" in payload:
         model_id = payload["model_id"]
         if model_id is not None and not db.query(SwitchModelModel).filter(SwitchModelModel.id == model_id).first():

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from database import (
     AppSetting, Credential, Device, Port, SessionLocal, SnmpProfile,
-    ScanRun, ScanRunSwitchMetric, TopologyLink,
+    ScanRun, ScanRunSwitchMetric, SwitchClass, TopologyLink,
 )
 from schemas import ScanResult, ScanSwitchMetric
 from shared.file_settings import _read_dns_settings, _read_scan_settings
@@ -650,6 +650,7 @@ async def _execute_scan(
     layout = auto_layout(all_ips_ordered)
     # Reload credentials to include any auto-created entries from range probes
     cred_by_ip = {c.ip: c for c in db.query(Credential).filter(Credential.ip.in_(list(discovered_ips))).all()}
+    class_by_id = {sc.id: sc for sc in db.query(SwitchClass).all()}
 
     for ip in discovered_ips:
         sw = switch_data.get(ip)
@@ -679,12 +680,41 @@ async def _execute_scan(
             device.ping_rtt_ms = ping_rtt if ping_ok else 0
             device.last_ping = datetime.utcnow()
             if cred:
-                if cred.rack_id is not None:
-                    device.rack_id = cred.rack_id
-                if cred.class_id is not None:
-                    device.class_id = cred.class_id
+                target_rack_id = cred.rack_id if cred.rack_id is not None else device.rack_id
+                target_class_id = cred.class_id if cred.class_id is not None else device.class_id
+                invalid_combo = False
+                if target_rack_id is None and target_class_id is not None:
+                    target_class = class_by_id.get(target_class_id)
+                    invalid_combo = (target_class is None) or (not target_class.allow_outside_rack)
+                if invalid_combo:
+                    _log_event(
+                        logging.WARNING,
+                        "scan.device_sync.skipped_invalid_outside_rack",
+                        correlation_id=corr,
+                        ip=ip,
+                        credential_rack_id=cred.rack_id,
+                        credential_class_id=cred.class_id,
+                    )
+                else:
+                    if cred.rack_id is not None:
+                        device.rack_id = cred.rack_id
+                    if cred.class_id is not None:
+                        device.class_id = cred.class_id
         else:
             x, y = layout.get(ip, (100.0, 100.0))
+            rack_id = cred.rack_id if cred else None
+            class_id = cred.class_id if cred else None
+            if rack_id is None and class_id is not None:
+                target_class = class_by_id.get(class_id)
+                if target_class is None or not target_class.allow_outside_rack:
+                    _log_event(
+                        logging.WARNING,
+                        "scan.device_create.skipped_invalid_outside_rack_class",
+                        correlation_id=corr,
+                        ip=ip,
+                        credential_class_id=class_id,
+                    )
+                    class_id = None
             db.add(Device(
                 ip=ip,
                 sys_name=sw.sys_name if sw else ip,
@@ -697,8 +727,8 @@ async def _execute_scan(
                 last_ping=datetime.utcnow(),
                 map_x=x,
                 map_y=y,
-                rack_id=cred.rack_id if cred else None,
-                class_id=cred.class_id if cred else None,
+                rack_id=rack_id,
+                class_id=class_id,
             ))
 
     db.commit()

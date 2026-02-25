@@ -55,6 +55,7 @@ class SwitchClass(Base):
     label       = Column(String, nullable=False)          # e.g. "Top of Rack"
     description = Column(String, default="")
     color       = Column(String, default="#64748b")       # hex color for UI highlights
+    allow_outside_rack = Column(Boolean, default=False, nullable=False)
     created_at  = Column(DateTime, default=datetime.utcnow)
     updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
