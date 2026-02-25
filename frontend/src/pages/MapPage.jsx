@@ -92,14 +92,23 @@ export default function MapPage() {
 
   const panelOpen = !!selectedRack;
   // Panel width adapts to the widest switch in the rack.
-  // Port cell = 34px + 2px gap = 36px; overhead accounts for padding, reorder buttons, borders.
+  // Layout breakdown per switch row:
+  //   port cell : 34px width + 2px gap = 36px per pair-column
+  //   SwitchPanel inner padding : 14px left + 14px right = 28px
+  //   SwitchPanel border        : 1px × 2 = 2px
+  //   reorder button column     : 18px button + 5px gap = 23px
+  //   RackDetail scroll-div padding: 20px left + 20px right = 40px
+  //   scrollbar reserve             : 15px
+  //   total overhead                : 28 + 2 + 23 + 40 + 15 = 108px
   const panelWidth = useMemo(() => {
     if (!selectedRackFull) return 760;
-    let maxPPR = 24;
+    let maxPPR = 0;
     (selectedRackFull.devices || []).forEach(d => {
-      if (d.ports_per_row && d.ports_per_row > maxPPR) maxPPR = d.ports_per_row;
+      const ppr = d.ports_per_row || 24;
+      if (ppr > maxPPR) maxPPR = ppr;
     });
-    return Math.max(520, maxPPR * 36 + 100);
+    if (maxPPR === 0) maxPPR = 24;
+    return Math.max(520, maxPPR * 36 + 108);
   }, [selectedRackFull]);
   const links10g = topology.links.filter(l => ["10G","25G","40G","100G"].includes(l.speed_label)).length;
   const links1g  = topology.links.filter(l => l.speed_label === "1G").length;

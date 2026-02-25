@@ -412,7 +412,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
       </div>
 
       {/* Content */}
-      <div ref={scrollRef} style={{flex:1,overflowY:"auto",overflowX:"hidden",padding:"12px 20px"}}>
+      <div ref={scrollRef} style={{flex:1,overflowY:"auto",overflowX:"auto",padding:"12px 20px"}}>
 
         {classSections.map((section, idx) => (
           <div key={section.key}>
