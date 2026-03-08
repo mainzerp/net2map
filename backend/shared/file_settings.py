@@ -1,15 +1,18 @@
-"""File-system constants and read/write helpers for map, scan, and DNS settings."""
+"""Settings helpers: DB-backed scan/DNS/map settings and file-system map background I/O."""
 import json
+import logging
 import os
 
 from fastapi import HTTPException
 
-# ─── Map Background ────────────────────────────────────────────────────────────
+_log = logging.getLogger(__name__)
+
+# ─── Map Background (file-system) ──────────────────────────────────────────────
 
 MAP_BG_DIR = "/data"
 MAP_BG_FILENAME = "map-background"
 ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
-ALLOWED_IMAGE_TYPES = {"png", "jpeg", "gif", "webp"}
+ALLOWED_IMAGE_TYPES = {"png", "jpeg", "jpg", "gif", "webp"}
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 
 
@@ -30,31 +33,41 @@ def _clear_bg_files():
             os.remove(path)
 
 
-# ─── Map Settings ──────────────────────────────────────────────────────────────
+# ─── DB-backed settings helpers ────────────────────────────────────────────────
 
-MAP_SETTINGS_PATH = os.path.join(MAP_BG_DIR, "map-settings.json")
-DEFAULT_MAP_SETTINGS = {"opacity": 0.3, "scale": 1.0, "bg_color": "#020817"}
+def _get_db_session():
+    """Get a fresh DB session for settings read/write."""
+    from database import SessionLocal
+    return SessionLocal()
 
 
-def _read_map_settings():
+def _read_db_setting(key: str, default: str = "") -> str:
+    db = _get_db_session()
     try:
-        with open(MAP_SETTINGS_PATH, "r") as f:
-            return {**DEFAULT_MAP_SETTINGS, **json.load(f)}
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {**DEFAULT_MAP_SETTINGS}
+        from database import AppSetting
+        row = db.query(AppSetting).filter(AppSetting.key == key).first()
+        return row.value if row else default
+    finally:
+        db.close()
 
 
-def _write_map_settings(data):
-    merged = {**_read_map_settings(), **data}
-    with open(MAP_SETTINGS_PATH, "w") as f:
-        json.dump(merged, f)
-    return merged
+def _write_db_setting(key: str, value: str):
+    db = _get_db_session()
+    try:
+        from database import AppSetting
+        row = db.query(AppSetting).filter(AppSetting.key == key).first()
+        if row:
+            row.value = value
+        else:
+            db.add(AppSetting(key=key, value=value))
+        db.commit()
+    finally:
+        db.close()
 
 
-# ─── Scan Settings ─────────────────────────────────────────────────────────────
+# ─── Scan Settings (DB-backed) ────────────────────────────────────────────────
 
-SCAN_SETTINGS_PATH = os.path.join(MAP_BG_DIR, "scan-settings.json")
-DEFAULT_SCAN_SETTINGS = {"max_workers": 4, "snmp_timeout": 3, "snmp_retries": 1}
+DEFAULT_SCAN_SETTINGS = {"max_workers": 12, "snmp_timeout": 3, "snmp_retries": 1}
 
 
 def _normalize_scan_settings(value: dict | None):
@@ -75,25 +88,23 @@ def _normalize_scan_settings(value: dict | None):
 
 
 def _read_scan_settings():
-    try:
-        with open(SCAN_SETTINGS_PATH, "r") as f:
-            raw = json.load(f)
-            return _normalize_scan_settings(raw)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {**DEFAULT_SCAN_SETTINGS}
+    return {
+        "max_workers": max(1, min(128, int(_read_db_setting("scan_max_workers", "12")))),
+        "snmp_timeout": max(1, min(30, int(_read_db_setting("scan_snmp_timeout", "3")))),
+        "snmp_retries": max(0, min(10, int(_read_db_setting("scan_snmp_retries", "1")))),
+    }
 
 
 def _write_scan_settings(value: dict | None):
-    os.makedirs(os.path.dirname(SCAN_SETTINGS_PATH), exist_ok=True)
     payload = _normalize_scan_settings(value)
-    with open(SCAN_SETTINGS_PATH, "w") as f:
-        json.dump(payload, f)
+    _write_db_setting("scan_max_workers", str(payload["max_workers"]))
+    _write_db_setting("scan_snmp_timeout", str(payload["snmp_timeout"]))
+    _write_db_setting("scan_snmp_retries", str(payload["snmp_retries"]))
     return payload
 
 
-# ─── DNS Settings ──────────────────────────────────────────────────────────────
+# ─── DNS Settings (DB-backed) ─────────────────────────────────────────────────
 
-DNS_SETTINGS_PATH = os.path.join(MAP_BG_DIR, "dns-settings.json")
 DEFAULT_DNS_SETTINGS = {"servers": []}
 
 
@@ -119,19 +130,40 @@ def _normalize_dns_servers(value) -> list[str]:
 
 
 def _read_dns_settings():
+    raw = _read_db_setting("dns_servers", "[]")
     try:
-        with open(DNS_SETTINGS_PATH, "r") as f:
-            data = json.load(f)
-            return {"servers": _normalize_dns_servers(data.get("servers", []))}
-    except FileNotFoundError:
-        return {**DEFAULT_DNS_SETTINGS}
-    except json.JSONDecodeError:
+        servers = json.loads(raw)
+        return {"servers": _normalize_dns_servers(servers) if isinstance(servers, list) else []}
+    except Exception:
         return {**DEFAULT_DNS_SETTINGS}
 
 
 def _write_dns_settings(servers: list[str]):
-    os.makedirs(os.path.dirname(DNS_SETTINGS_PATH), exist_ok=True)
-    payload = {"servers": _normalize_dns_servers(servers)}
-    with open(DNS_SETTINGS_PATH, "w") as f:
-        json.dump(payload, f)
-    return payload
+    validated = _normalize_dns_servers(servers)
+    _write_db_setting("dns_servers", json.dumps(validated))
+    return {"servers": validated}
+
+
+# ─── Map Settings (DB-backed) ─────────────────────────────────────────────────
+
+DEFAULT_MAP_SETTINGS = {"opacity": 0.3, "scale": 1.0, "bg_color": "#020817"}
+
+
+def _read_map_settings():
+    try:
+        return {
+            "opacity": float(_read_db_setting("map_opacity", "0.3")),
+            "scale": float(_read_db_setting("map_scale", "1.0")),
+            "bg_color": _read_db_setting("map_bg_color", "#020817"),
+        }
+    except (ValueError, TypeError):
+        return {**DEFAULT_MAP_SETTINGS}
+
+
+def _write_map_settings(data):
+    current = _read_map_settings()
+    merged = {**current, **data}
+    _write_db_setting("map_opacity", str(merged["opacity"]))
+    _write_db_setting("map_scale", str(merged["scale"]))
+    _write_db_setting("map_bg_color", str(merged.get("bg_color", "#020817"))[:20])
+    return merged

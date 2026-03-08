@@ -1,21 +1,27 @@
 """SQLAlchemy database setup and models."""
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import (
     create_engine, Column, Integer, String, Boolean,
-    DateTime, Float, ForeignKey, Text, text,
+    DateTime, Float, ForeignKey, Text, UniqueConstraint, func, text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://netmap:netmap_pw@postgres/netmap")
 
-engine = create_engine(
-    DATABASE_URL,
-    pool_size=10,
-    max_overflow=20,
-    pool_pre_ping=True,       # reconnect after idle timeout
-    pool_recycle=300,         # recycle connections every 5 minutes
-)
+_engine_kwargs = {}
+if DATABASE_URL.startswith("postgresql"):
+    _engine_kwargs.update(
+        pool_size=10,
+        max_overflow=20,
+        pool_pre_ping=True,
+        pool_recycle=300,
+    )
+elif DATABASE_URL.startswith("sqlite"):
+    _engine_kwargs["connect_args"] = {"check_same_thread": False}
+
+engine = create_engine(DATABASE_URL, **_engine_kwargs)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -41,8 +47,8 @@ class Rack(Base):
     description = Column(String, default="")
     map_x       = Column(Float, default=100.0)
     map_y       = Column(Float, default=100.0)
-    created_at  = Column(DateTime, default=datetime.utcnow)
-    updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at  = Column(DateTime, server_default=func.now())
+    updated_at  = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     devices = relationship("Device", back_populates="rack")
 
@@ -56,8 +62,8 @@ class SwitchClass(Base):
     description = Column(String, default="")
     color       = Column(String, default="#64748b")       # hex color for UI highlights
     allow_outside_rack = Column(Boolean, default=False, nullable=False)
-    created_at  = Column(DateTime, default=datetime.utcnow)
-    updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at  = Column(DateTime, server_default=func.now())
+    updated_at  = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     devices = relationship("Device", back_populates="switch_class")
 
@@ -71,8 +77,8 @@ class SwitchModel(Base):
     ports_per_row = Column(Integer, default=24)                   # physical ports per row on faceplate
     total_ports   = Column(Integer, nullable=True)                # expected total ports (optional)
     description   = Column(String, default="")
-    created_at    = Column(DateTime, default=datetime.utcnow)
-    updated_at    = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at    = Column(DateTime, server_default=func.now())
+    updated_at    = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     devices = relationship("Device", back_populates="switch_model")
 
@@ -91,8 +97,8 @@ class SnmpProfile(Base):
     v3_auth_password   = Column(String, default="")
     v3_priv_protocol   = Column(String, default="AES-128")
     v3_priv_password   = Column(String, default="")
-    created_at         = Column(DateTime, default=datetime.utcnow)
-    updated_at         = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at         = Column(DateTime, server_default=func.now())
+    updated_at         = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     credentials = relationship("Credential", back_populates="profile")
 
@@ -100,15 +106,17 @@ class SnmpProfile(Base):
 class Credential(Base):
     """Switch access credential – supports SNMPv2c and SNMPv3."""
     __tablename__ = "credentials"
+    __table_args__ = (UniqueConstraint("ip", "priority", name="uq_credential_ip_priority"),)
 
     id          = Column(Integer, primary_key=True, index=True)
     label       = Column(String, nullable=False)          # friendly name
-    ip          = Column(String, nullable=False, unique=True)
+    ip          = Column(String, nullable=False, index=True)
+    priority    = Column(Integer, default=0)               # lower = tried first
     snmp_port   = Column(Integer, default=161)
     location    = Column(String, default="")              # e.g. rack label / room
     enabled     = Column(Boolean, default=True)
-    created_at  = Column(DateTime, default=datetime.utcnow)
-    updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at  = Column(DateTime, server_default=func.now())
+    updated_at  = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     # ── SNMPv2c ──────────────────────────────────────────────────────────────
     snmp_version = Column(String, default="v2c")          # "v2c" | "v3"
@@ -154,7 +162,7 @@ class Device(Base):
     last_ping    = Column(DateTime, nullable=True)
     map_x        = Column(Float, default=100.0)
     map_y        = Column(Float, default=100.0)
-    last_seen    = Column(DateTime, default=datetime.utcnow)
+    last_seen    = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     ignored      = Column(Boolean, default=False, nullable=False)
 
     # Optional assignment to a managed rack and switch class
@@ -184,7 +192,7 @@ class Port(Base):
     peer_ip      = Column(String, default="")
     peer_host    = Column(String, default="")
     endpoint_count = Column(Integer, default=0)
-    endpoint_details_json = Column(Text, default="[]")
+    endpoint_details_json = Column(JSONB, default=[])
     vlan         = Column(Integer, default=0)
 
     device = relationship("Device", back_populates="ports")
@@ -201,7 +209,7 @@ class TopologyLink(Base):
     remote_sys     = Column(String, default="")
     remote_port    = Column(String, default="")
     speed_label    = Column(String, default="1G")         # "1G" | "10G" | "100G"
-    discovered_at  = Column(DateTime, default=datetime.utcnow)
+    discovered_at  = Column(DateTime, server_default=func.now())
 
 
 class AppSetting(Base):
@@ -210,6 +218,34 @@ class AppSetting(Base):
 
     key   = Column(String, primary_key=True, index=True)
     value = Column(String, nullable=False)
+
+
+class User(Base):
+    """Application user with role-based access."""
+    __tablename__ = "users"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    username   = Column(String, nullable=False, unique=True, index=True)
+    email      = Column(String, default="")
+    hashed_pw  = Column(String, nullable=False)
+    role       = Column(String, default="viewer")  # "admin" | "operator" | "viewer"
+    is_active  = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class AuditLog(Base):
+    """Audit trail for configuration changes."""
+    __tablename__ = "audit_logs"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    timestamp   = Column(DateTime, server_default=func.now(), index=True)
+    user_id     = Column(Integer, nullable=True)
+    username    = Column(String, default="")
+    action      = Column(String, nullable=False)   # "create"|"update"|"delete"|"scan"|"settings_change"
+    resource    = Column(String, nullable=False)    # "credential"|"snmp_profile"|"device"|...
+    resource_id = Column(String, default="")
+    details     = Column(JSONB, default={})
 
 
 class ScanRun(Base):
@@ -224,9 +260,9 @@ class ScanRun(Base):
     max_workers       = Column(Integer, default=1)
     total_duration_ms = Column(Integer, default=0)
     error_count       = Column(Integer, default=0)
-    devices_snapshot_json = Column(Text, default="[]")
-    links_snapshot_json   = Column(Text, default="[]")
-    created_at        = Column(DateTime, default=datetime.utcnow)
+    devices_snapshot_json = Column(JSONB, default=[])
+    links_snapshot_json   = Column(JSONB, default=[])
+    created_at        = Column(DateTime, server_default=func.now())
 
     switch_metrics = relationship(
         "ScanRunSwitchMetric",
@@ -250,6 +286,16 @@ class ScanRunSwitchMetric(Base):
     scan_run = relationship("ScanRun", back_populates="switch_metrics")
 
 
+class DryRunResult(Base):
+    """Persisted dry-run scan preview for later retrieval."""
+    __tablename__ = "dry_run_results"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    scan_run_id  = Column(Integer, ForeignKey("scan_runs.id"), nullable=True)
+    preview_json = Column(JSONB, default=[])
+    created_at   = Column(DateTime, server_default=func.now())
+
+
 def _seed_default_settings():
     """Insert default app_settings rows if they do not already exist.
 
@@ -261,6 +307,13 @@ def _seed_default_settings():
             ("discovery_interval_sec", "1800"),
             ("port_update_interval_sec", "30"),
             ("discovery_scan_ranges", "[]"),
+            ("scan_max_workers", "12"),
+            ("scan_snmp_timeout", "3"),
+            ("scan_snmp_retries", "1"),
+            ("dns_servers", "[]"),
+            ("map_opacity", "0.3"),
+            ("map_scale", "1.0"),
+            ("map_bg_color", "#020817"),
         ]
         for key, value in defaults:
             conn.execute(

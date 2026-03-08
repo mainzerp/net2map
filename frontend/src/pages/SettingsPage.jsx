@@ -32,8 +32,8 @@ export default function SettingsPage() {
 
   // Load map background
   useEffect(() => {
-    fetch(`${API}/api/map-background`, { method: "GET" })
-      .then(r => { if (r.ok) setMapBgUrl(`${API}/api/map-background?v=${Date.now()}`); })
+    api.get("/api/map-background")
+      .then(() => setMapBgUrl(`${API}/api/map-background?v=${Date.now()}`))
       .catch(() => {});
     api.get("/api/map-settings").then(s => {
       if (s.opacity != null) setMapBgOpacity(s.opacity);
@@ -45,12 +45,14 @@ export default function SettingsPage() {
   const uploadMapBg = async (file) => {
     const fd = new FormData();
     fd.append("file", file);
-    await fetch(`${API}/api/map-background`, { method: "POST", body: fd });
+    const TOKEN = import.meta.env.VITE_API_TOKEN || "";
+    const headers = TOKEN ? { Authorization: "Bearer " + TOKEN } : {};
+    await fetch(`${API}/api/map-background`, { method: "POST", body: fd, headers });
     setMapBgUrl(`${API}/api/map-background?v=${Date.now()}`);
   };
 
   const removeMapBg = async () => {
-    await fetch(`${API}/api/map-background`, { method: "DELETE" });
+    await api.del("/api/map-background");
     setMapBgUrl(null);
   };
 

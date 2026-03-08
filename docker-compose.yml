@@ -8,16 +8,39 @@ services:
     environment:
       POSTGRES_DB: netmap
       POSTGRES_USER: netmap
-      POSTGRES_PASSWORD: netmap_pw
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-netmap_pw}
     volumes:
       - netmap-pgdata:/var/lib/postgresql/data
     networks:
       - netmap
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U netmap"]
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # ─── Redis ────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: netmap-redis
+    restart: unless-stopped
+    networks:
+      - netmap
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.5"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   # ─── FastAPI Backend ──────────────────────────────────────────────────────────
   backend:
@@ -25,15 +48,26 @@ services:
     container_name: netmap-backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: "postgresql://netmap:netmap_pw@postgres/netmap"
+      DATABASE_URL: "postgresql://netmap:${POSTGRES_PASSWORD:-netmap_pw}@postgres/netmap"
+      REDIS_URL: "redis://redis:6379/0"
       CORS_ORIGIN: "http://localhost:3000"
-      SECRET_TOKEN: ""
+      SECRET_TOKEN: "${SECRET_TOKEN:-changeme}"
+      JWT_SECRET: "${JWT_SECRET:-}"
+      DEFAULT_ADMIN_PASSWORD: "${DEFAULT_ADMIN_PASSWORD:-changeme}"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-}"
     volumes:
       - netmap-data:/data          # persistent storage for map background images etc.
     networks:
       - netmap
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")' || exit 1"]
@@ -41,6 +75,31 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+
+  # ─── Celery Worker ────────────────────────────────────────────────────────────
+  celery-worker:
+    build: ./backend
+    container_name: netmap-celery
+    restart: unless-stopped
+    command: celery -A celery_app worker --loglevel=info --concurrency=4
+    environment:
+      DATABASE_URL: "postgresql://netmap:${POSTGRES_PASSWORD:-netmap_pw}@postgres/netmap"
+      REDIS_URL: "redis://redis:6379/0"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-}"
+    volumes:
+      - netmap-data:/data
+    networks:
+      - netmap
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
 
   # ─── React/Nginx Frontend ─────────────────────────────────────────────────────
   frontend:
@@ -54,6 +113,11 @@ services:
     restart: unless-stopped
     ports:
       - "3000:80"
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.5"
     depends_on:
       backend:
         condition: service_healthy

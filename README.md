@@ -109,3 +109,80 @@ docker buildx build --build-arg VITE_API_URL=http://your-backend:8000 -t netmap-
 - **Authentication**: Set `SECRET_TOKEN` in the backend environment to enable bearer token authentication. Leave empty to disable (LAN-only setups).
 - **No HTTPS**: All traffic is unencrypted HTTP. Do not use on untrusted networks. To enable HTTPS, place a reverse proxy (Traefik, Caddy, nginx) in front of the frontend container.
 - **SNMP Credentials**: API responses mask SNMP v3 passwords. However, if you enable `SECRET_TOKEN`, ensure it is kept secret.
+- **Encryption at Rest**: Set `ENCRYPTION_KEY` to encrypt SNMP passwords in the database. Generate a key with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+
+## TLS / HTTPS Setup
+
+NetMap ships without TLS. To secure traffic in production, place a TLS-terminating reverse proxy in front of the frontend container. Common options:
+
+### Option A: Caddy (automatic HTTPS)
+
+```
+# Caddyfile
+netmap.example.com {
+    reverse_proxy frontend:80
+}
+```
+
+Run Caddy alongside docker-compose. It will obtain and renew Let's Encrypt certificates automatically.
+
+### Option B: Traefik
+
+Add Traefik labels to the `frontend` service in `docker-compose.yml`:
+
+```yaml
+labels:
+  - "traefik.enable=true"
+  - "traefik.http.routers.netmap.rule=Host(`netmap.example.com`)"
+  - "traefik.http.routers.netmap.tls.certresolver=letsencrypt"
+```
+
+### Option C: nginx with TLS
+
+Create an `nginx-ssl.conf` with:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name netmap.example.com;
+
+    ssl_certificate     /etc/ssl/certs/netmap.pem;
+    ssl_certificate_key /etc/ssl/private/netmap.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    location / {
+        proxy_pass http://frontend:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+For any option, update `CORS_ORIGIN` in `.env` to match the HTTPS URL (e.g. `https://netmap.example.com`).
+
+## Dependency Management
+
+### Backend (Python)
+
+Direct dependencies are listed in `backend/requirements.txt`. For production deployments, consider using `pip-tools` to lock transitive dependencies:
+
+```bash
+pip install pip-tools
+pip-compile requirements.txt -o requirements.lock
+```
+
+### Vulnerability Scanning
+
+Periodically audit dependencies for known vulnerabilities:
+
+```bash
+# Python backend
+pip install pip-audit
+pip-audit -r backend/requirements.txt
+
+# Frontend
+cd frontend && npm audit
+```

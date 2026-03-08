@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, VENDOR_LABEL, VENDOR_COLOR, VENDOR_ICON } from "../api.js";
+import { useScanProgress } from "../hooks/useScanProgress.js";
+import useNetmapStore from "../store.js";
 
 // ── DashboardPage ────────────────────────────────────────────────────────────
 export default function DashboardPage() {
@@ -8,17 +10,47 @@ export default function DashboardPage() {
   const [topology, setTopology] = useState({ nodes: [], links: [], racks: [], classes: [] });
   const [apiStats, setApiStats] = useState(null);
   const [loading, setLoading]   = useState(true);
+  const [fetchError, setFetchError] = useState(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState(null);
+
+  const activeScanJobId = useNetmapStore(s => s.activeScanJobId);
+  const startScan = useNetmapStore(s => s.startScan);
+  const clearScanJob = useNetmapStore(s => s.clearScanJob);
+  const progress = useScanProgress(activeScanJobId);
 
   const loadData = () => {
     setLoading(true);
+    setFetchError(null);
     Promise.allSettled([api.get("/api/topology"), api.get("/api/stats")])
       .then(([topoRes, statsRes]) => {
         if (topoRes.status === "fulfilled") setTopology(topoRes.value);
+        else setFetchError(topoRes.reason?.message || "Failed to load topology");
         if (statsRes.status === "fulfilled") setApiStats(statsRes.value);
         setLoading(false);
       });
   };
   useEffect(() => { loadData(); }, []);
+
+  // Handle scan completion via WebSocket
+  useEffect(() => {
+    if (progress?.type === "scan_complete") {
+      setScanning(false);
+      clearScanJob();
+      loadData(); // refresh dashboard data after scan completes
+    }
+  }, [progress]);
+
+  const handleStartScan = async () => {
+    setScanning(true);
+    setScanError(null);
+    try {
+      await startScan();
+    } catch (e) {
+      setScanning(false);
+      setScanError(e.message || "Failed to start scan");
+    }
+  };
 
   // ── Computed stats ─────────────────────────────────────────────────────────
   const stats = useMemo(() => {
@@ -98,6 +130,15 @@ export default function DashboardPage() {
     );
   }
 
+  if (fetchError) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "calc(100vh - 48px)", gap: 12 }}>
+        <div style={{ color: "#f87171", fontSize: 13 }}>Failed to load data: {fetchError}</div>
+        <button onClick={loadData} style={{ border: "1px solid #1e293b", background: "none", color: "#94a3b8", borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontSize: 11 }}>Retry</button>
+      </div>
+    );
+  }
+
   return (
     <div style={{
       padding: "32px 40px", maxWidth: 1100, margin: "0 auto",
@@ -109,15 +150,61 @@ export default function DashboardPage() {
           <div style={{ fontSize: 22, fontWeight: 700, color: "#e2e8f0" }}>Dashboard</div>
           <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>Network topology overview</div>
         </div>
-        <button
-          onClick={loadData}
-          style={{
-            border: "1px solid #1e293b", background: "none",
-            color: "#475569", borderRadius: 6, padding: "6px 14px",
-            cursor: "pointer", fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11,
-          }}
-        >Refresh</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={loadData}
+            style={{
+              border: "1px solid #1e293b", background: "none",
+              color: "#475569", borderRadius: 6, padding: "6px 14px",
+              cursor: "pointer", fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11,
+            }}
+          >Refresh</button>
+          <button
+            onClick={handleStartScan}
+            disabled={scanning || !!activeScanJobId}
+            style={{
+              border: "1px solid #164e63",
+              background: scanning ? "#0c4a6e" : "#083344",
+              color: "#22d3ee", borderRadius: 6, padding: "6px 14px",
+              cursor: scanning ? "default" : "pointer",
+              fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11, fontWeight: 600,
+              opacity: scanning ? 0.7 : 1,
+            }}
+          >{scanning ? "Scanning..." : "Run Scan"}</button>
+        </div>
       </div>
+
+      {/* ── Scan progress ─────────────────────────────────────────────── */}
+      {(scanning || activeScanJobId) && progress?.type === "scan_progress" && (
+        <div style={{
+          backgroundColor: "#0a0e18", border: "1px solid #164e63", borderRadius: 10,
+          padding: "14px 20px", marginBottom: 28,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontSize: 11, color: "#22d3ee", fontWeight: 600 }}>
+              Scanning: {progress.scanned} / {progress.total}
+            </span>
+            <span style={{ fontSize: 10, color: "#475569" }}>
+              {progress.latest_ip}
+            </span>
+          </div>
+          <div style={{ height: 6, backgroundColor: "#0f172a", borderRadius: 3, overflow: "hidden" }}>
+            <div style={{
+              height: "100%",
+              width: progress.total > 0 ? `${Math.round(progress.scanned / progress.total * 100)}%` : "0%",
+              backgroundColor: "#22d3ee", borderRadius: 3, transition: "width 0.3s",
+            }} />
+          </div>
+        </div>
+      )}
+      {scanError && (
+        <div style={{
+          backgroundColor: "#0a0e18", border: "1px solid #7f1d1d", borderRadius: 10,
+          padding: "14px 20px", marginBottom: 28, color: "#f87171", fontSize: 11,
+        }}>
+          Scan failed: {scanError}
+        </div>
+      )}
 
       {/* ── Summary cards ─────────────────────────────────────────────────── */}
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 28 }}>

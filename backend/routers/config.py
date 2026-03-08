@@ -1,22 +1,29 @@
 """Global config export/import endpoints."""
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from database import AppSetting, Credential, SnmpProfile, get_db
 from routers.bulk import _normalize_bool, _normalize_optional_int
 from schemas import CredentialCreate, GlobalConfigExportOut, GlobalConfigImportRequest, SnmpProfileCreate
+from shared.auth import require_role
+from shared.audit import log_audit
+from shared.errors import api_error
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 
 @router.get("/api/config/export", response_model=GlobalConfigExportOut)
-def export_global_config(db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def export_global_config(request: Request, db: Session = Depends(get_db)):
     payload = {
         "version": 1,
-        "exported_at": datetime.utcnow().isoformat() + "Z",
+        "exported_at": datetime.now(timezone.utc).isoformat() + "Z",
         "settings": [
             {"key": s.key, "value": s.value}
             for s in db.query(AppSetting).order_by(AppSetting.key).all()
@@ -29,9 +36,9 @@ def export_global_config(db: Session = Depends(get_db)):
                 "v3_security_level": p.v3_security_level,
                 "v3_username": p.v3_username,
                 "v3_auth_protocol": p.v3_auth_protocol,
-                "v3_auth_password": p.v3_auth_password,
+                "v3_auth_password": "********" if p.v3_auth_password else "",
                 "v3_priv_protocol": p.v3_priv_protocol,
-                "v3_priv_password": p.v3_priv_password,
+                "v3_priv_password": "********" if p.v3_priv_password else "",
             }
             for p in db.query(SnmpProfile).order_by(SnmpProfile.id).all()
         ],
@@ -47,9 +54,9 @@ def export_global_config(db: Session = Depends(get_db)):
                 "v3_security_level": c.v3_security_level,
                 "v3_username": c.v3_username,
                 "v3_auth_protocol": c.v3_auth_protocol,
-                "v3_auth_password": c.v3_auth_password,
+                "v3_auth_password": "********" if c.v3_auth_password else "",
                 "v3_priv_protocol": c.v3_priv_protocol,
-                "v3_priv_password": c.v3_priv_password,
+                "v3_priv_password": "********" if c.v3_priv_password else "",
                 "profile_id": c.profile_id,
                 "rack_id": c.rack_id,
                 "class_id": c.class_id,
@@ -62,22 +69,23 @@ def export_global_config(db: Session = Depends(get_db)):
     return GlobalConfigExportOut(data=json.dumps(payload, ensure_ascii=False, indent=2))
 
 
-@router.post("/api/config/import")
-def import_global_config(body: GlobalConfigImportRequest, db: Session = Depends(get_db)):
+@router.post("/api/config/import",
+             dependencies=[require_role("admin")])
+def import_global_config(body: GlobalConfigImportRequest, request: Request, db: Session = Depends(get_db)):
     try:
         payload = json.loads(body.data or "{}")
     except Exception as exc:
-        raise HTTPException(400, f"Invalid JSON payload: {exc}")
+        api_error(400, "INVALID_JSON", f"Invalid JSON payload: {exc}")
 
     if not isinstance(payload, dict):
-        raise HTTPException(400, "Config payload must be a JSON object")
+        api_error(400, "INVALID_CONFIG", "Config payload must be a JSON object")
 
     settings_rows = payload.get("settings") or []
     profile_rows = payload.get("profiles") or []
     credential_rows = payload.get("credentials") or []
 
     if not isinstance(settings_rows, list) or not isinstance(profile_rows, list) or not isinstance(credential_rows, list):
-        raise HTTPException(400, "settings/profiles/credentials must be arrays")
+        api_error(400, "INVALID_CONFIG_ARRAYS", "settings/profiles/credentials must be arrays")
 
     errors = []
     valid_settings = []
@@ -146,6 +154,11 @@ def import_global_config(body: GlobalConfigImportRequest, db: Session = Depends(
                 inserted["credentials"] += 1
 
         db.commit()
+
+    if not body.dry_run and not errors:
+        log_audit(request, "import", "global_config", "", {
+            "inserted": inserted, "updated": updated,
+        })
 
     return {
         "dry_run": bool(body.dry_run),

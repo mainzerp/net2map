@@ -28,7 +28,7 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
   const [bgPan, setBgPan] = useState(null);
 
   useEffect(() => {
-    localStorage.setItem("netmap-zoom", JSON.stringify(zoom));
+    try { localStorage.setItem("netmap-zoom", JSON.stringify(zoom)); } catch {}
   }, [zoom]);
 
   useEffect(() => {

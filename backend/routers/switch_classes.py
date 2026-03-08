@@ -1,12 +1,15 @@
 """CRUD endpoints for switch classes."""
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from database import Device, get_db
 from database import SwitchClass as SwitchClassModel
 from schemas import SwitchClassCreate, SwitchClassOut, SwitchClassUpdate
+from shared.auth import require_role
+from shared.audit import log_audit
+from shared.errors import api_error
 
 router = APIRouter()
 
@@ -16,20 +19,23 @@ def list_switch_classes(db: Session = Depends(get_db)):
     return db.query(SwitchClassModel).order_by(SwitchClassModel.id).all()
 
 
-@router.post("/api/switch-classes", response_model=SwitchClassOut, status_code=201)
-def create_switch_class(body: SwitchClassCreate, db: Session = Depends(get_db)):
+@router.post("/api/switch-classes", response_model=SwitchClassOut, status_code=201,
+             dependencies=[require_role("admin", "operator")])
+def create_switch_class(body: SwitchClassCreate, request: Request, db: Session = Depends(get_db)):
     sc = SwitchClassModel(**body.model_dump())
     db.add(sc)
     db.commit()
     db.refresh(sc)
+    log_audit(request, "create", "switch_class", str(sc.id), {"label": sc.label})
     return sc
 
 
-@router.put("/api/switch-classes/{class_id}", response_model=SwitchClassOut)
-def update_switch_class(class_id: int, body: SwitchClassUpdate, db: Session = Depends(get_db)):
+@router.put("/api/switch-classes/{class_id}", response_model=SwitchClassOut,
+            dependencies=[require_role("admin", "operator")])
+def update_switch_class(class_id: int, body: SwitchClassUpdate, request: Request, db: Session = Depends(get_db)):
     sc = db.query(SwitchClassModel).filter(SwitchClassModel.id == class_id).first()
     if not sc:
-        raise HTTPException(404, "Switch class not found")
+        api_error(404, "SWITCH_CLASS_NOT_FOUND", "Switch class not found")
     payload = body.model_dump(exclude_unset=True)
     if (
         "allow_outside_rack" in payload
@@ -41,23 +47,27 @@ def update_switch_class(class_id: int, body: SwitchClassUpdate, db: Session = De
             Device.rack_id.is_(None),
         ).count()
         if unracked_count > 0:
-            raise HTTPException(
+            api_error(
                 409,
+                "OUTSIDE_RACK_IN_USE",
                 "Cannot disable outside-rack placement while unracked devices are assigned to this class",
             )
     for k, v in payload.items():
         setattr(sc, k, v)
     db.commit()
     db.refresh(sc)
+    log_audit(request, "update", "switch_class", str(class_id), {"fields": list(body.model_dump(exclude_none=True).keys())})
     return sc
 
 
-@router.delete("/api/switch-classes/{class_id}", status_code=204)
-def delete_switch_class(class_id: int, db: Session = Depends(get_db)):
+@router.delete("/api/switch-classes/{class_id}", status_code=204,
+               dependencies=[require_role("admin")])
+def delete_switch_class(class_id: int, request: Request, db: Session = Depends(get_db)):
     sc = db.query(SwitchClassModel).filter(SwitchClassModel.id == class_id).first()
     if not sc:
-        raise HTTPException(404, "Switch class not found")
+        api_error(404, "SWITCH_CLASS_NOT_FOUND", "Switch class not found")
     # Detach devices assigned to this class before deleting
     db.query(Device).filter(Device.class_id == class_id).update({"class_id": None})
+    log_audit(request, "delete", "switch_class", str(class_id), {"label": sc.label})
     db.delete(sc)
     db.commit()

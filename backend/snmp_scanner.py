@@ -9,6 +9,7 @@ import math
 import re
 import socket
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
 # Auth / privacy constants (sync module exports these, async module does not)
@@ -29,6 +30,28 @@ from pysnmp.hlapi.asyncio import (
 )
 
 log = logging.getLogger(__name__)
+
+
+# --- SNMP enums ---------------------------------------------------------------
+
+class SnmpVersion(str, Enum):
+    V2C = "v2c"
+    V3 = "v3"
+
+
+class SecurityLevel(str, Enum):
+    NO_AUTH_NO_PRIV = "noAuthNoPriv"
+    AUTH_NO_PRIV = "authNoPriv"
+    AUTH_PRIV = "authPriv"
+
+
+class Vendor(str, Enum):
+    ARUBA_CX = "aruba_cx"
+    FS = "fs"
+    UNIFI = "unifi"
+    OPNSENSE = "opnsense"
+    GENERIC = "generic"
+
 
 # --- Protocol maps ------------------------------------------------------------
 
@@ -89,13 +112,8 @@ OID_IP_NET_TO_PHYSICAL_TYPE = "1.3.6.1.2.1.4.35.1.7"  # 3=dynamic (learned), 4=s
 # OPNsense reports sysObjectID = 1.3.6.1.4.1.8072.3.2.9 (net-snmp on FreeBSD)
 OID_NETSNMP_ENTERPRISE = "1.3.6.1.4.1.8072"
 
-# Per-vendor FDB walk strategy
-FDB_STRATEGY: Dict[str, str] = {
-    "unifi":    "qbridge",  # dot1d returns NOSUCHINSTANCE on UniFi
-    "aruba_cx": "dot1d",
-    "fs":       "dot1d",
-    "opnsense": "dot1d",   # bridge(4) interfaces use dot1d; returns empty if no bridge configured
-}
+# VLAN (Q-BRIDGE-MIB)
+OID_DOT1Q_PVID = "1.3.6.1.2.1.17.7.1.4.5.1.1"  # dot1qPvid
 
 # --- Vendor enterprise OIDs ---------------------------------------------------
 VENDOR_OIDS: Dict[str, str] = {
@@ -125,6 +143,7 @@ class IfInfo:
     alias:       str = ""
     speed_mbps:  int = 0
     oper_status: int = 2
+    vlan:        int = 0
 
 
 @dataclass
@@ -163,18 +182,18 @@ def build_auth(
     v3_priv_password: str = "",
 ):
     """Return a pysnmp auth object (CommunityData or UsmUserData)."""
-    if snmp_version == "v2c":
+    if snmp_version in (SnmpVersion.V2C, "v2c"):
         return CommunityData(community, mpModel=1)  # mpModel=1 -> SNMPv2c
 
     # SNMPv3
     sl = v3_security_level
-    if sl == "noAuthNoPriv":
+    if sl in (SecurityLevel.NO_AUTH_NO_PRIV, "noAuthNoPriv"):
         return UsmUserData(
             v3_username,
             authProtocol=usmNoAuthProtocol,
             privProtocol=usmNoPrivProtocol,
         )
-    if sl == "authNoPriv":
+    if sl in (SecurityLevel.AUTH_NO_PRIV, "authNoPriv"):
         return UsmUserData(
             v3_username,
             authKey=v3_auth_password,
@@ -200,11 +219,14 @@ def _transport(ip: str, port: int = 161, timeout: int = 3, retries: int = 1):
 async def snmp_get(ip: str, port: int, auth,
                    *oids: str,
                    timeout: int = 3,
-                   retries: int = 1) -> Dict[str, str]:
+                   retries: int = 1,
+                   engine: Optional[SnmpEngine] = None) -> Dict[str, str]:
     """Async GET one or more scalar OIDs. Returns {oid_str: value_str}."""
     result: Dict[str, str] = {}
     objects = [ObjectType(ObjectIdentity(o)) for o in oids]
-    engine = SnmpEngine()
+    own_engine = engine is None
+    if own_engine:
+        engine = SnmpEngine()
     try:
         error_indication, error_status, _, var_binds = await getCmd(
             engine, auth, _transport(ip, port, timeout, retries), ContextData(), *objects
@@ -224,17 +246,19 @@ async def snmp_get(ip: str, port: int, auth,
         else:
             log.debug("snmp_get %s: %s: %s", ip, exc_type, exc)
     finally:
-        try:
-            engine.transportDispatcher.closeDispatcher()
-        except Exception:
-            pass
+        if own_engine:
+            try:
+                engine.transportDispatcher.closeDispatcher()
+            except Exception:
+                pass
     return result
 
 
 async def snmp_bulk_walk(ip: str, port: int, auth,
                          oid: str, max_rows: int = 500,
                          timeout: int = 3,
-                         retries: int = 1) -> List[Tuple[str, str]]:
+                         retries: int = 1,
+                         engine: Optional[SnmpEngine] = None) -> List[Tuple[str, str]]:
     """Async SNMPv2c/v3 GETBULK walk. Returns [(oid_str, value_str)].
 
     pysnmp-lextudio 5.x changed bulkCmd to return a single awaitable future
@@ -246,7 +270,9 @@ async def snmp_bulk_walk(ip: str, port: int, auth,
     rows: List[Tuple[str, str]] = []
     current_oid = oid
     bulk_size = 25
-    engine = SnmpEngine()
+    own_engine = engine is None
+    if own_engine:
+        engine = SnmpEngine()
     try:
         while len(rows) < max_rows:
             try:
@@ -285,10 +311,11 @@ async def snmp_bulk_walk(ip: str, port: int, auth,
             if not advanced:
                 break
     finally:
-        try:
-            engine.transportDispatcher.closeDispatcher()
-        except Exception:
-            pass
+        if own_engine:
+            try:
+                engine.transportDispatcher.closeDispatcher()
+            except Exception:
+                pass
     return rows
 
 
@@ -306,66 +333,19 @@ def detect_vendor(sys_descr: str, sys_object_id: str) -> str:
     return "generic"
 
 
-# --- Vendor-specific model extraction ----------------------------------------
+# --- Vendor-aware helpers (delegated to scanners plugin) ----------------------
 
-_MODEL_ARUBA = re.compile(
-    r"(Aruba(?:\s+CX)?\s+[\d]{4}[A-Za-z\-]*(?:\s+\d+[A-Za-z]+)?)",
-    re.IGNORECASE,
-)
-_MODEL_FS = re.compile(
-    r"(FS\s+[A-Z]\d+[\w\-]*)",
-    re.IGNORECASE,
-)
-_MODEL_UNIFI = re.compile(
-    r"((?:UniFi|Ubiquiti)\s+[\w\- ]+|USW\-[\w\-]+)",
-    re.IGNORECASE,
-)
-_MODEL_GENERIC = re.compile(
-    r"(Aruba\s+CX\s+[\w\-]+|HPE?\s+[\w\-]+|Cisco\s+[\w\-]+|FS\s+[\w\-]+|FSOS\s+[\w\-]+)",
-    re.IGNORECASE,
-)
+from scanners import get_scanner
 
 
 def extract_model(sys_descr: str, vendor: str) -> str:
-    if vendor == "aruba_cx":
-        m = _MODEL_ARUBA.search(sys_descr)
-        return m.group(1) if m else ""
-    if vendor == "fs":
-        m = _MODEL_FS.search(sys_descr)
-        return m.group(1) if m else ""
-    if vendor == "unifi":
-        m = _MODEL_UNIFI.search(sys_descr)
-        return m.group(1) if m else ""
-    m = _MODEL_GENERIC.search(sys_descr or "")
-    return m.group(1) if m else ""
-
-
-# --- Port filter helpers ------------------------------------------------------
-
-_VIRTUAL_GENERIC = ("loopback", "tunnel", "null", "vlan", "management", "mgmt",
-                    "bridge", "cpu", "stack", "oob")
-_VIRTUAL_ARUBA = ("loopback", "vlan", "tunnel", "mgmt", "oobm")
-_VIRTUAL_FS = ("loopback", "vlan", "mgmt", "null", "stack")
-_VIRTUAL_UNIFI = ("loopback", "vlan", "bridge", "cpu", "mgmt")
-# OPNsense / FreeBSD: lo*, vlan*, pppoe*, lagg*, enc*, pflog*, pfsync*, tun*, openvpn*, wg*
-_VIRTUAL_OPNSENSE = ("lo", "loopback", "vlan", "pppoe", "lagg", "enc", "pflog",
-                     "pfsync", "tun", "tap", "ovpn", "openvpn", "wg", "ng",
-                     "ipsec", "gif", "gre", "bridge", "vxlan", "carp")
+    """Extract model from sysDescr using the vendor scanner plugin."""
+    return get_scanner(vendor).extract_model(sys_descr)
 
 
 def is_virtual(if_descr: str, vendor: str) -> bool:
-    d = if_descr.lower()
-    # OPNsense/FreeBSD interfaces always start with a fixed type prefix (lo0,
-    # vlan100, tun0 …).  Using startswith avoids false positives like "mxlen0"
-    # matching the substring "lo".
-    if vendor == "opnsense":
-        return any(d.startswith(p) for p in _VIRTUAL_OPNSENSE)
-    patterns = {
-        "aruba_cx": _VIRTUAL_ARUBA,
-        "fs":       _VIRTUAL_FS,
-        "unifi":    _VIRTUAL_UNIFI,
-    }.get(vendor, _VIRTUAL_GENERIC)
-    return any(p in d for p in patterns)
+    """Check if an interface is virtual using the vendor scanner plugin."""
+    return get_scanner(vendor).is_virtual_port(if_descr)
 
 
 # --- Speed label helper -------------------------------------------------------
@@ -499,6 +479,30 @@ async def scan_switch(
         v3_priv_password=v3_priv_password,
     )
 
+    # Per-session SnmpEngine reuse: create once, pass to all SNMP calls
+    session_engine = SnmpEngine()
+    try:
+        return await _scan_switch_inner(
+            ip, snmp_port, auth, snmp_timeout, snmp_retries, scan_mode, session_engine,
+        )
+    finally:
+        try:
+            session_engine.transportDispatcher.closeDispatcher()
+        except Exception:
+            pass
+
+
+async def _scan_switch_inner(
+    ip: str,
+    snmp_port: int,
+    auth,
+    snmp_timeout: int,
+    snmp_retries: int,
+    scan_mode: str,
+    engine: SnmpEngine,
+) -> Optional[SwitchData]:
+    """Inner scan logic using a pre-created SnmpEngine."""
+
     # -- 1. System scalars ----------------------------------------------------
     scalars = await snmp_get(
         ip, snmp_port, auth,
@@ -506,6 +510,7 @@ async def scan_switch(
         OID_SYS_LOCATION, OID_SYS_OBJECT_ID,
         timeout=snmp_timeout,
         retries=snmp_retries,
+        engine=engine,
     )
     if not scalars:
         log.warning("No SNMP response from %s", ip)
@@ -529,10 +534,10 @@ async def scan_switch(
 
     # -- 3. Interface table (all four walks in parallel) ----------------------
     descr_rows, status_rows, hspeed_rows, alias_rows = await asyncio.gather(
-        snmp_bulk_walk(ip, snmp_port, auth, OID_IF_DESCR, timeout=snmp_timeout, retries=snmp_retries),
-        snmp_bulk_walk(ip, snmp_port, auth, OID_IF_OPER_STATUS, timeout=snmp_timeout, retries=snmp_retries),
-        snmp_bulk_walk(ip, snmp_port, auth, OID_IF_HIGH_SPEED, timeout=snmp_timeout, retries=snmp_retries),
-        snmp_bulk_walk(ip, snmp_port, auth, OID_IF_ALIAS, timeout=snmp_timeout, retries=snmp_retries),
+        snmp_bulk_walk(ip, snmp_port, auth, OID_IF_DESCR, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
+        snmp_bulk_walk(ip, snmp_port, auth, OID_IF_OPER_STATUS, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
+        snmp_bulk_walk(ip, snmp_port, auth, OID_IF_HIGH_SPEED, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
+        snmp_bulk_walk(ip, snmp_port, auth, OID_IF_ALIAS, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
     )
 
     def _idx(oid_s: str) -> Optional[int]:
@@ -569,13 +574,14 @@ async def scan_switch(
 
     wants_links = scan_mode in {"full", "ports", "links"}
     wants_macs = scan_mode in {"full", "ports", "macs"}
+    bridge_to_ifindex: Dict[int, int] = {}
 
     if wants_links:
         # -- 4. LLDP neighbor table (all three walks in parallel) -------------
         sys_rows, port_rows, pdesc_rows = await asyncio.gather(
-            snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_SYS_NAME, timeout=snmp_timeout, retries=snmp_retries),
-            snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_PORT_ID, timeout=snmp_timeout, retries=snmp_retries),
-            snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_PORT_DESC, timeout=snmp_timeout, retries=snmp_retries),
+            snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_SYS_NAME, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
+            snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_PORT_ID, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
+            snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_PORT_DESC, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
         )
 
         nbr_map: Dict[Tuple[int, int], LldpNeighbor] = {}
@@ -615,16 +621,24 @@ async def scan_switch(
 
     if wants_macs:
         # -- 5. ARP + BRIDGE-MIB in parallel ---------------------------------
-        fdb_strategy = FDB_STRATEGY.get(sw.vendor, "dot1d")
+        scanner = get_scanner(sw.vendor)
+        fdb_strategy = scanner.fdb_strategy()
         fdb_oid = OID_QBRIDGE_FDB_PORT if fdb_strategy == "qbridge" else OID_DOT1D_TP_FDB_PORT
         log.debug("FDB strategy for %s (vendor=%s): %s", ip, sw.vendor, fdb_strategy)
 
         (arp_mac_rows, arp_ip_rows,
          base_port_rows, fdb_rows) = await asyncio.gather(
-            snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_MAC, timeout=snmp_timeout, retries=snmp_retries),
-            snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_IP, timeout=snmp_timeout, retries=snmp_retries),
-            snmp_bulk_walk(ip, snmp_port, auth, OID_DOT1D_BASE_PORT_IF_INDEX, timeout=snmp_timeout, retries=snmp_retries),
-            snmp_bulk_walk(ip, snmp_port, auth, fdb_oid, timeout=snmp_timeout, retries=snmp_retries),
+            snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_MAC, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
+            snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_IP, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
+            snmp_bulk_walk(ip, snmp_port, auth, OID_DOT1D_BASE_PORT_IF_INDEX, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
+            snmp_bulk_walk(ip, snmp_port, auth, fdb_oid, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
+        )
+
+        log.info(
+            "MAC/ARP walk results for %s (%s): arp_mac=%d, arp_ip=%d, base_port=%d, fdb=%d",
+            ip, sw.sys_name,
+            len(arp_mac_rows), len(arp_ip_rows),
+            len(base_port_rows), len(fdb_rows),
         )
 
         ip_by_suffix: Dict[str, str] = {}
@@ -638,7 +652,7 @@ async def scan_switch(
             if mac and arp_ip:
                 sw.arp_table[mac] = arp_ip
 
-        bridge_to_ifindex: Dict[int, int] = {}
+        bridge_to_ifindex.clear()
         for oid_s, ifindex_val in base_port_rows:
             try:
                 bridge_port = int(_last_n(oid_s, 1)[0])
@@ -658,6 +672,67 @@ async def scan_switch(
             ifindex = bridge_to_ifindex.get(bridge_port)
             if ifindex is not None:
                 sw.mac_ifindex[mac] = ifindex
+
+        # IP-MIB unified fallback when legacy ARP table is empty
+        if not sw.arp_table:
+            log.info("Legacy ARP empty for %s, trying IP-MIB unified neighbor table", ip)
+            unified_rows = await snmp_bulk_walk(
+                ip, snmp_port, auth, OID_IP_NET_TO_PHYSICAL_MAC,
+                timeout=snmp_timeout, retries=snmp_retries, engine=engine,
+            )
+            log.info("IP-MIB unified walk for %s: %d rows", ip, len(unified_rows))
+            for oid_s, mac_val in unified_rows:
+                mac = _hex_to_mac(mac_val)
+                if not mac:
+                    continue
+                parts = oid_s.split(".")
+                try:
+                    base_len = len(OID_IP_NET_TO_PHYSICAL_MAC.split("."))
+                    idx_parts = parts[base_len:]
+                    addr_type = int(idx_parts[1])
+                    addr_len = int(idx_parts[2])
+                    if addr_type == 1 and addr_len == 4:
+                        peer_ip = ".".join(idx_parts[3:3+4])
+                        sw.arp_table[mac] = peer_ip
+                except (IndexError, ValueError):
+                    continue
+
+        log.info(
+            "Endpoint tables for %s (%s): arp_table=%d entries, mac_ifindex=%d entries",
+            ip, sw.sys_name,
+            len(sw.arp_table), len(sw.mac_ifindex),
+        )
+
+    # -- 6. VLAN (dot1qPvid) - fault-tolerant --------------------------------
+    try:
+        # If bridge_to_ifindex wasn't populated (no MAC walk), fetch it now
+        if not bridge_to_ifindex:
+            bp_rows = await snmp_bulk_walk(
+                ip, snmp_port, auth, OID_DOT1D_BASE_PORT_IF_INDEX,
+                timeout=snmp_timeout, retries=snmp_retries, engine=engine,
+            )
+            for oid_s, ifindex_val in bp_rows:
+                try:
+                    bp = int(_last_n(oid_s, 1)[0])
+                    bridge_to_ifindex[bp] = int(ifindex_val)
+                except ValueError:
+                    continue
+
+        pvid_rows = await snmp_bulk_walk(
+            ip, snmp_port, auth, OID_DOT1Q_PVID,
+            timeout=snmp_timeout, retries=snmp_retries, engine=engine,
+        )
+        for oid_s, val in pvid_rows:
+            try:
+                bp = int(_last_n(oid_s, 1)[0])
+                pvid = int(val)
+            except (ValueError, IndexError):
+                continue
+            ifindex = bridge_to_ifindex.get(bp)
+            if ifindex is not None and ifindex in sw.interfaces:
+                sw.interfaces[ifindex].vlan = pvid
+    except Exception:
+        log.debug("VLAN walk failed for %s (Q-BRIDGE-MIB not supported)", ip)
 
     log.info("Scanned %s (%s) vendor=%s: %d ifaces, %d LLDP nbrs",
              ip, sw.sys_name, sw.vendor, len(sw.interfaces), len(sw.lldp_neighbors))

@@ -3,9 +3,9 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 COPY package.json package-lock.json* ./
-# NOTE: no package-lock.json committed -- using npm install (non-reproducible).
-# Add package-lock.json and switch to `npm ci` for reproducible builds.
-RUN npm install
+# Use `npm ci` for reproducible builds when package-lock.json is present.
+# Falls back to `npm install` if no lockfile exists.
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 COPY . .
 # API URL is injected at build time; defaults to same-host nginx proxy

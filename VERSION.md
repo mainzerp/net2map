@@ -1,45 +1,149 @@
 # Version History
 
-## v1.6.0 — Class-Based Outside-Rack Placement
+## v1.8.0 — Port Endpoint Data (MAC/IP on Hover)
 
 **Type:** MINOR (new feature)
 
 ### Changes
 
-#### Backend: Class Policy + Validation
-- Added `allow_outside_rack` to switch classes (ORM + Alembic revision `003`).
-- Extended switch class API schemas to expose and update `allow_outside_rack`.
-- `PATCH /api/topology/devices/{id}/meta` now enforces valid combinations:
-  - unracked device requires a class with `allow_outside_rack=true`.
-- `PUT /api/credentials/{id}` now uses `exclude_unset=True` and validates rack/class transitions for matching discovered devices.
-- `PUT /api/switch-classes/{id}` blocks disabling outside-rack placement if unracked devices are still assigned to that class (`409`).
-- Scan engine sync now skips invalid credential-to-device rack/class applications and logs structured warnings.
-
-#### Frontend: Switch Classes + Map Rendering
-- `SwitchClasses` settings tab now includes an `Allow outside rack placement` toggle.
-- Added class status indicator badge (`Outside allowed` / `Rack required`) on class cards.
-- Map now renders eligible outside-rack devices as standalone draggable nodes.
-- Outside-rack nodes are now selectable and open the existing detail panel with per-port visibility.
-- Outside-rack node drag behavior is preserved (drag persists position, click opens details).
-- Link rendering now supports mixed endpoint pairs:
-  - rack-to-rack
-  - rack-to-outside
-  - outside-to-outside
-- Rack filters continue to target rack groups; outside nodes remain controlled by class filter.
+#### Port Endpoint Data Population
+- **MAC-only endpoints**: Ports now show MAC addresses even when no IP is available (FDB data without ARP).
+- **Global ARP table**: ARP tables from all scanned devices (especially routers) are merged and shared across L2 switches, enabling IP resolution for MACs on pure L2 switches.
+- **IP-MIB unified fallback**: When legacy ARP table (ipNetToMediaTable) returns empty, the scanner falls back to the unified IP-MIB neighbor table (ipNetToPhysicalPhysAddress). Resolves ARP for OPNsense/FreeBSD and modern devices.
+- **LLDP port filtering**: MAC-only entries are skipped on ports with LLDP neighbors (interswitch/uplink links) to avoid transit MAC noise.
+- **Diagnostic logging**: SNMP walk result counts (ARP MAC/IP, bridge port, FDB rows) and final endpoint table sizes are logged for each device.
+- **Smart sorting**: When multiple endpoints exist on a port, entries with IPs sort first for primary display.
 
 ### Files Modified
 | File | Change |
 |------|--------|
-| backend/alembic/versions/003_add_switch_class_allow_outside_rack.py | NEW — add `switch_classes.allow_outside_rack` |
-| backend/database.py | `SwitchClass.allow_outside_rack` ORM column |
-| backend/schemas.py | Switch class schemas include `allow_outside_rack` |
-| backend/routers/topology.py | Device meta rack/class validation for unracked policy |
-| backend/routers/credentials.py | `exclude_unset` update semantics + rack/class guardrails |
-| backend/routers/switch_classes.py | Block disabling outside-rack on in-use unracked classes |
-| backend/scan_engine.py | Scan sync safeguards for invalid rack/class combinations |
-| frontend/src/components/settings/SwitchClassesTab.jsx | Toggle + class status indicator + assignment error surfacing |
-| frontend/src/pages/MapPage.jsx | Endpoint pair color mapping for rack/outside links |
-| frontend/src/components/map/TopologyMap.jsx | Outside-rack node rendering/drag + mixed endpoint link rendering |
+| backend/snmp_scanner.py | Diagnostic logging after ARP/FDB walks, IP-MIB unified neighbor table fallback |
+| backend/scan_engine.py | MAC-only endpoint loop, LLDP port filtering, global ARP merge, updated sort key |
+
+---
+
+## v1.7.0 — Phase 6 & 7: Observability, Operations, and Remaining Items
+
+**Type:** MINOR (new features + infrastructure)
+
+### Changes
+
+#### 6.1 Prometheus Metrics
+- Added `prometheus-client>=0.20.0` to requirements.txt.
+- Created `backend/shared/metrics.py` with Histogram, Counter, and Gauge metrics for scans, devices, ports, and HTTP requests.
+- Added `MetricsMiddleware` to `main.py` recording request latency and total counts per method/endpoint/status (excludes /metrics itself).
+- Added `GET /metrics` endpoint (auth-exempt, excluded from schema) returning Prometheus text format.
+- Instrumented `scan_engine.py`: SCAN_ACTIVE inc/dec, SCAN_DURATION/SCAN_TOTAL at completion, DEVICE_COUNT/PORT_COUNT gauge updates after each scan.
+- Added `/metrics` to `_AUTH_EXEMPT_PATHS` in `shared/auth.py`.
+
+#### 6.2 CI/CD Pipeline
+- Expanded `.github/workflows/ci.yml` with lint-backend (ruff), test-backend (pytest), test-frontend (vitest), docker-build (on push to main), docker-push (on tags v*).
+- Created `backend/pyproject.toml` with ruff config (line-length=120, target-version=py312, select E/W/F/I, ignore E501).
+
+#### 7.1 Credential Fallback Chains
+- Created migration `008_credential_fallback.py`: adds `priority` column, drops unique on `ip`, adds composite unique on `(ip, priority)`.
+- Updated `Credential` model in `database.py`: added `priority` column, `UniqueConstraint("ip", "priority")`, removed `unique=True` from `ip`.
+- Updated `schemas.py`: added `priority` field to `CredentialBase`, `CredentialCreate`, `CredentialUpdate`.
+- Updated `routers/credentials.py`: duplicate check now uses `(ip, priority)` instead of just `ip`.
+- Updated `scan_engine.py`: credentials loaded ordered by priority, grouped by IP; scan tries primary then fallback credentials in order.
+- Updated `CredentialsTab.jsx`: added priority field to form and edit flow.
+
+#### 7.2 Bulk Device Operations
+- Added `BulkDeviceMetaUpdate` schema to `schemas.py`.
+- Added `PATCH /api/topology/devices/bulk-meta` endpoint to `topology.py`.
+- Updated `DevicesTab.jsx`: checkbox per device row, bulk action toolbar (Ignore Selected, Re-enable Selected, Clear), Select All per section.
+
+#### 7.3 Dry-Run Persistence
+- Added `DryRunResult` model to `database.py`.
+- Created migration `009_dry_run_results.py`.
+- Updated `scan_engine.py` dry-run block to persist preview via `_persist_scan_run` + `DryRunResult`.
+- Added `GET /api/scan-runs/{run_id}/dry-run-preview` endpoint to `scan_runs.py`.
+- Added `DryRunPreviewItem` schema to `schemas.py`.
+
+### Files Created
+| File | Description |
+|------|-------------|
+| backend/shared/metrics.py | Prometheus metric definitions |
+| backend/pyproject.toml | Ruff linter configuration |
+| backend/alembic/versions/008_credential_fallback.py | Migration for credential priority + fallback |
+| backend/alembic/versions/009_dry_run_results.py | Migration for dry-run results table |
+
+### Files Modified
+| File | Change |
+|------|--------|
+| backend/requirements.txt | Added prometheus-client |
+| backend/main.py | MetricsMiddleware + /metrics endpoint |
+| backend/shared/auth.py | /metrics added to auth-exempt paths |
+| backend/shared/metrics.py | NEW: Prometheus metric definitions |
+| backend/scan_engine.py | Prometheus instrumentation, credential fallback chains, dry-run persistence |
+| backend/database.py | Credential priority + UniqueConstraint, DryRunResult model |
+| backend/schemas.py | priority field, BulkDeviceMetaUpdate, DryRunPreviewItem |
+| backend/routers/credentials.py | Duplicate check on (ip, priority) |
+| backend/routers/topology.py | PATCH /api/topology/devices/bulk-meta |
+| backend/routers/scan_runs.py | GET /api/scan-runs/{run_id}/dry-run-preview |
+| .github/workflows/ci.yml | Expanded CI/CD pipeline |
+| frontend/src/components/settings/CredentialsTab.jsx | Priority field in form |
+| frontend/src/components/settings/DevicesTab.jsx | Selection + bulk actions |
+
+---
+
+## v1.6.0 — Phase 1: Foundation (Architecture Improvements)
+
+**Type:** MINOR (new infrastructure + structural improvements)
+
+### Changes
+
+#### 1.1 Structured Error Responses
+- Created `backend/shared/errors.py` with `api_error()` helper for consistent error format.
+- Added `ErrorDetail`, `APIError` Pydantic schemas to `schemas.py`.
+- Added global exception handlers in `main.py` for both `Exception` and `HTTPException`.
+- Updated all 11 router files (14 total endpoints) from raw `HTTPException` to structured `api_error()`.
+- Updated `shared/auth.py` to return structured error on auth failure.
+- Updated `frontend/src/api.js` `_checkOk` to parse `body.error.message`.
+
+#### 1.2 Comprehensive Input Validation
+- Added 8 Pydantic models: `ScanSettingsUpdate/Out`, `DnsSettingsUpdate/Out`, `DiscoveryRangesUpdate/Out`, `MapSettingsUpdate/Out`.
+- Rewrote `scan_settings.py` to use Pydantic request bodies instead of `request.json()`.
+- Updated `map_bg.py` to use `MapSettingsUpdate` body model.
+
+#### 1.3 Consolidate Settings into Database
+- Created Alembic migration `005_settings_to_db.py` for new setting keys.
+- Rewrote `shared/file_settings.py` from file-based (portalocker) to DB-backed settings via `AppSetting` table.
+- Updated `database.py` `_seed_default_settings()` with 7 new setting keys.
+- Removed `portalocker` dependency from `requirements.txt`.
+
+#### 1.4 Test Infrastructure Setup
+- Created `backend/tests/` package with `conftest.py` (SQLite in-memory, auth fixtures, DB override).
+- Created `test_health.py`, `test_credentials.py` (7 CRUD tests), `test_schemas.py` (7 validation tests).
+- Added `pytest`, `pytest-asyncio`, `httpx` to `requirements.txt`.
+- Added `pytest.ini` for test configuration.
+- Made `database.py` engine creation backend-aware (PostgreSQL pool params vs SQLite).
+
+### Files Created
+| File | Description |
+|------|-------------|
+| backend/shared/errors.py | Structured error response helper |
+| backend/alembic/versions/005_settings_to_db.py | Migration for DB-backed settings |
+| backend/tests/__init__.py | Test package init |
+| backend/tests/conftest.py | Shared test fixtures |
+| backend/tests/test_health.py | Health endpoint test |
+| backend/tests/test_credentials.py | Credential CRUD tests |
+| backend/tests/test_schemas.py | Schema validation tests |
+| backend/pytest.ini | Pytest configuration |
+
+### Files Modified
+| File | Change |
+|------|--------|
+| backend/schemas.py | Added ErrorDetail, APIError, 8 settings schemas |
+| backend/main.py | Structured exception handlers |
+| backend/database.py | Conditional engine params, 7 new seed settings |
+| backend/shared/auth.py | Structured error format |
+| backend/shared/file_settings.py | Complete rewrite to DB-backed |
+| backend/requirements.txt | Removed portalocker, added test deps |
+| backend/routers/*.py | All 11 router files updated to api_error() |
+| frontend/src/api.js | Parse structured error messages |
+
+---
 
 ## v1.5.0 — Rack Class Section Reorder
 

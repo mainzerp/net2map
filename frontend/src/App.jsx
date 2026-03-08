@@ -1,4 +1,5 @@
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { getStoredToken, getStoredUser, logout } from "./api.js";
 
 const NAV = [
   { to: "/",         label: "Dashboard" },
@@ -9,6 +10,19 @@ const NAV = [
 
 export default function App() {
   const location = useLocation();
+  const navigate = useNavigate();
+
+  // Redirect to login if no token stored (skip if on login page)
+  if (location.pathname !== "/login" && !getStoredToken()) {
+    return <Navigate to="/login" replace />;
+  }
+
+  const user = getStoredUser();
+
+  function handleLogout() {
+    logout();
+    navigate("/login", { replace: true });
+  }
 
   return (
     <>
@@ -75,6 +89,30 @@ export default function App() {
             );
           })}
         </nav>
+
+        {/* User info + Logout */}
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+          {user && (
+            <span style={{ color: "#64748b", fontSize: 11, fontFamily: "'Inter', system-ui, sans-serif" }}>
+              {user.username} ({user.role})
+            </span>
+          )}
+          <button
+            onClick={handleLogout}
+            style={{
+              padding: "4px 10px",
+              borderRadius: 5,
+              border: "1px solid #334155",
+              backgroundColor: "transparent",
+              color: "#94a3b8",
+              fontSize: 11,
+              cursor: "pointer",
+              fontFamily: "'Inter', system-ui, sans-serif",
+            }}
+          >
+            Logout
+          </button>
+        </div>
       </header>
 
       {/* Page content */}

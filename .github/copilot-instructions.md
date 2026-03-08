@@ -1,7 +1,6 @@
-## Project Context
-**Important:** Project-specific details, context, and guidelines are documented in `.github/instructions/project-definition.md`. Always consult this file first when working on a project to understand the tech stack, conventions, and any project-specific requirements.
-
 ## Capabilities
+
+Project definition: .github/instructions/project-definition.md
 
 ### What This Agent Does
 - Receives and interprets user requests
@@ -26,21 +25,22 @@
 ```
 User Request
     ↓
-SUBAGENT #1: Research & Spec
+SUBAGENT #1: Research & Analysis
     - Reads files, analyzes codebase
-    - Creates spec/analysis doc in docs/SubAgent/[NAME_ANALYSIS].md
-    - Returns summary, findings and spec path
+    - Creates analysis doc in docs/SubAgent/[NAME_ANALYSIS].md
+    - Returns summary and analysis file path
     ↓
 ORCHESTRATOR: Receive results, spawn next subagent
     ↓
 SUBAGENT #2: Planning
-    - Reads spec from Research subagent in docs/SubAgent/[NAME_ANALYSIS].md
+    - Reads analysis from Research subagent in docs/SubAgent/[NAME_ANALYSIS].md
     - Creates detailed step-by-step implementation plan with Checklist in docs/SubAgent/[NAME_PLAN].md
-    - Returns plan doc path
+    - Returns summary and plan file path
     ↓
-ORCHESTRATOR: Calls only plan_review tool to render the plan and confirm or request changes, no ask_user yet
+ORCHESTRATOR: Calls only plan_review tool to render the plan.
     - If changes requested: re-spawn SUBAGENT #2 with feedback
-    - If approved: spawn implementation subagent
+    - If approved: YOU MUST spawn SUBAGENT #3. DO NOT implement yourself.
+    - The orchestrator NEVER writes code, edits files, or runs implementation commands.
     ↓
 SUBAGENT #3: Implementation (FRESH context)
     - Reads the approved plan in docs/SubAgent/[NAME_PLAN].md
@@ -55,25 +55,25 @@ ORCHESTRATOR: Confirm with user via ask_user tool
 ### Research Subagent Template
 ```
 Research [topic]. Analyze relevant files in the codebase.
-Create a spec/analysis doc at: docs/SubAgent/[NAME_ANALYSIS].md
-NEVER call plan_review or ask_user tool - just return the spec file path.
-Return: summary of findings and the spec file path.
+Create a analysis doc at: docs/SubAgent/[NAME_ANALYSIS].md
+**NEVER** call plan_review or ask_user tool
+Return: summary of findings and the analysis file path.
 ```
 
 ### Planning Subagent Template
 ```
-Read the spec at: docs/SubAgent/[NAME_ANALYSIS].md
+Read the analysis at: docs/SubAgent/[NAME_ANALYSIS].md
 Create a detailed step-by-step implementation plan in docs/SubAgent/[NAME_PLAN].md.
-NEVER call plan_review or ask_user tool - just return the plan file path.
-Return: the plan document path.
+**NEVER** call plan_review or ask_user tool.
+Return: summary of the plan and the plan file path.
 ```
 
 ### Implementation Subagent Template
 ```
 Read the approved plan at: docs/SubAgent/[NAME_PLAN].md
 Implement according to the plan.
-NEVER call plan_review or ask_user tool - just return a summary of changes made and any relevant details.
-Return: summary of changes made.
+**NEVER** call plan_review or ask_user tool
+Return: Summary of changes made and any relevant details.
 ```
 
 ## Important Rules
@@ -84,8 +84,9 @@ Return: summary of changes made.
 4. **NEVER include `agentName`** in runSubagent calls - always use default subagent
 5. **runSubagent requires BOTH** `description` (3-5 words) and `prompt` (detailed instructions)
 6. **Gather context first** - don't make assumptions about the codebase
-7. **Update VERSION.md** when implementing new features - track feature additions in the changelog
-8. **Do not use emojis** anywhere (messages, docs, comments, commit messages, generated output, or source code including string literals/UI text) unless explicitly requested.
+7. **The ORCHESTRATOR never implements** - it never writes code, edits files, or executes implementation steps directly. ALL implementation goes through SUBAGENT #3, no exceptions, even for trivial changes.
+8. **Update VERSION.md** when implementing new features - track feature additions in the changelog
+9. **Do not use emojis** anywhere (messages, docs, comments, commit messages, generated output, or source code including string literals/UI text) unless explicitly requested.
 
 ## Version Tracking
 

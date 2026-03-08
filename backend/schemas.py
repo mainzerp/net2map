@@ -1,7 +1,71 @@
 """Pydantic schemas for request / response validation."""
 from datetime import datetime
 from typing import Literal, Optional, List
-from pydantic import BaseModel, field_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, field_serializer, model_validator
+
+
+# ─── Structured Error Response ────────────────────────────────────────────────
+
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
+    field: Optional[str] = None
+    details: Optional[List[dict]] = None
+
+class APIError(BaseModel):
+    error: ErrorDetail
+
+
+# ─── Auth & Users ─────────────────────────────────────────────────────────────
+
+UserRole = Literal["admin", "operator", "viewer"]
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    role: str
+    username: str
+
+class UserCreate(BaseModel):
+    username: str
+    email: str = ""
+    password: str
+    role: UserRole = "viewer"
+
+class UserUpdate(BaseModel):
+    email: Optional[str] = None
+    password: Optional[str] = None
+    role: Optional[UserRole] = None
+    is_active: Optional[bool] = None
+
+class UserOut(BaseModel):
+    id: int
+    username: str
+    email: str
+    role: str
+    is_active: bool
+    created_at: datetime
+    class Config:
+        from_attributes = True
+
+
+# ─── Audit Log ────────────────────────────────────────────────────────────────
+
+class AuditLogOut(BaseModel):
+    id: int
+    timestamp: datetime
+    username: str
+    action: str
+    resource: str
+    resource_id: str
+    details: Optional[dict] = None
+    class Config:
+        from_attributes = True
+
 
 # ─── Enums ────────────────────────────────────────────────────────────────────
 SnmpVersion   = Literal["v2c", "v3"]
@@ -158,6 +222,7 @@ class SnmpProfileOut(SnmpProfileBase):
 class CredentialBase(BaseModel):
     label:        str
     ip:           str
+    priority:     int  = 0
     snmp_port:    int  = 161
     location:     str  = ""
     enabled:      bool = True
@@ -186,6 +251,7 @@ class CredentialCreate(CredentialBase):
 class CredentialUpdate(BaseModel):
     label:             Optional[str]           = None
     ip:                Optional[str]           = None
+    priority:          Optional[int]           = None
     snmp_port:         Optional[int]           = None
     location:          Optional[str]           = None
     enabled:           Optional[bool]          = None
@@ -271,6 +337,8 @@ class DeviceBase(BaseModel):
 
 
 class DeviceOut(DeviceBase):
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
     id:            int
     last_seen:     datetime
     ports:         List[PortOut] = []
@@ -279,9 +347,6 @@ class DeviceOut(DeviceBase):
     model_id:      Optional[int] = None
     ports_per_row: Optional[int] = None   # resolved from switch_model
     total_ports:   Optional[int] = None   # port cutoff: ports beyond this index are hidden
-
-    class Config:
-        from_attributes = True
 
 
 class RackPositionUpdate(BaseModel):
@@ -294,6 +359,8 @@ class DevicePositionUpdate(BaseModel):
 
 
 class DeviceMetaUpdate(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     location: Optional[str] = None
     sys_name: Optional[str] = None
     vendor:   Optional[str] = None
@@ -302,6 +369,13 @@ class DeviceMetaUpdate(BaseModel):
     class_id: Optional[int] = None
     model_id: Optional[int] = None
     ignored:  Optional[bool] = None
+
+
+class BulkDeviceMetaUpdate(BaseModel):
+    device_ids: List[int]
+    ignored: Optional[bool] = None
+    rack_id: Optional[int] = None
+    class_id: Optional[int] = None
 
 
 # ─── Topology Link ────────────────────────────────────────────────────────────
@@ -314,7 +388,7 @@ class TopologyLinkOut(BaseModel):
     remote_sys:    str
     remote_port:   str
     speed_label:   str
-    discovered_at: datetime
+    discovered_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -372,6 +446,16 @@ class ScanResult(BaseModel):
     run_id:             Optional[int] = None
 
 
+class DryRunPreviewItem(BaseModel):
+    ip: str
+    sys_name: str = ""
+    sys_descr: str = ""
+    vendor: str = "generic"
+    location: str = ""
+    matched_profile_id: Optional[int] = None
+    already_exists: bool = False
+
+
 class BulkImportRequest(BaseModel):
     format: Literal["json", "csv"] = "json"
     data: str
@@ -407,3 +491,67 @@ class GlobalConfigExportOut(BaseModel):
 class GlobalConfigImportRequest(BaseModel):
     data: str
     dry_run: bool = True
+
+
+# ─── Scan Settings ────────────────────────────────────────────────────────────
+
+class ScanSettingsUpdate(BaseModel):
+    max_workers: Optional[int] = None
+    snmp_timeout: Optional[int] = None
+    snmp_retries: Optional[int] = None
+
+    @model_validator(mode="after")
+    def _clamp_values(self):
+        if self.max_workers is not None:
+            self.max_workers = max(1, min(128, self.max_workers))
+        if self.snmp_timeout is not None:
+            self.snmp_timeout = max(1, min(30, self.snmp_timeout))
+        if self.snmp_retries is not None:
+            self.snmp_retries = max(0, min(10, self.snmp_retries))
+        return self
+
+class ScanSettingsOut(BaseModel):
+    max_workers: int
+    snmp_timeout: int
+    snmp_retries: int
+
+
+# ─── DNS Settings ─────────────────────────────────────────────────────────────
+
+class DnsSettingsUpdate(BaseModel):
+    servers: List[str] = []
+
+class DnsSettingsOut(BaseModel):
+    servers: List[str]
+
+
+# ─── Discovery Ranges ────────────────────────────────────────────────────────
+
+class DiscoveryRangesUpdate(BaseModel):
+    ranges: List[str] = []
+
+class DiscoveryRangesOut(BaseModel):
+    ranges: List[str]
+
+
+# ─── Map Settings ─────────────────────────────────────────────────────────────
+
+class MapSettingsUpdate(BaseModel):
+    opacity: Optional[float] = None
+    scale: Optional[float] = None
+    bg_color: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _clamp_and_sanitize(self):
+        if self.opacity is not None:
+            self.opacity = max(0.0, min(1.0, self.opacity))
+        if self.scale is not None:
+            self.scale = max(0.1, min(10.0, self.scale))
+        if self.bg_color is not None:
+            self.bg_color = self.bg_color[:20]
+        return self
+
+class MapSettingsOut(BaseModel):
+    opacity: float
+    scale: float
+    bg_color: str

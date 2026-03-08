@@ -22,6 +22,7 @@ EXPOSE 8000
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# workers=1 is required: LOG_BUFFER is in-process memory (see main.py)
+# Default 1 worker. With Redis configured (REDIS_URL), multiple workers are safe.
+# Override via UVICORN_WORKERS env var (e.g. UVICORN_WORKERS=2).
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--loop", "asyncio", "--timeout-keep-alive", "75"]
+CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-1} --loop asyncio --timeout-keep-alive 75"]

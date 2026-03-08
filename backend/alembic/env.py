@@ -13,9 +13,9 @@ config = context.config
 
 # Override sqlalchemy.url from environment so the same ini works in Docker
 # and in local bare-Python dev.
-# Docker sets DATABASE_URL=sqlite:////data/netmap.db (four slashes = absolute path).
-# Bare-Python fallback is sqlite:///./netmap.db (relative to cwd).
-_db_url = os.environ.get("DATABASE_URL", "sqlite:////data/netmap.db")
+_db_url = os.environ.get("DATABASE_URL")
+if not _db_url:
+    raise RuntimeError("DATABASE_URL environment variable is required for migrations")
 config.set_main_option("sqlalchemy.url", _db_url)
 
 # ---------------------------------------------------------------------------

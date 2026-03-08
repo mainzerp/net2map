@@ -6,12 +6,14 @@ import DashboardPage from "./pages/DashboardPage.jsx";
 import MapPage from "./pages/MapPage.jsx";
 import LogsPage from "./pages/LogsPage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
+import LoginPage from "./pages/LoginPage.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <BrowserRouter>
       <Routes>
+        <Route path="login" element={<LoginPage />} />
         <Route element={<App />}>
           <Route index element={<ErrorBoundary><DashboardPage /></ErrorBoundary>} />
           <Route path="map" element={<ErrorBoundary><MapPage /></ErrorBoundary>} />

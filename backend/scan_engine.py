@@ -10,24 +10,86 @@ import subprocess
 import threading
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
 from database import (
     AppSetting, Credential, Device, Port, SessionLocal, SnmpProfile,
-    ScanRun, ScanRunSwitchMetric, SwitchClass, TopologyLink,
+    ScanRun, ScanRunSwitchMetric, SwitchClass, TopologyLink, DryRunResult,
 )
 from schemas import ScanResult, ScanSwitchMetric
 from shared.file_settings import _read_dns_settings, _read_scan_settings
-from shared.state import SCAN_JOBS, SCAN_JOBS_LOCK, _log_event
+from shared.state import _log_event, set_scan_job, get_scan_job, update_scan_job, can_dispatch_scan
 from snmp_scanner import (
     LldpNeighbor, SwitchData, auto_layout, extract_model,
     is_virtual, scan_switch, speed_label,
 )
+from shared.crypto import decrypt
+from shared.metrics import SCAN_ACTIVE, SCAN_DURATION, SCAN_TOTAL, DEVICE_COUNT, PORT_COUNT
 
 log = logging.getLogger(__name__)
+
+
+def _broadcast_progress(scanned: int, total: int, latest_ip: str, success: bool, job_id: str) -> None:
+    """Broadcast scan progress to WebSocket clients (fire-and-forget)."""
+    try:
+        from routers.ws import broadcast_scan_update_sync
+        broadcast_scan_update_sync({
+            "type": "scan_progress",
+            "job_id": job_id,
+            "scanned": scanned,
+            "total": total,
+            "latest_ip": latest_ip,
+            "success": success,
+        })
+    except Exception:
+        pass
+
+
+def _broadcast_scan_complete(job_id: str, status: str, found: int, links: int, duration_ms: int) -> None:
+    """Broadcast scan completion to WebSocket clients."""
+    try:
+        from routers.ws import broadcast_scan_update_sync
+        broadcast_scan_update_sync({
+            "type": "scan_complete",
+            "job_id": job_id,
+            "status": status,
+            "found": found,
+            "links": links,
+            "duration_ms": duration_ms,
+        })
+    except Exception:
+        pass
+
+
+# ── Shared background event loop ──────────────────────────────────────────────
+# A single asyncio event loop running in a daemon thread, reused across all
+# scan invocations.  Avoids the overhead of creating/destroying a loop per scan.
+
+_bg_loop: Optional[asyncio.AbstractEventLoop] = None
+_bg_loop_lock = threading.Lock()
+
+
+def _get_bg_loop() -> asyncio.AbstractEventLoop:
+    """Return the shared background event loop, starting it lazily."""
+    global _bg_loop
+    if _bg_loop is not None and _bg_loop.is_running():
+        return _bg_loop
+    with _bg_loop_lock:
+        if _bg_loop is not None and _bg_loop.is_running():
+            return _bg_loop
+        loop = asyncio.new_event_loop()
+
+        def _run(l: asyncio.AbstractEventLoop):
+            asyncio.set_event_loop(l)
+            l.run_forever()
+
+        t = threading.Thread(target=_run, args=(loop,), daemon=True)
+        t.start()
+        _bg_loop = loop
+        return loop
 
 
 # ─── Ping helpers ─────────────────────────────────────────────────────────────
@@ -247,7 +309,7 @@ def _resolve_host(
 
 async def _execute_scan(
     db: Session,
-    cancel_event: Optional[threading.Event] = None,
+    cancel_event=None,
     correlation_id: Optional[str] = None,
     scan_type: str = "full",
     dry_run: bool = False,
@@ -255,13 +317,24 @@ async def _execute_scan(
     corr = correlation_id or str(uuid.uuid4())
 
     scan_mode = scan_type if scan_type in {"discovery", "ports", "links", "macs", "full"} else "full"
+    SCAN_ACTIVE.inc()
 
     if scan_mode in {"ports", "links", "macs"}:
         # Only scan credentials that are already in the Device table and not ignored
         known_ips = {d.ip for d in db.query(Device.ip).filter(Device.ignored == False).all()}
-        credentials = db.query(Credential).filter(Credential.enabled == True, Credential.ip.in_(known_ips)).all()
+        credentials = db.query(Credential).filter(
+            Credential.enabled == True, Credential.ip.in_(known_ips)
+        ).order_by(Credential.ip, Credential.priority).all()
     else:
-        credentials = db.query(Credential).filter(Credential.enabled == True).all()
+        credentials = db.query(Credential).filter(
+            Credential.enabled == True
+        ).order_by(Credential.ip, Credential.priority).all()
+
+    # Group credentials by IP for fallback chain support
+    from collections import defaultdict
+    creds_by_ip: Dict[str, List] = defaultdict(list)
+    for c in credentials:
+        creds_by_ip[c.ip].append(c)
 
     scan_settings = _read_scan_settings()
     configured_max_workers = scan_settings.get("max_workers", 4)
@@ -290,9 +363,9 @@ async def _execute_scan(
                             "v3_security_level": p.v3_security_level,
                             "v3_username": p.v3_username,
                             "v3_auth_protocol": p.v3_auth_protocol,
-                            "v3_auth_password": p.v3_auth_password,
+                            "v3_auth_password": decrypt(p.v3_auth_password),
                             "v3_priv_protocol": p.v3_priv_protocol,
-                            "v3_priv_password": p.v3_priv_password,
+                            "v3_priv_password": decrypt(p.v3_priv_password),
                         }
                         for p in all_profiles
                     ]
@@ -361,6 +434,8 @@ async def _execute_scan(
             status="finished",
         )
         _log_event(logging.INFO, "scan.end", correlation_id=corr, status=result.status, scanned=0, found=0, links=0, total_duration_ms=0)
+        SCAN_ACTIVE.dec()
+        SCAN_TOTAL.labels(scan_type=scan_mode, status="finished").inc()
         return result
 
     errors: List[str] = []
@@ -371,26 +446,39 @@ async def _execute_scan(
 
     scan_targets = []
 
-    for cred in credentials:
+    def _cred_to_snmp_dict(cred):
         p = cred.profile
-        profile_key = f"profile:{p.id}" if p else f"cred:{cred.id}"
-
-        scan_targets.append({
-            "ip": cred.ip,
-            "label": cred.label,
-            "profile_key": profile_key,
+        return {
             "snmp_port": cred.snmp_port,
             "snmp_version": p.snmp_version if p else cred.snmp_version,
             "community": p.community if p else cred.community,
             "v3_security_level": p.v3_security_level if p else cred.v3_security_level,
             "v3_username": p.v3_username if p else cred.v3_username,
             "v3_auth_protocol": p.v3_auth_protocol if p else cred.v3_auth_protocol,
-            "v3_auth_password": p.v3_auth_password if p else cred.v3_auth_password,
+            "v3_auth_password": decrypt(p.v3_auth_password if p else cred.v3_auth_password),
             "v3_priv_protocol": p.v3_priv_protocol if p else cred.v3_priv_protocol,
-            "v3_priv_password": p.v3_priv_password if p else cred.v3_priv_password,
+            "v3_priv_password": decrypt(p.v3_priv_password if p else cred.v3_priv_password),
+        }
+
+    for ip, ip_creds in creds_by_ip.items():
+        primary = ip_creds[0]
+        p = primary.profile
+        profile_key = f"profile:{p.id}" if p else f"cred:{primary.id}"
+        primary_snmp = _cred_to_snmp_dict(primary)
+
+        fallback_creds = []
+        for fc in ip_creds[1:]:
+            fallback_creds.append(_cred_to_snmp_dict(fc))
+
+        scan_targets.append({
+            "ip": ip,
+            "label": primary.label,
+            "profile_key": profile_key,
+            **primary_snmp,
             "snmp_timeout": global_snmp_timeout,
             "snmp_retries": global_snmp_retries,
             "is_range_probe": False,
+            "fallback_creds": fallback_creds,
         })
 
     scan_targets.extend(range_targets)
@@ -472,29 +560,36 @@ async def _execute_scan(
                 duration_ms = int((time.perf_counter() - started) * 1000)
                 return ip, label, None, "no profile suitable", duration_ms, ping_ok, ping_rtt, is_probe, None
 
-            try:
-                data = await scan_switch(
-                    ip=ip,
-                    snmp_version=target["snmp_version"],
-                    community=target["community"],
-                    snmp_port=target["snmp_port"],
-                    snmp_timeout=target["snmp_timeout"],
-                    snmp_retries=target["snmp_retries"],
-                    v3_security_level=target["v3_security_level"],
-                    v3_username=target["v3_username"],
-                    v3_auth_protocol=target["v3_auth_protocol"],
-                    v3_auth_password=target["v3_auth_password"],
-                    v3_priv_protocol=target["v3_priv_protocol"],
-                    v3_priv_password=target["v3_priv_password"],
-                    scan_type=scan_mode,
-                )
-                duration_ms = int((time.perf_counter() - started) * 1000)
-                if data:
-                    return ip, label, data, "", duration_ms, ping_ok, ping_rtt, is_probe, None
-                return ip, label, None, "no SNMP response", duration_ms, ping_ok, ping_rtt, is_probe, None
-            except Exception as exc:
-                duration_ms = int((time.perf_counter() - started) * 1000)
-                return ip, label, None, str(exc), duration_ms, ping_ok, ping_rtt, is_probe, None
+            # Try primary credential, then fallback credentials in priority order
+            all_cred_sets = [target] + target.get("fallback_creds", [])
+            last_error = "no SNMP response"
+            for cred_set in all_cred_sets:
+                try:
+                    data = await scan_switch(
+                        ip=ip,
+                        snmp_version=cred_set["snmp_version"],
+                        community=cred_set["community"],
+                        snmp_port=cred_set.get("snmp_port", target["snmp_port"]),
+                        snmp_timeout=target["snmp_timeout"],
+                        snmp_retries=target["snmp_retries"],
+                        v3_security_level=cred_set["v3_security_level"],
+                        v3_username=cred_set["v3_username"],
+                        v3_auth_protocol=cred_set["v3_auth_protocol"],
+                        v3_auth_password=cred_set["v3_auth_password"],
+                        v3_priv_protocol=cred_set["v3_priv_protocol"],
+                        v3_priv_password=cred_set["v3_priv_password"],
+                        scan_type=scan_mode,
+                    )
+                    if data:
+                        if cred_set is not target:
+                            log.info("Credential fallback succeeded for %s", ip)
+                        duration_ms = int((time.perf_counter() - started) * 1000)
+                        return ip, label, data, "", duration_ms, ping_ok, ping_rtt, is_probe, None
+                except Exception as exc:
+                    last_error = str(exc)
+                    continue
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            return ip, label, None, last_error, duration_ms, ping_ok, ping_rtt, is_probe, None
 
     # Track per-IP matched profile for auto-credential creation
     range_matched_profile: Dict[str, Optional[int]] = {}
@@ -509,7 +604,10 @@ async def _execute_scan(
         *[_scan_target_async(t, sem) for t in scan_targets],
         return_exceptions=False,
     )
+    total_targets = len(scan_targets)
+    scanned_count = 0
     for ip, label, data, error_msg, duration_ms, ping_ok, ping_rtt, is_probe, matched_profile_id in results:
+        scanned_count += 1
         ping_by_ip[ip] = (ping_ok, ping_rtt)
         if data:
             switch_data[ip] = data
@@ -560,6 +658,9 @@ async def _execute_scan(
                     success=False, error=error_msg or "no SNMP response"
                 ))
 
+        # Broadcast progress to WebSocket clients
+        _broadcast_progress(scanned_count, total_targets, ip, bool(data), corr)
+
     total_duration_ms = int((time.perf_counter() - scan_started) * 1000)
     switch_metrics.sort(key=lambda m: m.duration_ms, reverse=True)
     status = "cancelled" if (cancel_event and cancel_event.is_set()) else "finished"
@@ -605,6 +706,20 @@ async def _execute_scan(
         )
         # Attach preview as extra data outside the Pydantic model
         result.__dict__["_dry_run_preview"] = dry_run_preview
+
+        # Persist dry-run result to database
+        run_id = _persist_scan_run(db, result, [], [])
+        dry_run_record = DryRunResult(
+            scan_run_id=run_id,
+            preview_json=dry_run_preview,
+        )
+        db.add(dry_run_record)
+        db.commit()
+        result.run_id = run_id
+
+        SCAN_ACTIVE.dec()
+        SCAN_DURATION.labels(scan_type=scan_mode).observe(total_duration_ms / 1000)
+        SCAN_TOTAL.labels(scan_type=scan_mode, status="dry_run").inc()
         return result
 
     # Auto-create credentials for IPs discovered via range probes
@@ -670,7 +785,7 @@ async def _execute_scan(
                 device.location  = sw.location  or device.location
                 device.model     = model        or device.model
                 device.vendor    = vendor
-                device.last_seen = datetime.utcnow()
+                device.last_seen = datetime.now(timezone.utc)
             elif ping_ok:
                 device.sys_name = device.sys_name or ip
                 device.sys_descr = device.sys_descr or "Discovered by ping (SNMP unavailable)"
@@ -678,7 +793,7 @@ async def _execute_scan(
                 device.model = model or device.model
             device.ping_status = ping_status
             device.ping_rtt_ms = ping_rtt if ping_ok else 0
-            device.last_ping = datetime.utcnow()
+            device.last_ping = datetime.now(timezone.utc)
             if cred:
                 target_rack_id = cred.rack_id if cred.rack_id is not None else device.rack_id
                 target_class_id = cred.class_id if cred.class_id is not None else device.class_id
@@ -724,7 +839,7 @@ async def _execute_scan(
                 location=sw.location if sw else "",
                 ping_status=ping_status,
                 ping_rtt_ms=ping_rtt if ping_ok else 0,
-                last_ping=datetime.utcnow(),
+                last_ping=datetime.now(timezone.utc),
                 map_x=x,
                 map_y=y,
                 rack_id=rack_id,
@@ -737,144 +852,200 @@ async def _execute_scan(
     update_ports = scan_mode in {"full", "ports", "macs"}
     update_links = scan_mode in {"full", "ports", "links"}
     if update_ports:
-        dns_cache: Dict[str, str] = {}
-        dns_servers = _read_dns_settings().get("servers", [])
+        if cancel_event and cancel_event.is_set():
+            status = "cancelled"
+        else:
+            try:
+                dns_cache: Dict[str, str] = {}
+                dns_servers = _read_dns_settings().get("servers", [])
 
-        for ip, sw in switch_data.items():
-            device = db.query(Device).filter(Device.ip == ip).first()
-            if not device:
-                continue
-            if device.ignored:
-                continue
+                global_arp: dict = {}
+                for sw_data in switch_data.values():
+                    for mac, arp_ip in sw_data.arp_table.items():
+                        if mac and arp_ip:
+                            global_arp.setdefault(mac, arp_ip)
 
-            peers_by_ifindex: Dict[int, List[tuple[str, str, str]]] = {}
-            for mac, peer_ip in sw.arp_table.items():
-                ifindex = sw.mac_ifindex.get(mac)
-                if ifindex is None or not peer_ip:
-                    continue
-                peer_host = _resolve_host(peer_ip, dns_cache, dns_servers, correlation_id=corr)
-                peers_by_ifindex.setdefault(ifindex, []).append((mac, peer_ip, peer_host))
+                log.info("Global ARP table: %d entries merged from %d devices", len(global_arp), len(switch_data))
 
-            db.query(Port).filter(Port.device_id == device.id).delete()
-            port_rows = []
-            for iface in sw.interfaces.values():
-                if is_virtual(iface.descr, sw.vendor):
-                    continue
+                for ip, sw in switch_data.items():
+                    if cancel_event and cancel_event.is_set():
+                        db.rollback()
+                        status = "cancelled"
+                        break
 
-                peer_mac = ""
-                peer_ip = ""
-                peer_host = ""
-                endpoint_entries: List[tuple[str, str, str]] = []
-                if iface.index in peers_by_ifindex and peers_by_ifindex[iface.index]:
-                    endpoint_entries = sorted(peers_by_ifindex[iface.index], key=lambda x: x[1])
-                    peer_mac, peer_ip, peer_host = endpoint_entries[0]
+                    device = db.query(Device).filter(Device.ip == ip).first()
+                    if not device:
+                        continue
+                    if device.ignored:
+                        continue
 
-                endpoint_details = [
-                    {"mac": mac, "ip": ip_addr, "host": host}
-                    for mac, ip_addr, host in endpoint_entries
-                ]
+                    peers_by_ifindex: Dict[int, List[tuple[str, str, str]]] = {}
+                    for mac, peer_ip in sw.arp_table.items():
+                        ifindex = sw.mac_ifindex.get(mac)
+                        if ifindex is None or not peer_ip:
+                            continue
+                        peer_host = _resolve_host(peer_ip, dns_cache, dns_servers, correlation_id=corr)
+                        peers_by_ifindex.setdefault(ifindex, []).append((mac, peer_ip, peer_host))
 
-                port_rows.append({
-                    "device_id": device.id,
-                    "if_index": iface.index,
-                    "if_descr": iface.descr,
-                    "if_alias": iface.alias,
-                    "speed_mbps": iface.speed_mbps,
-                    "oper_status": iface.oper_status,
-                    "peer_mac": peer_mac,
-                    "peer_ip": peer_ip,
-                    "peer_host": peer_host,
-                    "endpoint_count": len(endpoint_details),
-                    "endpoint_details_json": json.dumps(endpoint_details),
-                })
-            if port_rows:
-                db.bulk_insert_mappings(Port, port_rows)
-            db.commit()
+                    # MAC-only entries: FDB has MAC->ifIndex, but no ARP entry
+                    lldp_ifindexes = set()
+                    for nbr in sw.lldp_neighbors:
+                        lldp_ifindexes.add(nbr.local_port_idx)
+
+                    macs_with_arp = set(sw.arp_table.keys())
+                    for mac, ifindex in sw.mac_ifindex.items():
+                        if mac in macs_with_arp:
+                            continue
+                        if ifindex in lldp_ifindexes:
+                            continue
+                        resolved_ip = global_arp.get(mac, "")
+                        resolved_host = ""
+                        if resolved_ip:
+                            resolved_host = _resolve_host(resolved_ip, dns_cache, dns_servers, correlation_id=corr)
+                        peers_by_ifindex.setdefault(ifindex, []).append((mac, resolved_ip, resolved_host))
+
+                    db.query(Port).filter(Port.device_id == device.id).delete()
+                    port_rows = []
+                    for iface in sw.interfaces.values():
+                        if is_virtual(iface.descr, sw.vendor):
+                            continue
+
+                        peer_mac = ""
+                        peer_ip = ""
+                        peer_host = ""
+                        endpoint_entries: List[tuple[str, str, str]] = []
+                        if iface.index in peers_by_ifindex and peers_by_ifindex[iface.index]:
+                            endpoint_entries = sorted(
+                                peers_by_ifindex[iface.index],
+                                key=lambda x: (x[1] == "", x[1], x[0])
+                            )
+                            peer_mac, peer_ip, peer_host = endpoint_entries[0]
+
+                        endpoint_details = [
+                            {"mac": mac, "ip": ip_addr, "host": host}
+                            for mac, ip_addr, host in endpoint_entries
+                        ]
+
+                        port_rows.append({
+                            "device_id": device.id,
+                            "if_index": iface.index,
+                            "if_descr": iface.descr,
+                            "if_alias": iface.alias,
+                            "speed_mbps": iface.speed_mbps,
+                            "oper_status": iface.oper_status,
+                            "peer_mac": peer_mac,
+                            "peer_ip": peer_ip,
+                            "peer_host": peer_host,
+                            "endpoint_count": len(endpoint_details),
+                            "endpoint_details_json": json.dumps(endpoint_details),
+                            "vlan": iface.vlan,
+                        })
+                    if port_rows:
+                        db.bulk_insert_mappings(Port, port_rows)
+                    db.commit()
+            except Exception:
+                db.rollback()
+                log.exception("Error during port update, rolled back")
+                errors.append("Port update failed (rolled back)")
 
     if update_links:
-        scanned_ips = set(switch_data.keys())
-        db.query(TopologyLink).filter(TopologyLink.local_ip.in_(scanned_ips)).delete(
-            synchronize_session=False
-        )
+        if cancel_event and cancel_event.is_set():
+            status = "cancelled"
+        else:
+            try:
+                scanned_ips = set(switch_data.keys())
+                db.query(TopologyLink).filter(TopologyLink.local_ip.in_(scanned_ips)).delete(
+                    synchronize_session=False
+                )
 
-        # Build a lookup: remote_ip -> { norm(if_descr) -> if_descr } for
-        # resolving LLDP remote_port abbreviations to the canonical if_descr.
-        def _norm(s: str) -> str:
-            return (s or "").strip().lower()
+                # Build a lookup: remote_ip -> { norm(if_descr) -> if_descr } for
+                # resolving LLDP remote_port abbreviations to the canonical if_descr.
+                def _norm(s: str) -> str:
+                    return (s or "").strip().lower()
 
-        def _port_suffix(s: str) -> str:
-            """Return the numeric/slash suffix of a port name.
-            e.g. 'TenGigabitEthernet 1/0/1' -> '1/0/1', 'TF2/0/21' -> '2/0/21'
-            Strip all letters and leading spaces before the first digit group.
-            """
-            import re
-            m = re.search(r'(\d[\d/]+)$', (s or "").strip())
-            return m.group(1) if m else _norm(s)
+                def _port_suffix(s: str) -> str:
+                    """Return the numeric/slash suffix of a port name.
+                    e.g. 'TenGigabitEthernet 1/0/1' -> '1/0/1', 'TF2/0/21' -> '2/0/21'
+                    Strip all letters and leading spaces before the first digit group.
+                    """
+                    import re
+                    m = re.search(r'(\d[\d/]+)$', (s or "").strip())
+                    return m.group(1) if m else _norm(s)
 
-        port_lookup: Dict[str, Dict[str, str]] = {}
-        port_suffix_lookup: Dict[str, Dict[str, str]] = {}
-        for ip, sw in switch_data.items():
-            port_lookup[ip] = {}
-            for iface in sw.interfaces.values():
-                # Primary key: ifDescr (canonical)
-                port_lookup[ip][_norm(iface.descr)] = iface.descr
-                # Secondary key: ifAlias (e.g. OPNsense uses "lan" alias for "mlxen0")
-                if iface.alias:
-                    port_lookup[ip].setdefault(_norm(iface.alias), iface.descr)
-            port_suffix_lookup[ip] = {}
-            for iface in sw.interfaces.values():
-                sfx = _port_suffix(iface.descr)
-                # Only store if the suffix is unique enough (contains /)
-                if "/" in sfx:
-                    port_suffix_lookup[ip][sfx] = iface.descr
-
-        for ip, sw in switch_data.items():
-            for nbr in sw.lldp_neighbors:
-                if not nbr.remote_sys:
-                    continue
-                remote_ip = _resolve_ip(nbr.remote_sys, switch_data)
-                spd_label = speed_label(sw.interfaces[nbr.local_port_idx].speed_mbps) \
-                    if nbr.local_port_idx in sw.interfaces else "1G"
-
-                # Resolve remote_port to canonical if_descr when possible so the
-                # frontend can match LLDP port names to scanned port if_descr values.
-                resolved_remote_port = nbr.remote_port
-                if remote_ip and remote_ip in port_lookup:
-                    # First try exact normalized match
-                    canonical = port_lookup[remote_ip].get(_norm(nbr.remote_port))
-                    if canonical:
-                        resolved_remote_port = canonical
-                    else:
-                        # Fallback: match by numeric suffix (e.g. TF2/0/21 -> TFGigabitEthernet 2/0/21)
-                        sfx = _port_suffix(nbr.remote_port)
+                port_lookup: Dict[str, Dict[str, str]] = {}
+                port_suffix_lookup: Dict[str, Dict[str, str]] = {}
+                for ip, sw in switch_data.items():
+                    port_lookup[ip] = {}
+                    for iface in sw.interfaces.values():
+                        # Primary key: ifDescr (canonical)
+                        port_lookup[ip][_norm(iface.descr)] = iface.descr
+                        # Secondary key: ifAlias (e.g. OPNsense uses "lan" alias for "mlxen0")
+                        if iface.alias:
+                            port_lookup[ip].setdefault(_norm(iface.alias), iface.descr)
+                    port_suffix_lookup[ip] = {}
+                    for iface in sw.interfaces.values():
+                        sfx = _port_suffix(iface.descr)
+                        # Only store if the suffix is unique enough (contains /)
                         if "/" in sfx:
-                            canonical = port_suffix_lookup[remote_ip].get(sfx)
-                            if canonical:
-                                resolved_remote_port = canonical
-                    if resolved_remote_port == nbr.remote_port:
-                        # Fallback: lldpd on FreeBSD/OPNsense formats portDesc as
-                        # "Description (ifname)" – extract the ifname from parens.
-                        m = re.search(r'\(([^)]+)\)\s*$', nbr.remote_port)
-                        if m:
-                            canonical = port_lookup[remote_ip].get(_norm(m.group(1)))
-                            if canonical:
-                                resolved_remote_port = canonical
-                    if resolved_remote_port == nbr.remote_port and nbr.remote_port_id:
-                        # Last resort: try the raw lldpRemPortId (e.g. 'mlxen0' on OPNsense)
-                        canonical = port_lookup[remote_ip].get(_norm(nbr.remote_port_id))
-                        if canonical:
-                            resolved_remote_port = canonical
+                            port_suffix_lookup[ip][sfx] = iface.descr
 
-                db.add(TopologyLink(
-                    local_ip=ip,
-                    local_port=nbr.local_port_desc or str(nbr.local_port_idx),
-                    remote_ip=remote_ip,
-                    remote_sys=nbr.remote_sys,
-                    remote_port=resolved_remote_port,
-                    speed_label=spd_label,
-                ))
-                link_count += 1
-        db.commit()
+                for ip, sw in switch_data.items():
+                    if cancel_event and cancel_event.is_set():
+                        db.rollback()
+                        status = "cancelled"
+                        break
+
+                    for nbr in sw.lldp_neighbors:
+                        if not nbr.remote_sys:
+                            continue
+                        remote_ip = _resolve_ip(nbr.remote_sys, switch_data)
+                        spd_label = speed_label(sw.interfaces[nbr.local_port_idx].speed_mbps) \
+                            if nbr.local_port_idx in sw.interfaces else "1G"
+
+                        # Resolve remote_port to canonical if_descr when possible so the
+                        # frontend can match LLDP port names to scanned port if_descr values.
+                        resolved_remote_port = nbr.remote_port
+                        if remote_ip and remote_ip in port_lookup:
+                            # First try exact normalized match
+                            canonical = port_lookup[remote_ip].get(_norm(nbr.remote_port))
+                            if canonical:
+                                resolved_remote_port = canonical
+                            else:
+                                # Fallback: match by numeric suffix (e.g. TF2/0/21 -> TFGigabitEthernet 2/0/21)
+                                sfx = _port_suffix(nbr.remote_port)
+                                if "/" in sfx:
+                                    canonical = port_suffix_lookup[remote_ip].get(sfx)
+                                    if canonical:
+                                        resolved_remote_port = canonical
+                            if resolved_remote_port == nbr.remote_port:
+                                # Fallback: lldpd on FreeBSD/OPNsense formats portDesc as
+                                # "Description (ifname)" -- extract the ifname from parens.
+                                m = re.search(r'\(([^)]+)\)\s*$', nbr.remote_port)
+                                if m:
+                                    canonical = port_lookup[remote_ip].get(_norm(m.group(1)))
+                                    if canonical:
+                                        resolved_remote_port = canonical
+                            if resolved_remote_port == nbr.remote_port and nbr.remote_port_id:
+                                # Last resort: try the raw lldpRemPortId (e.g. 'mlxen0' on OPNsense)
+                                canonical = port_lookup[remote_ip].get(_norm(nbr.remote_port_id))
+                                if canonical:
+                                    resolved_remote_port = canonical
+
+                        db.add(TopologyLink(
+                            local_ip=ip,
+                            local_port=nbr.local_port_desc or str(nbr.local_port_idx),
+                            remote_ip=remote_ip,
+                            remote_sys=nbr.remote_sys,
+                            remote_port=resolved_remote_port,
+                            speed_label=spd_label,
+                        ))
+                        link_count += 1
+                else:
+                    db.commit()
+            except Exception:
+                db.rollback()
+                log.exception("Error during link update, rolled back")
+                errors.append("Link update failed (rolled back)")
 
     result = ScanResult(
         scanned=len(credentials),
@@ -913,23 +1084,31 @@ async def _execute_scan(
         errors=len(result.errors),
         run_id=result.run_id,
     )
+    _broadcast_scan_complete(corr, result.status, result.found, result.links, result.total_duration_ms)
+
+    # Update Prometheus metrics
+    SCAN_ACTIVE.dec()
+    SCAN_DURATION.labels(scan_type=scan_mode).observe(total_duration_ms / 1000)
+    SCAN_TOTAL.labels(scan_type=scan_mode, status=status).inc()
+    DEVICE_COUNT.set(db.query(Device).count())
+    PORT_COUNT.labels(status="up").set(db.query(Port).filter(Port.oper_status == 1).count())
+    PORT_COUNT.labels(status="down").set(db.query(Port).filter(Port.oper_status == 2).count())
+
     return result
 
 
 # ─── Job management ───────────────────────────────────────────────────────────
 
-def _run_scan_job(job_id: str, cancel_event: threading.Event, dry_run: bool = False):
+def _run_scan_job(job_id: str, cancel_event: threading.Event, dry_run: bool = False, scan_type: str = "full"):
     db = SessionLocal()
     result = None
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(
-                _execute_scan(db, cancel_event, correlation_id=job_id, dry_run=dry_run)
-            )
-        finally:
-            loop.close()
+        loop = _get_bg_loop()
+        future = asyncio.run_coroutine_threadsafe(
+            _execute_scan(db, cancel_event, correlation_id=job_id, dry_run=dry_run, scan_type=scan_type),
+            loop,
+        )
+        result = future.result()  # blocks until done
     except Exception as exc:
         result = ScanResult(
             scanned=0,
@@ -951,41 +1130,112 @@ def _run_scan_job(job_id: str, cancel_event: threading.Event, dry_run: bool = Fa
     if dry_run:
         result_dict["preview"] = result.__dict__.get("_dry_run_preview", [])
 
-    with SCAN_JOBS_LOCK:
-        state = SCAN_JOBS.get(job_id)
-        if not state:
-            return
-        state["finished_at"] = datetime.utcnow().isoformat()
-        state["result"] = result_dict
-        state["status"] = result.status if result.status in {"finished", "cancelled", "dry_run"} else "failed"
+    update_scan_job(job_id, {
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "result": result_dict,
+        "status": result.status if result.status in {"finished", "cancelled", "dry_run"} else "failed",
+    })
 
 
-def _start_job(dry_run: bool = False) -> dict:
+def _start_job(dry_run: bool = False, scan_type: str = "full") -> dict:
     job_id = str(uuid.uuid4())
+
+    # Try Celery dispatch if Redis is available
+    from shared.redis_client import get_redis
+    if get_redis():
+        try:
+            from tasks import run_scan_task
+            set_scan_job(job_id, {
+                "id": job_id,
+                "status": "queued",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "finished_at": None,
+                "result": None,
+                "cancel_requested": False,
+            })
+            run_scan_task.delay(job_id, dry_run, scan_type)
+            _log_event(logging.INFO, "scan.job.start", correlation_id=job_id, job_id=job_id, dry_run=dry_run, backend="celery")
+            return {"job_id": job_id, "status": "queued"}
+        except Exception as exc:
+            _log_event(logging.WARNING, "scan.job.celery_fallback", error=str(exc))
+
+    # Thread-based fallback
     cancel_event = threading.Event()
+    set_scan_job(job_id, {
+        "id": job_id,
+        "status": "running",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": None,
+        "result": None,
+        "cancel_requested": False,
+        "cancel_event": cancel_event,
+        "thread": None,
+    })
 
-    with SCAN_JOBS_LOCK:
-        SCAN_JOBS[job_id] = {
-            "id": job_id,
-            "status": "running",
-            "started_at": datetime.utcnow().isoformat(),
-            "finished_at": None,
-            "result": None,
-            "cancel_requested": False,
-            "cancel_event": cancel_event,
-            "thread": None,
-        }
-
-    t = threading.Thread(target=_run_scan_job, args=(job_id, cancel_event, dry_run), daemon=True)
-    with SCAN_JOBS_LOCK:
-        SCAN_JOBS[job_id]["thread"] = t
+    t = threading.Thread(target=_run_scan_job, args=(job_id, cancel_event, dry_run, scan_type), daemon=True)
+    update_scan_job(job_id, {"thread": t})
     t.start()
-    _log_event(logging.INFO, "scan.job.start", correlation_id=job_id, job_id=job_id, dry_run=dry_run)
+    _log_event(logging.INFO, "scan.job.start", correlation_id=job_id, job_id=job_id, dry_run=dry_run, backend="thread")
 
     return {"job_id": job_id, "status": "running"}
 
 
 # ─── Background scheduler ─────────────────────────────────────────────────────
+
+# Wake event: set this to interrupt the scheduler sleep early (e.g. when
+# settings change and the scheduler should re-evaluate intervals immediately).
+_scheduler_wake = threading.Event()
+
+
+def _dispatch_scheduled_scan(scan_type: str):
+    """Run a scheduled scan, using Celery if available, otherwise directly.
+
+    Checks the distributed scan lock before dispatching: if a higher-priority
+    scan is running or waiting, this scan is skipped.
+    """
+    if not can_dispatch_scan(scan_type):
+        _log_event(logging.INFO, "scheduler.%s.skipped" % scan_type,
+                   reason="higher_priority_scan_active_or_waiting")
+        return
+
+    from shared.redis_client import get_redis
+    if get_redis():
+        try:
+            from tasks import run_scan_task
+            job_id = str(uuid.uuid4())
+            set_scan_job(job_id, {
+                "id": job_id,
+                "status": "queued",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "finished_at": None,
+                "result": None,
+                "cancel_requested": False,
+            })
+            run_scan_task.delay(job_id, False, scan_type)
+            _log_event(logging.INFO, "scheduler.%s.dispatched" % scan_type, backend="celery")
+            return
+        except Exception as exc:
+            _log_event(logging.WARNING, "scheduler.celery_fallback", error=str(exc), scan_type=scan_type)
+
+    # Direct execution fallback (also needs lock)
+    from shared.state import acquire_scan_lock, release_scan_lock
+    if not acquire_scan_lock(scan_type, timeout=60):
+        _log_event(logging.INFO, "scheduler.%s.lock_timeout" % scan_type)
+        return
+
+    db = SessionLocal()
+    loop = _get_bg_loop()
+    try:
+        future = asyncio.run_coroutine_threadsafe(
+            _execute_scan(db, scan_type=scan_type), loop,
+        )
+        future.result()
+    except Exception as e:
+        _log_event(logging.ERROR, "scheduler.%s.error" % scan_type, error=str(e))
+    finally:
+        release_scan_lock(scan_type)
+        db.close()
+
 
 def _background_scheduler():
     """Runs discovery, link and MAC scans periodically based on app settings."""
@@ -994,7 +1244,8 @@ def _background_scheduler():
     last_macs = 0
 
     while True:
-        time.sleep(5)
+        _scheduler_wake.wait(timeout=5)
+        _scheduler_wake.clear()
 
         try:
             # Use a short-lived session only for reading settings
@@ -1014,47 +1265,23 @@ def _background_scheduler():
 
             now = time.time()
 
-            # Run discovery scan – fresh session per scan
-            if discovery_interval > 0 and (now - last_discovery) >= discovery_interval:
-                _log_event(logging.INFO, "scheduler.discovery.start")
-                db = SessionLocal()
-                loop = asyncio.new_event_loop()
-                try:
-                    loop.run_until_complete(_execute_scan(db, scan_type="discovery"))
-                except Exception as e:
-                    _log_event(logging.ERROR, "scheduler.discovery.error", error=str(e))
-                finally:
-                    db.close()
-                    loop.close()
-                    last_discovery = time.time()
-
-            # Run link/neighbor scan – fresh session per scan
-            if links_interval > 0 and (now - last_links) >= links_interval:
-                _log_event(logging.INFO, "scheduler.links.start")
-                db = SessionLocal()
-                loop = asyncio.new_event_loop()
-                try:
-                    loop.run_until_complete(_execute_scan(db, scan_type="links"))
-                except Exception as e:
-                    _log_event(logging.ERROR, "scheduler.links.error", error=str(e))
-                finally:
-                    db.close()
-                    loop.close()
-                    last_links = time.time()
-
-            # Run MAC-at-port scan – fresh session per scan
+            # Dispatch in priority order: macs > links > discovery
+            # Higher-priority scans are dispatched first so they register
+            # in the waiting set before lower-priority checks run.
             if macs_interval > 0 and (now - last_macs) >= macs_interval:
                 _log_event(logging.INFO, "scheduler.macs.start")
-                db = SessionLocal()
-                loop = asyncio.new_event_loop()
-                try:
-                    loop.run_until_complete(_execute_scan(db, scan_type="macs"))
-                except Exception as e:
-                    _log_event(logging.ERROR, "scheduler.macs.error", error=str(e))
-                finally:
-                    db.close()
-                    loop.close()
-                    last_macs = time.time()
+                _dispatch_scheduled_scan("macs")
+                last_macs = time.time()
+
+            if links_interval > 0 and (now - last_links) >= links_interval:
+                _log_event(logging.INFO, "scheduler.links.start")
+                _dispatch_scheduled_scan("links")
+                last_links = time.time()
+
+            if discovery_interval > 0 and (now - last_discovery) >= discovery_interval:
+                _log_event(logging.INFO, "scheduler.discovery.start")
+                _dispatch_scheduled_scan("discovery")
+                last_discovery = time.time()
 
         except Exception as e:
             _log_event(logging.ERROR, "scheduler.error", error=str(e))

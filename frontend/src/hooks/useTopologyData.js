@@ -1,49 +1,22 @@
-import { useState, useRef, useCallback, useEffect } from "react";
-import { api } from "../api.js";
+import { useEffect, useRef } from "react";
+import useNetmapStore from "../store.js";
 
 export function useTopologyData() {
-  const [topology, setTopology] = useState({ nodes: [], links: [], racks: [], classes: [] });
-  const [selectedRack, setSelectedRack] = useState(null);
-  const [loadError, setLoadError] = useState(null);
+  const topology = useNetmapStore(s => s.topology);
+  const selectedRack = useNetmapStore(s => s.selectedRack);
+  const setSelectedRack = useNetmapStore(s => s.setSelectedRack);
+  const loadError = useNetmapStore(s => s.loadError);
+  const loadTopology = useNetmapStore(s => s.loadTopology);
+  const restoreSelectedRack = useNetmapStore(s => s.restoreSelectedRack);
   const initializedRef = useRef(false);
 
-  const loadTopology = useCallback(() => {
+  useEffect(() => {
+    if (initializedRef.current) return;
     initializedRef.current = true;
-    api.get("/api/topology").then(data => {
-      setTopology(data);
-    }).catch(e => setLoadError(e.message || "Failed to load topology"));
-  }, []);
-
-  // Initial load + sessionStorage selectedRack restore
-  useEffect(() => {
-    api.get("/api/topology").then(data => {
-      setTopology(data);
-      const savedId = sessionStorage.getItem("selectedRackId");
-      if (savedId) {
-        const id = Number(savedId);
-        const rack = (data.racks || []).find(r => r.id === id);
-        if (rack) {
-          const devices = data.nodes.filter(n => n.rack_id === id);
-          setSelectedRack({
-            id: rack.id,
-            label: rack.label,
-            location: rack.location || `${rack.label}${rack.room ? " / " + rack.room : ""}`,
-            devices,
-          });
-        } else {
-          sessionStorage.removeItem("selectedRackId");
-        }
-      }
-      initializedRef.current = true;
-    }).catch(e => setLoadError(e.message || "Failed to load topology"));
-  }, []);
-
-  // Persist selectedRack to sessionStorage (skip before initial load completes)
-  useEffect(() => {
-    if (!initializedRef.current) return;
-    if (selectedRack) sessionStorage.setItem("selectedRackId", String(selectedRack.id));
-    else sessionStorage.removeItem("selectedRackId");
-  }, [selectedRack]);
+    loadTopology().then(data => {
+      if (data) restoreSelectedRack(data);
+    });
+  }, [loadTopology, restoreSelectedRack]);
 
   return { topology, selectedRack, setSelectedRack, loadError, loadTopology };
 }

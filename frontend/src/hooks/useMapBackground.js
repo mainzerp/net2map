@@ -1,41 +1,22 @@
-import { useState, useCallback, useEffect } from "react";
-import { api, API } from "../api.js";
+import { useEffect, useRef } from "react";
+import useNetmapStore from "../store.js";
 
 export function useMapBackground() {
-  const [mapBgUrl, setMapBgUrl] = useState(null);
-  const [mapBgNat, setMapBgNat] = useState(null);
-  const [mapBgOpacity, setMapBgOpacity] = useState(0.3);
-  const [mapBgScale, setMapBgScale] = useState(1);
-  const [mapBgColor, setMapBgColor] = useState("#020817");
+  const mapBgUrl = useNetmapStore(s => s.bgUrl);
+  const mapBgNat = useNetmapStore(s => s.bgNat);
+  const mapBgOpacity = useNetmapStore(s => s.bgOpacity);
+  const mapBgScale = useNetmapStore(s => s.bgScale);
+  const mapBgColor = useNetmapStore(s => s.bgColor);
+  const loadMapBg = useNetmapStore(s => s.loadMapBackground);
+  const loadMapSettings = useNetmapStore(s => s.loadMapSettings);
+  const initializedRef = useRef(false);
 
-  const loadMapBg = useCallback(() => {
-    fetch(`${API}/api/map-background`, { method: "GET" })
-      .then(r => {
-        if (r.ok) {
-          const url = `${API}/api/map-background?v=${Date.now()}`;
-          setMapBgUrl(url);
-          const img = new Image();
-          img.onload = () => setMapBgNat({ w: img.naturalWidth, h: img.naturalHeight });
-          img.onerror = () => setMapBgNat(null);
-          img.src = url;
-        } else {
-          setMapBgUrl(null);
-          setMapBgNat(null);
-        }
-      })
-      .catch(() => { setMapBgUrl(null); setMapBgNat(null); });
-  }, []);
-
-  const loadMapSettings = useCallback(() => {
-    api.get("/api/map-settings").then(s => {
-      if (s.opacity != null) setMapBgOpacity(s.opacity);
-      if (s.scale != null) setMapBgScale(s.scale);
-      if (s.bg_color != null) setMapBgColor(s.bg_color);
-    }).catch(console.error);
-  }, []);
-
-  useEffect(() => { loadMapBg(); }, []);
-  useEffect(() => { loadMapSettings(); }, []);
+  useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+    loadMapBg();
+    loadMapSettings();
+  }, [loadMapBg, loadMapSettings]);
 
   return { mapBgUrl, mapBgNat, mapBgOpacity, mapBgScale, mapBgColor };
 }

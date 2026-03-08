@@ -4,9 +4,29 @@
 // Set VITE_API_URL=http://host:8000 to point to a remote backend
 export const API = (import.meta.env.VITE_API_URL ?? "").replace(/\/+$/, "");
 
-// Optional Bearer token for authenticated backends (set VITE_API_TOKEN to enable)
-const TOKEN = import.meta.env.VITE_API_TOKEN || "";
-const _authHeader = TOKEN ? { Authorization: "Bearer " + TOKEN } : {};
+// Auth token from localStorage (JWT or legacy token)
+function _getAuthHeader() {
+  const token = localStorage.getItem("auth_token") || import.meta.env.VITE_API_TOKEN || "";
+  return token ? { Authorization: "Bearer " + token } : {};
+}
+
+export function login(token, user) {
+  localStorage.setItem("auth_token", token);
+  localStorage.setItem("auth_user", JSON.stringify(user));
+}
+
+export function logout() {
+  localStorage.removeItem("auth_token");
+  localStorage.removeItem("auth_user");
+}
+
+export function getStoredUser() {
+  try { return JSON.parse(localStorage.getItem("auth_user") || "null"); } catch { return null; }
+}
+
+export function getStoredToken() {
+  return localStorage.getItem("auth_token") || "";
+}
 
 // ETag cache for GET requests that support conditional fetching
 const _etagCache = {};
@@ -14,7 +34,12 @@ const _etagCache = {};
 async function _checkOk(r) {
   if (!r.ok) {
     let msg;
-    try { msg = await r.text(); } catch { msg = r.statusText; }
+    try {
+      const body = await r.json();
+      msg = body?.error?.message || body?.detail || r.statusText;
+    } catch {
+      try { msg = await r.text(); } catch { msg = r.statusText; }
+    }
     throw new Error(`HTTP ${r.status}: ${msg}`);
   }
   return r;
@@ -22,13 +47,13 @@ async function _checkOk(r) {
 
 export const api = {
   get: async (path) => {
-    const headers = { ..._authHeader };
+    const headers = { ..._getAuthHeader() };
     if (_etagCache[path]) headers["If-None-Match"] = _etagCache[path].etag;
     const r = await fetch(`${API}${path}`, { headers });
     if (r.status === 304) {
       if (_etagCache[path]) return structuredClone(_etagCache[path].data);
       // Cache miss despite 304 - re-fetch without ETag
-      const r2 = await fetch(`${API}${path}`, { headers: { ..._authHeader } });
+      const r2 = await fetch(`${API}${path}`, { headers: { ..._getAuthHeader() } });
       await _checkOk(r2);
       const data2 = await r2.json();
       return data2;
@@ -45,10 +70,10 @@ export const api = {
     }
     return data;
   },
-  post:  (path, body) => fetch(`${API}${path}`, { method:"POST",   headers:{"Content-Type":"application/json", ..._authHeader}, body: JSON.stringify(body) }).then(_checkOk).then(r => r.json()),
-  put:   (path, body) => fetch(`${API}${path}`, { method:"PUT",    headers:{"Content-Type":"application/json", ..._authHeader}, body: JSON.stringify(body) }).then(_checkOk).then(r => r.json()),
-  patch: (path, body) => fetch(`${API}${path}`, { method:"PATCH",  headers:{"Content-Type":"application/json", ..._authHeader}, body: JSON.stringify(body) }).then(_checkOk).then(r => r.json()),
-  del:   (path)       => fetch(`${API}${path}`, { method:"DELETE", headers:{ ..._authHeader } }).then(_checkOk),
+  post:  (path, body) => fetch(`${API}${path}`, { method:"POST",   headers:{"Content-Type":"application/json", ..._getAuthHeader()}, body: JSON.stringify(body) }).then(_checkOk).then(r => r.json()),
+  put:   (path, body) => fetch(`${API}${path}`, { method:"PUT",    headers:{"Content-Type":"application/json", ..._getAuthHeader()}, body: JSON.stringify(body) }).then(_checkOk).then(r => r.json()),
+  patch: (path, body) => fetch(`${API}${path}`, { method:"PATCH",  headers:{"Content-Type":"application/json", ..._getAuthHeader()}, body: JSON.stringify(body) }).then(_checkOk).then(r => r.json()),
+  del:   (path)       => fetch(`${API}${path}`, { method:"DELETE", headers:{ ..._getAuthHeader() } }).then(_checkOk),
   /** Invalidate one or more ETag cache entries so the next GET fetches fresh data. */
   invalidate: (...paths) => { paths.forEach(p => { delete _etagCache[p]; }); },
 };
@@ -60,12 +85,15 @@ export const CABLE_COLORS = ["#f472b6","#fb923c","#a78bfa","#34d399","#fbbf24","
 // Any changes here must be reflected there too.
 export const speedLabel = mbps =>
   mbps >= 100000 ? "100G" :
+  mbps >= 40000  ? "40G"  :
+  mbps >= 25000  ? "25G"  :
   mbps >= 10000  ? "10G"  :
   mbps >= 1000   ? "1G"   :
   mbps >= 100    ? "100M" :
   mbps > 0       ? "10M"  : "?";
 
 export const speedColor = mbps =>
+  mbps >= 25000 ? "#a78bfa" :
   mbps >= 10000 ? "#22d3ee" :
   mbps >= 1000  ? "#22c55e" : "#f59e0b";
 

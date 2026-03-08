@@ -3,11 +3,22 @@ import ipaddress
 import json
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from database import AppSetting, get_db
 from scan_engine import _read_discovery_ranges
+from schemas import (
+    DiscoveryRangesOut,
+    DiscoveryRangesUpdate,
+    DnsSettingsOut,
+    DnsSettingsUpdate,
+    ScanSettingsOut,
+    ScanSettingsUpdate,
+)
+from shared.auth import require_role
+from shared.audit import log_audit
+from shared.errors import api_error
 from shared.file_settings import (
     _normalize_dns_servers,
     _read_dns_settings,
@@ -19,35 +30,33 @@ from shared.file_settings import (
 router = APIRouter()
 
 
-@router.get("/api/scan-settings")
+@router.get("/api/scan-settings", response_model=ScanSettingsOut)
 def get_scan_settings():
     """Return scan execution settings."""
     return _read_scan_settings()
 
 
-@router.put("/api/scan-settings")
-async def update_scan_settings(request: Request):
+@router.put("/api/scan-settings", response_model=ScanSettingsOut,
+            dependencies=[require_role("admin", "operator")])
+def update_scan_settings(body: ScanSettingsUpdate, request: Request):
     """Update scan execution settings."""
-    body = await request.json()
-    return _write_scan_settings(body)
+    result = _write_scan_settings(body.model_dump(exclude_none=True))
+    log_audit(request, "settings_change", "scan_settings", "", body.model_dump(exclude_none=True))
+    return result
 
 
-@router.get("/api/discovery-ranges")
+@router.get("/api/discovery-ranges", response_model=DiscoveryRangesOut)
 def get_discovery_ranges(db: Session = Depends(get_db)):
     """Return configured discovery scan ranges."""
     return {"ranges": _read_discovery_ranges(db)}
 
 
-@router.put("/api/discovery-ranges")
-async def update_discovery_ranges(request: Request, db: Session = Depends(get_db)):
+@router.put("/api/discovery-ranges", response_model=DiscoveryRangesOut,
+            dependencies=[require_role("admin", "operator")])
+def update_discovery_ranges(body: DiscoveryRangesUpdate, request: Request, db: Session = Depends(get_db)):
     """Save discovery scan ranges (CIDR notation or single IPs)."""
-    body = await request.json()
-    raw_ranges = body.get("ranges", [])
-    if not isinstance(raw_ranges, list):
-        raise HTTPException(400, "'ranges' must be an array")
-
     validated: List[str] = []
-    for entry in raw_ranges:
+    for entry in body.ranges:
         entry = str(entry).strip()
         if not entry:
             continue
@@ -59,7 +68,7 @@ async def update_discovery_ranges(request: Request, db: Session = Depends(get_db
                 ipaddress.ip_address(entry)
                 validated.append(entry)
             except ValueError:
-                raise HTTPException(400, f"Invalid IP or CIDR range: {entry}")
+                api_error(400, "INVALID_IP_RANGE", f"Invalid IP or CIDR range: {entry}", field="ranges")
 
     row = db.query(AppSetting).filter(AppSetting.key == "discovery_scan_ranges").first()
     if row:
@@ -67,17 +76,20 @@ async def update_discovery_ranges(request: Request, db: Session = Depends(get_db
     else:
         db.add(AppSetting(key="discovery_scan_ranges", value=json.dumps(validated)))
     db.commit()
+    log_audit(request, "settings_change", "discovery_ranges", "", {"ranges": validated})
     return {"ranges": validated}
 
 
-@router.get("/api/dns-settings")
+@router.get("/api/dns-settings", response_model=DnsSettingsOut)
 def get_dns_settings():
     """Return configured DNS servers for reverse lookups."""
     return _read_dns_settings()
 
 
-@router.put("/api/dns-settings")
-async def update_dns_settings(request: Request):
+@router.put("/api/dns-settings", response_model=DnsSettingsOut,
+            dependencies=[require_role("admin", "operator")])
+def update_dns_settings(body: DnsSettingsUpdate, request: Request):
     """Update configured DNS servers for reverse lookups."""
-    body = await request.json()
-    return _write_dns_settings(body.get("servers", []))
+    result = _write_dns_settings(body.servers)
+    log_audit(request, "settings_change", "dns_settings", "", {"servers": body.servers})
+    return result

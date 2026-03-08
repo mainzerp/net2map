@@ -1,11 +1,13 @@
 import { useState, useRef } from "react";
 import { speedLabel, speedColor, normPort } from "../api.js";
+import PortDetailModal from "./PortDetailModal.jsx";
 
 // ── Port ─────────────────────────────────────────────────────────────────────
 export default function Port({ port, portKey, portLinkMap, selectedLink, onPortClick, cableColor, interRack }) {
   const [hov, setHov] = useState(false);
   const ref = useRef(null);
   const [pos, setPos] = useState({ top:0, left:0 });
+  const [showModal, setShowModal] = useState(false);
 
   const active   = port.oper_status === 1;
   const spd      = port.speed_mbps;
@@ -59,10 +61,24 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
         ref={ref}
         data-pkey={portKey || ""}
         onClick={handleClick}
+        onDoubleClick={() => { if (hasDev) setShowModal(true); }}
         onMouseEnter={() => {
           if (!hasDev && !isLinked) return;
           const r = ref.current.getBoundingClientRect();
-          setPos({ top: r.bottom + 8, left: r.left + r.width / 2 });
+          const tipW = 260;  // approximate min-width + padding
+          const tipH = 120;  // approximate minimum height
+          let top = r.bottom + 8;
+          let left = r.left + r.width / 2;
+          let flipY = false;
+          // Flip above if overflowing bottom
+          if (top + tipH > window.innerHeight) {
+            top = r.top - 8;
+            flipY = true;
+          }
+          // Clamp horizontal to viewport
+          if (left - tipW / 2 < 4) left = tipW / 2 + 4;
+          else if (left + tipW / 2 > window.innerWidth - 4) left = window.innerWidth - tipW / 2 - 4;
+          setPos({ top, left, flipY });
           setHov(true);
         }}
         onMouseLeave={() => setHov(false)}
@@ -99,7 +115,7 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
       {hov && (hasDev || isLinked) && (
         <div style={{
           position:"fixed", top:pos.top, left:pos.left,
-          transform:"translateX(-50%)", zIndex:9999,
+          transform: pos.flipY ? "translate(-50%, -100%)" : "translateX(-50%)", zIndex:9999,
           backgroundColor:"#0f172a", border:`1px solid ${isLinked ? cc+"55" : "#334155"}`,
           borderRadius:8, padding:"10px 14px", minWidth:240,
           pointerEvents:"none",
@@ -145,6 +161,7 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
           )}
         </div>
       )}
+      {showModal && <PortDetailModal port={port} onClose={() => setShowModal(false)} />}
     </>
   );
 }

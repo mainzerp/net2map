@@ -1,10 +1,8 @@
-import { useState } from "react";
+import useNetmapStore from "../store.js";
 
 export function useRackOrders() {
-  const [rackOrders, setRackOrders] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("netmap_rack_orders") || "{}"); }
-    catch { return {}; }
-  });
+  const rackOrders = useNetmapStore(s => s.rackOrders);
+  const setRackOrders = useNetmapStore(s => s.setRackOrders);
 
   const reorderDevice = (deviceId, direction, groupKey, rackId, rackDevicesInput) => {
     if (rackId == null) return;
@@ -36,9 +34,7 @@ export function useRackOrders() {
     const newIdx = direction === "up" ? idx - 1 : idx + 1;
     if (newIdx < 0 || newIdx >= sorted.length) return;
     [sorted[idx], sorted[newIdx]] = [sorted[newIdx], sorted[idx]];
-    const newOrders = { ...rackOrders, [storeKey]: sorted };
-    setRackOrders(newOrders);
-    localStorage.setItem("netmap_rack_orders", JSON.stringify(newOrders));
+    setRackOrders(prev => ({ ...prev, [storeKey]: sorted }));
   };
 
   const reorderClassSection = (sectionKey, direction, rackId, currentSectionKeysInput) => {
@@ -62,9 +58,7 @@ export function useRackOrders() {
     if (newIdx < 0 || newIdx >= merged.length) return;
 
     [merged[idx], merged[newIdx]] = [merged[newIdx], merged[idx]];
-    const newOrders = { ...rackOrders, [storeKey]: merged };
-    setRackOrders(newOrders);
-    localStorage.setItem("netmap_rack_orders", JSON.stringify(newOrders));
+    setRackOrders(prev => ({ ...prev, [storeKey]: merged }));
   };
 
   return { rackOrders, reorderDevice, reorderClassSection };

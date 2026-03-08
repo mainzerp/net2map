@@ -4,9 +4,10 @@ from typing import List
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from database import ScanRun, get_db
+from database import DryRunResult, ScanRun, get_db
 from scan_engine import _safe_json_list
 from schemas import ScanRunOut, ScanSwitchMetric
+from shared.errors import api_error
 
 router = APIRouter()
 
@@ -56,3 +57,11 @@ def list_scan_runs(limit: int = 20, db: Session = Depends(get_db)):
             switch_metrics=metrics,
         ))
     return out
+
+
+@router.get("/api/scan-runs/{run_id}/dry-run-preview")
+def get_dry_run_preview(run_id: int, db: Session = Depends(get_db)):
+    record = db.query(DryRunResult).filter(DryRunResult.scan_run_id == run_id).first()
+    if not record:
+        api_error(404, "DRY_RUN_NOT_FOUND", "Dry-run preview not found")
+    return record.preview_json

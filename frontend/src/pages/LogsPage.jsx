@@ -1,25 +1,27 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api.js";
 
 export default function LogsPage() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [levelFilter, setLevelFilter] = useState("");
   const [eventFilter, setEventFilter] = useState("");
   const [textFilter, setTextFilter] = useState("");
   const [limit, setLimit] = useState(300);
 
-  const loadLogs = () => {
+  const loadLogs = useCallback(() => {
     const query = `/api/logs?limit=${Math.max(1, Math.min(2000, Number(limit) || 300))}${levelFilter ? `&level=${levelFilter}` : ""}${eventFilter ? `&event_prefix=${encodeURIComponent(eventFilter)}` : ""}${textFilter ? `&q=${encodeURIComponent(textFilter)}` : ""}`;
     api.get(query)
-      .then(d => setLogs(Array.isArray(d) ? d : []))
+      .then(d => { setLogs(Array.isArray(d) ? d : []); setFetchError(null); })
+      .catch(e => setFetchError(e.message || "Failed to load logs"))
       .finally(() => setLoading(false));
-  };
+  }, [levelFilter, eventFilter, textFilter, limit]);
 
   useEffect(() => {
     loadLogs();
-  }, [levelFilter, eventFilter, textFilter, limit]);
+  }, [loadLogs]);
 
   useEffect(() => {
     if (!autoRefresh) return;
@@ -27,7 +29,7 @@ export default function LogsPage() {
       if (document.visibilityState === "visible") loadLogs();
     }, 5000);
     return () => clearInterval(t);
-  }, [autoRefresh, levelFilter, eventFilter, textFilter, limit]);
+  }, [autoRefresh, loadLogs]);
 
   const rows = useMemo(() => [...logs].reverse(), [logs]);
 
@@ -122,6 +124,8 @@ export default function LogsPage() {
         <div style={{maxHeight:"calc(100vh - 190px)",overflowY:"auto"}}>
           {loading ? (
             <div style={{padding:14,color:"#475569",fontSize:11}}>Loading...</div>
+          ) : fetchError ? (
+            <div style={{padding:14,color:"#f87171",fontSize:11}}>Error: {fetchError}</div>
           ) : rows.length === 0 ? (
             <div style={{padding:14,color:"#475569",fontSize:11}}>No log entries</div>
           ) : rows.map((entry, idx) => {

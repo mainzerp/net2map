@@ -5,6 +5,8 @@ function DevicesTabContent() {
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [togglingId, setTogglingId] = useState(null);
+  const [selected, setSelected] = useState(new Set());
+  const [bulkLoading, setBulkLoading] = useState(false);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -23,6 +25,28 @@ function DevicesTabContent() {
       refresh();
     } finally {
       setTogglingId(null);
+    }
+  };
+
+  const toggleSelect = (id) => setSelected(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
+  const selectAll = (devs) => setSelected(new Set(devs.map(d => d.id)));
+
+  const bulkIgnore = async (ignored) => {
+    setBulkLoading(true);
+    try {
+      await api.patch("/api/topology/devices/bulk-meta", {
+        device_ids: [...selected], ignored
+      });
+      setSelected(new Set());
+      api.invalidate("/api/topology", "/api/devices");
+      refresh();
+    } finally {
+      setBulkLoading(false);
     }
   };
 
@@ -48,6 +72,12 @@ function DevicesTabContent() {
     const isToggling = togglingId === dev.id;
     return (
       <div key={dev.id} style={{ ...INPUT_ROW, opacity: dev.ignored ? 0.45 : 1 }}>
+        <input
+          type="checkbox"
+          checked={selected.has(dev.id)}
+          onChange={() => toggleSelect(dev.id)}
+          style={{ flexShrink: 0, cursor: "pointer", accentColor: "#22d3ee" }}
+        />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ color: dev.ignored ? "#475569" : "#e2e8f0", fontWeight: 600, fontSize: 12 }}>
@@ -106,10 +136,53 @@ function DevicesTabContent() {
         They remain in the database and can be re-enabled at any time.
       </div>
 
+      {/* Bulk action toolbar */}
+      {selected.size > 0 && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "8px 12px", backgroundColor: "#0c1a2e",
+          border: "1px solid #1e3a5f", borderRadius: 8,
+        }}>
+          <span style={{ color: "#7dd3fc", fontSize: 11, fontWeight: 600 }}>{selected.size} selected</span>
+          <button
+            disabled={bulkLoading}
+            onClick={() => bulkIgnore(true)}
+            style={{
+              backgroundColor: "#1a0a0a", border: "1px solid #7f1d1d", color: "#f87171",
+              borderRadius: 5, padding: "4px 10px", cursor: bulkLoading ? "not-allowed" : "pointer",
+              fontFamily: "'Inter', system-ui, sans-serif", fontSize: 10, fontWeight: 600,
+            }}
+          >Ignore Selected</button>
+          <button
+            disabled={bulkLoading}
+            onClick={() => bulkIgnore(false)}
+            style={{
+              backgroundColor: "#083344", border: "1px solid #164e63", color: "#22d3ee",
+              borderRadius: 5, padding: "4px 10px", cursor: bulkLoading ? "not-allowed" : "pointer",
+              fontFamily: "'Inter', system-ui, sans-serif", fontSize: 10, fontWeight: 600,
+            }}
+          >Re-enable Selected</button>
+          <button
+            onClick={() => setSelected(new Set())}
+            style={{
+              background: "none", border: "1px solid #1e293b", color: "#64748b",
+              borderRadius: 5, padding: "4px 10px", cursor: "pointer",
+              fontFamily: "'Inter', system-ui, sans-serif", fontSize: 10,
+            }}
+          >Clear</button>
+        </div>
+      )}
+
       {/* Active devices */}
       <div style={{ backgroundColor: "#0a0e18", border: "1px solid #1e293b", borderRadius: 8, overflow: "hidden" }}>
-        <div style={{ padding: "8px 12px", borderBottom: "1px solid #0f172a", color: "#94a3b8", fontSize: 10, fontWeight: 700, letterSpacing: 1 }}>
-          ACTIVE DEVICES ({active.length})
+        <div style={{ padding: "8px 12px", borderBottom: "1px solid #0f172a", color: "#94a3b8", fontSize: 10, fontWeight: 700, letterSpacing: 1, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span>ACTIVE DEVICES ({active.length})</span>
+          {active.length > 0 && (
+            <button
+              onClick={() => selectAll(active)}
+              style={{ background: "none", border: "1px solid #1e293b", color: "#64748b", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontSize: 9, fontFamily: "'Inter', system-ui, sans-serif" }}
+            >Select All</button>
+          )}
         </div>
         {active.length === 0 ? (
           <div style={{ padding: "10px 12px", color: "#475569", fontSize: 11 }}>All devices are currently ignored</div>
@@ -121,8 +194,14 @@ function DevicesTabContent() {
       {/* Ignored devices */}
       {ignored.length > 0 && (
         <div style={{ backgroundColor: "#0a0e18", border: "1px solid #3f1515", borderRadius: 8, overflow: "hidden" }}>
-          <div style={{ padding: "8px 12px", borderBottom: "1px solid #3f1515", color: "#f87171", fontSize: 10, fontWeight: 700, letterSpacing: 1 }}>
-            IGNORED DEVICES ({ignored.length})
+          <div style={{ padding: "8px 12px", borderBottom: "1px solid #3f1515", color: "#f87171", fontSize: 10, fontWeight: 700, letterSpacing: 1, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span>IGNORED DEVICES ({ignored.length})</span>
+            {ignored.length > 0 && (
+              <button
+                onClick={() => selectAll(ignored)}
+                style={{ background: "none", border: "1px solid #3f1515", color: "#f87171", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontSize: 9, fontFamily: "'Inter', system-ui, sans-serif" }}
+              >Select All</button>
+            )}
           </div>
           {ignored.map(renderDevice)}
         </div>

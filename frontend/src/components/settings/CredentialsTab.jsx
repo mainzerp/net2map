@@ -3,7 +3,7 @@ import { api, AUTH_PROTOCOLS, PRIV_PROTOCOLS, SEC_LEVELS } from "../../api.js";
 
 // ── CredentialsTabContent ──────────────────────────────────────────────────
 const EMPTY_FORM = {
-  label:"", ip:"", snmp_port:161, location:"", enabled:true,
+  label:"", ip:"", priority:0, snmp_port:161, location:"", enabled:true,
   profile_id: null,
   rack_id: null,
   class_id: null,
@@ -68,7 +68,7 @@ function CredentialsTabContent({ profiles, newEntryTrigger }) {
 
   const startEdit = (c) => {
     setForm({
-      label:c.label, ip:c.ip, snmp_port:c.snmp_port, location:c.location, enabled:c.enabled,
+      label:c.label, ip:c.ip, priority:c.priority ?? 0, snmp_port:c.snmp_port, location:c.location, enabled:c.enabled,
       profile_id: c.profile_id ?? null,
       rack_id: c.rack_id ?? null,
       class_id: c.class_id ?? null,
@@ -154,6 +154,9 @@ function CredentialsTabContent({ profiles, newEntryTrigger }) {
               </label>
               <label style={lbl()}>IP address *
                 <input required value={F.ip} onChange={e=>set("ip",e.target.value)} placeholder="192.168.1.1" style={{...inp,marginTop:3}}/>
+              </label>
+              <label style={lbl()}>Priority (0 = primary)
+                <input type="number" min="0" value={F.priority} onChange={e=>set("priority",+e.target.value)} style={{...inp,marginTop:3}}/>
               </label>
               <label style={lbl()}>SNMP Port
                 <input type="number" value={F.snmp_port} onChange={e=>set("snmp_port",+e.target.value)} style={{...inp,marginTop:3}}/>
