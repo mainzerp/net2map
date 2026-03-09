@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { api, API } from "../api.js";
+import { api, API, _getAuthHeader } from "../api.js";
 import SnmpProfilesTabContent from "../components/settings/SnmpProfilesTab.jsx";
 import CredentialsTabContent  from "../components/settings/CredentialsTab.jsx";
 import RacksTabContent        from "../components/settings/RacksTab.jsx";
@@ -32,8 +32,8 @@ export default function SettingsPage() {
 
   // Load map background
   useEffect(() => {
-    api.get("/api/map-background")
-      .then(() => setMapBgUrl(`${API}/api/map-background?v=${Date.now()}`))
+    fetch(`${API}/api/map-background`)
+      .then(r => { if (r.ok) setMapBgUrl(`${API}/api/map-background?v=${Date.now()}`); })
       .catch(() => {});
     api.get("/api/map-settings").then(s => {
       if (s.opacity != null) setMapBgOpacity(s.opacity);
@@ -45,9 +45,17 @@ export default function SettingsPage() {
   const uploadMapBg = async (file) => {
     const fd = new FormData();
     fd.append("file", file);
-    const TOKEN = import.meta.env.VITE_API_TOKEN || "";
-    const headers = TOKEN ? { Authorization: "Bearer " + TOKEN } : {};
-    await fetch(`${API}/api/map-background`, { method: "POST", body: fd, headers });
+    const res = await fetch(`${API}/api/map-background`, {
+      method: "POST",
+      body: fd,
+      headers: _getAuthHeader(),
+    });
+    if (!res.ok) {
+      let msg;
+      try { const b = await res.json(); msg = b?.error?.message || b?.detail || res.statusText; } catch { msg = res.statusText; }
+      alert(`Upload failed: ${msg}`);
+      return;
+    }
     setMapBgUrl(`${API}/api/map-background?v=${Date.now()}`);
   };
 
@@ -173,7 +181,7 @@ export default function SettingsPage() {
                 {allNavItems.find(n=>n.tab===activeTab)?.desc}
               </div>
             </div>
-            {activeTab === "switches" && (
+            {["switches","profiles","racks","classes","models"].includes(activeTab) && (
               <button
                 onClick={() => setNewEntryTrigger(t => t + 1)}
                 style={{
@@ -189,12 +197,12 @@ export default function SettingsPage() {
 
         <div style={{flex:1, overflow:"hidden", display:"flex", width:"100%", padding:"0 32px 20px"}}>
           {activeTab === "switches" && <CredentialsTabContent profiles={profiles} newEntryTrigger={newEntryTrigger} />}
-          {activeTab === "profiles" && <SnmpProfilesTabContent profiles={profiles} loading={profLoading} onChanged={refreshProfiles} />}
+          {activeTab === "profiles" && <SnmpProfilesTabContent profiles={profiles} loading={profLoading} onChanged={refreshProfiles} newEntryTrigger={newEntryTrigger} />}
           {activeTab === "devices"  && <DevicesTabContent />}
           {activeTab === "data"     && <DataImportExportTabContent onProfilesChanged={refreshProfiles} />}
-          {activeTab === "racks"    && <RacksTabContent />}
-          {activeTab === "classes"  && <ClassesTabContent />}
-          {activeTab === "models"   && <ModelsTabContent />}
+          {activeTab === "racks"    && <RacksTabContent newEntryTrigger={newEntryTrigger} />}
+          {activeTab === "classes"  && <ClassesTabContent newEntryTrigger={newEntryTrigger} />}
+          {activeTab === "models"   && <ModelsTabContent newEntryTrigger={newEntryTrigger} />}
           {activeTab === "scan"     && <EngineTabContent />}
           {activeTab === "dns"      && <DnsSettingsTabContent />}
           {activeTab === "map"      && (

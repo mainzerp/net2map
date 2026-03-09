@@ -2,7 +2,7 @@
 
 Revision ID: 005
 Revises: 004
-Create Date: 2025-07-25
+Create Date: 2026-02-25
 
 """
 from typing import Sequence, Union
@@ -18,7 +18,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.execute("""
         INSERT INTO app_settings (key, value) VALUES
-            ('scan_max_workers',  '4'),
+            ('scan_max_workers',  '12'),
             ('scan_snmp_timeout', '3'),
             ('scan_snmp_retries', '1'),
             ('dns_servers',       '[]'),

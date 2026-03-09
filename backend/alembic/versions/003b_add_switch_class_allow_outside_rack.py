@@ -1,7 +1,7 @@
 """Add allow_outside_rack column to switch_classes.
 
-Revision ID: 003
-Revises: 002
+Revision ID: 003b
+Revises: 003
 Create Date: 2026-02-25
 
 """
@@ -10,8 +10,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "003"
-down_revision: Union[str, None] = "002"
+revision: str = "003b"
+down_revision: Union[str, None] = "003"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

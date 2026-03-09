@@ -5,7 +5,7 @@
 export const API = (import.meta.env.VITE_API_URL ?? "").replace(/\/+$/, "");
 
 // Auth token from localStorage (JWT or legacy token)
-function _getAuthHeader() {
+export function _getAuthHeader() {
   const token = localStorage.getItem("auth_token") || import.meta.env.VITE_API_TOKEN || "";
   return token ? { Authorization: "Bearer " + token } : {};
 }
@@ -33,6 +33,13 @@ const _etagCache = {};
 
 async function _checkOk(r) {
   if (!r.ok) {
+    if (r.status === 401) {
+      localStorage.removeItem("auth_token");
+      localStorage.removeItem("auth_user");
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
+    }
     let msg;
     try {
       const body = await r.json();

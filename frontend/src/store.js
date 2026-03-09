@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { api, API } from "./api.js";
+import { api, API, _getAuthHeader } from "./api.js";
 
 const useNetmapStore = create((set, get) => ({
   // ── Topology slice ───────────────────────────────────────────────────────
@@ -60,8 +60,9 @@ const useNetmapStore = create((set, get) => ({
   bgColor: "#020817",
 
   loadMapBackground: () => {
-    api.get("/api/map-background")
-      .then(() => {
+    fetch(`${API}/api/map-background`, { headers: _getAuthHeader() })
+      .then(r => {
+        if (!r.ok) throw new Error();
         const url = `${API}/api/map-background?v=${Date.now()}`;
         set({ bgUrl: url });
         const img = new Image();

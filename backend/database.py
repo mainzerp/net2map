@@ -192,8 +192,9 @@ class Port(Base):
     peer_ip      = Column(String, default="")
     peer_host    = Column(String, default="")
     endpoint_count = Column(Integer, default=0)
-    endpoint_details_json = Column(JSONB, default=[])
+    endpoint_details_json = Column(JSONB, default=list)
     vlan         = Column(Integer, default=0)
+    tagged_vlans = Column(JSONB, default=list)
 
     device = relationship("Device", back_populates="ports")
 
@@ -245,7 +246,7 @@ class AuditLog(Base):
     action      = Column(String, nullable=False)   # "create"|"update"|"delete"|"scan"|"settings_change"
     resource    = Column(String, nullable=False)    # "credential"|"snmp_profile"|"device"|...
     resource_id = Column(String, default="")
-    details     = Column(JSONB, default={})
+    details     = Column(JSONB, default=dict)
 
 
 class ScanRun(Base):
@@ -260,8 +261,8 @@ class ScanRun(Base):
     max_workers       = Column(Integer, default=1)
     total_duration_ms = Column(Integer, default=0)
     error_count       = Column(Integer, default=0)
-    devices_snapshot_json = Column(JSONB, default=[])
-    links_snapshot_json   = Column(JSONB, default=[])
+    devices_snapshot_json = Column(JSONB, default=list)
+    links_snapshot_json   = Column(JSONB, default=list)
     created_at        = Column(DateTime, server_default=func.now())
 
     switch_metrics = relationship(
@@ -291,8 +292,8 @@ class DryRunResult(Base):
     __tablename__ = "dry_run_results"
 
     id           = Column(Integer, primary_key=True, index=True)
-    scan_run_id  = Column(Integer, ForeignKey("scan_runs.id"), nullable=True)
-    preview_json = Column(JSONB, default=[])
+    scan_run_id  = Column(Integer, ForeignKey("scan_runs.id", ondelete="CASCADE"), nullable=True)
+    preview_json = Column(JSONB, default=list)
     created_at   = Column(DateTime, server_default=func.now())
 
 

@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Set
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException, Query
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ async def scan_progress_ws(ws: WebSocket, token: str = Query(default="")):
 
 
 def _authenticate_ws(token: str) -> None:
-    """Best-effort token validation for WebSocket connections.
+    """Validate token for WebSocket connections.
 
     WebSockets cannot use standard HTTP auth headers, so the token is
     passed as a query parameter. If auth is disabled on the server,
@@ -83,7 +83,7 @@ def _authenticate_ws(token: str) -> None:
         return  # auth disabled
 
     if not token:
-        return  # allow unauthenticated when no token provided (matches REST behavior)
+        raise WebSocketException(code=1008, reason="Authentication required")
 
     if legacy_token and token == legacy_token:
         return
@@ -92,4 +92,4 @@ def _authenticate_ws(token: str) -> None:
         import jwt as pyjwt
         pyjwt.decode(token, jwt_secret, algorithms=["HS256"])
     except Exception:
-        pass  # don't reject -- keep consistent with REST fallback behavior
+        raise WebSocketException(code=1008, reason="Invalid or expired token")

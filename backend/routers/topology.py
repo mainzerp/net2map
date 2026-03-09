@@ -116,7 +116,7 @@ def get_topology(request: Request, db: Session = Depends(get_db)):
 
     result  = TopologyOut(nodes=node_dicts, links=links, racks=racks, classes=classes, models=models)
     body = result.model_dump_json()
-    etag = f'"{hashlib.md5(body.encode()).hexdigest()}"'
+    etag = f'"{ hashlib.sha256(body.encode()).hexdigest()[:32]}"'
 
     _set_topo_cache({"version": topo_version, "body": body, "etag": etag})
 
@@ -193,19 +193,17 @@ def update_device_meta(
     target_class_id = payload["class_id"] if "class_id" in payload else device.class_id
 
     if target_rack_id is not None and not db.query(RackModel).filter(RackModel.id == target_rack_id).first():
-        raise HTTPException(404, "Rack not found")
+        api_error(404, "RACK_NOT_FOUND", "Rack not found")
 
     target_class = None
     if target_class_id is not None:
         target_class = db.query(SwitchClassModel).filter(SwitchClassModel.id == target_class_id).first()
         if not target_class:
-            raise HTTPException(404, "Switch class not found")
+            api_error(404, "SWITCH_CLASS_NOT_FOUND", "Switch class not found")
 
-    if target_rack_id is None:
-        if target_class_id is None:
-            raise HTTPException(400, "Unracked devices require a switch class that allows outside-rack placement")
+    if target_rack_id is None and target_class_id is not None:
         if not target_class.allow_outside_rack:
-            raise HTTPException(400, "Selected switch class requires rack assignment")
+            api_error(400, "OUTSIDE_RACK_NOT_ALLOWED", "Selected switch class requires rack assignment")
 
     if "location" in payload:
         device.location = payload["location"]
@@ -257,7 +255,7 @@ def list_all_devices(request: Request, db: Session = Depends(get_db)):
             dout.total_ports = model_tp[d.model_id]
         result.append(dout)
     body = json.dumps([d.model_dump() for d in result], default=str)
-    etag = f'"{hashlib.md5(body.encode()).hexdigest()}"'
+    etag = f'"{ hashlib.sha256(body.encode()).hexdigest()[:32]}"'
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304)
     return Response(content=body, media_type="application/json", headers={"ETag": etag, "Cache-Control": "no-cache"})

@@ -296,8 +296,9 @@ class PortOut(BaseModel):
     peer_ip:     Optional[str] = ""
     peer_host:   Optional[str] = ""
     endpoint_count:        Optional[int] = 0
-    endpoint_details_json: Optional[str] = "[]"
+    endpoint_details_json: Optional[list] = []
     vlan:        Optional[int] = 0
+    tagged_vlans: Optional[list] = []
 
     @model_validator(mode="before")
     @classmethod
@@ -309,7 +310,8 @@ class PortOut(BaseModel):
             defaults = {
                 "if_index": 0, "if_descr": "", "if_alias": "", "speed_mbps": 0,
                 "oper_status": 0, "peer_mac": "", "peer_ip": "", "peer_host": "",
-                "endpoint_count": 0, "endpoint_details_json": "[]", "vlan": 0,
+                "endpoint_count": 0, "endpoint_details_json": [], "vlan": 0,
+                "tagged_vlans": [],
             }
             for field, fallback in defaults.items():
                 if data.get(field) is None:

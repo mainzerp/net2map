@@ -3,7 +3,7 @@ import { CABLE_COLORS, VENDOR_COLOR, VENDOR_ICON, buildPortLinkMap, normPort } f
 import SwitchPanel from "../SwitchPanel.jsx";
 
 // ── RackDetail ───────────────────────────────────────────────────────────────
-function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks, deviceOrder, onReorder, onReorderClass, onClose, onRename, onMoveDevice, onUpdateDeviceMeta, rackPairColorMap, selectedLink, onLinkSelect }) {
+function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks, deviceOrder, onReorder, onReorderClass, onClose, onRename, onMoveDevice, onUpdateDeviceMeta, rackPairColorMap, selectedLink, onLinkSelect, onShowDetail }) {
   const [editing, setEditing] = useState(false);
   const [nameInput, setNameInput] = useState(rack.label);
   const canRename = typeof onRename === "function";
@@ -306,7 +306,8 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
           onPortClick={toggleLink} linkColorMap={linkColorMap}
           interRackPortKeys={interRackPortKeys}
           switchClass={d.class_id ? classMap[d.class_id] : null}
-          switchModel={d.model_id ? modelMap[d.model_id] : null}/>
+          switchModel={d.model_id ? modelMap[d.model_id] : null}
+          onShowDetail={onShowDetail}/>
       </div>
     </div>
   ));

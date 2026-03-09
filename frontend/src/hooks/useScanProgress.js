@@ -36,7 +36,9 @@ export function useScanProgress(jobId) {
           const data = JSON.parse(e.data);
           if (data.job_id && data.job_id !== jobId) return;
           setProgress(data);
-        } catch {}
+        } catch (err) {
+          console.warn("WebSocket message parse error", err);
+        }
       };
 
       ws.onclose = () => {

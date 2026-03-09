@@ -3,8 +3,7 @@ import { speedColor, normPort } from "../api.js";
 import Port from "./Port.jsx";
 
 // ── SwitchPanel ──────────────────────────────────────────────────────────────
-export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateMeta, portLinkMap, selectedLink, onPortClick, linkColorMap, switchClass, switchModel, interRackPortKeys }) {
-  const [open, setOpen] = useState(true);
+export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateMeta, portLinkMap, selectedLink, onPortClick, linkColorMap, switchClass, switchModel, interRackPortKeys, onShowDetail }) {
   const [showMove, setShowMove] = useState(false);
   const panelRef = useRef(null);
   const activePorts = device.ports.filter(p => p.oper_status === 1);
@@ -18,9 +17,9 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
       boxShadow:"none",
       transition:"all 0.15s",
     }}>
-      <div onClick={() => setOpen(!open)} style={{
+      <div style={{
         display:"flex", alignItems:"center", justifyContent:"space-between",
-        padding:"10px 14px", cursor:"pointer", userSelect:"none",
+        padding:"10px 14px", userSelect:"none",
       }}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <div
@@ -48,6 +47,18 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
           </div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <div
+            title="Switch details"
+            onClick={e => { e.stopPropagation(); onShowDetail?.(device.id); }}
+            style={{
+              fontSize:10, color:"#94a3b8",
+              padding:"3px 8px", borderRadius:4,
+              border:"1px solid #334155",
+              backgroundColor:"transparent",
+              cursor:"pointer", userSelect:"none",
+              letterSpacing:"0.03em",
+            }}
+          >Details</div>
           {onMove && otherRacks.length > 0 && (
             <div
               title="Change rack"
@@ -61,7 +72,6 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
               }}
             >{"<>"}</div>
           )}
-          <span style={{color:"#475569",fontSize:16}}>{open ? "v" : ">"}</span>
         </div>
       </div>
       {showMove && otherRacks.length > 0 && (
@@ -87,7 +97,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
         </div>
       )}
 
-      {open && device.ports.length > 0 && (
+      {device.ports.length > 0 && (
         <div style={{padding:"0 14px 12px"}}>
           {(() => {
             // Sort ports by if_index for physical layout
@@ -144,7 +154,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
           </div>
         </div>
       )}
-      {open && device.ports.length === 0 && (
+      {device.ports.length === 0 && (
         <div style={{padding:"8px 14px 12px",color:"#334155",fontSize:11}}>No ports found - run scan</div>
       )}
     </div>

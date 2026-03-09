@@ -85,6 +85,8 @@ services:
     environment:
       DATABASE_URL: "postgresql://netmap:${POSTGRES_PASSWORD:-netmap_pw}@postgres/netmap"
       REDIS_URL: "redis://redis:6379/0"
+      SECRET_TOKEN: "${SECRET_TOKEN:-changeme}"
+      JWT_SECRET: "${JWT_SECRET:-}"
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-}"
     volumes:
       - netmap-data:/data

@@ -3,6 +3,7 @@ import { api, CABLE_COLORS } from "../api.js";
 import FilterBar from "../components/map/FilterBar.jsx";
 import TopologyMap from "../components/map/TopologyMap.jsx";
 import RackDetail from "../components/map/RackDetail.jsx";
+import SwitchDetailSlideIn from "../components/SwitchDetailSlideIn.jsx";
 import { useTopologyData } from "../hooks/useTopologyData.js";
 import { useMapBackground } from "../hooks/useMapBackground.js";
 import { useRackOrders } from "../hooks/useRackOrders.js";
@@ -27,6 +28,7 @@ export default function MapPage() {
   const [filters, setFilters] = useState({ racks: null, classes: null });
   const [selectedLink, setSelectedLink] = useState(null);
   const [selectedOutsideNode, setSelectedOutsideNode] = useState(null);
+  const [detailSwitchId, setDetailSwitchId] = useState(null);
 
   // Clear selected link when switching racks
   const handleSelectRack = (rack) => {
@@ -240,6 +242,7 @@ export default function MapPage() {
               rackPairColorMap={rackPairColorMap}
               selectedLink={selectedLink}
               onLinkSelect={setSelectedLink}
+              onShowDetail={setDetailSwitchId}
               deviceOrder={selectedRackOrders}
               onReorder={(deviceId, dir, groupKey) =>
                 reorderDevice(deviceId, dir, groupKey, selectedDetail.id, selectedDetail.devices)
@@ -258,6 +261,16 @@ export default function MapPage() {
           </div>
         )}
       </div>
+      {detailSwitchId != null && (
+        <SwitchDetailSlideIn
+          deviceId={detailSwitchId}
+          nodes={topology.nodes}
+          topologyLinks={topology.links}
+          rackPairColorMap={rackPairColorMap}
+          allRacks={allRacks}
+          onClose={() => setDetailSwitchId(null)}
+        />
+      )}
     </div>
   );
 }

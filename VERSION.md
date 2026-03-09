@@ -1,5 +1,139 @@
 # Version History
 
+## v1.11.0 — Slide-In Switch Detail Panel
+
+**Type:** MINOR (new feature)
+
+### Changes
+
+#### Slide-In Switch Detail Panel
+- Switch detail view converted from separate page route to slide-in panel overlay on map.
+- [i] button color fixed for visibility (#475569 -> #94a3b8, border #1e293b -> #334155).
+- Removed /switch/:id route and deleted SwitchDetailPage.jsx.
+- Panel slides in from the right with backdrop overlay and CSS animation.
+- Sortable 9-column port table preserved from previous implementation.
+
+### Files Created
+| File | Description |
+|------|-------------|
+| frontend/src/components/SwitchDetailSlideIn.jsx | Slide-in panel component with sortable port table |
+
+### Files Modified
+| File | Change |
+|------|--------|
+| frontend/src/pages/MapPage.jsx | Added detailSwitchId state, import, render of SwitchDetailSlideIn, pass onShowDetail to RackDetail |
+| frontend/src/components/map/RackDetail.jsx | Accept and thread onShowDetail prop to SwitchPanel |
+| frontend/src/components/SwitchPanel.jsx | Replaced useNavigate with onShowDetail callback, fixed [i] button color |
+| frontend/src/main.jsx | Removed SwitchDetailPage import and /switch/:id route |
+
+### Files Deleted
+| File | Reason |
+|------|--------|
+| frontend/src/pages/SwitchDetailPage.jsx | Replaced by SwitchDetailSlideIn component |
+
+---
+
+## v1.10.0 — Switch Detail Page
+
+**Type:** MINOR (new feature, superseded by v1.11.0)
+
+### Changes
+
+#### Per-Switch Detail Page
+- New `/switch/:id` route with full port table for any switch, accessible via `[i]` button on each switch panel in the rack overview.
+- Switch header card showing name, IP, vendor, model, location, ping status, RTT, and active port count.
+- Sortable 9-column port table: port number, name, status, speed, native VLAN, tagged VLANs, MAC address, IP, hostname.
+- Loading state when topology is not yet fetched (auto-loads on direct URL navigation).
+- Not-found state with back button when device ID is invalid.
+- Dark theme matching existing style tokens.
+
+### Files Created
+| File | Description |
+|------|-------------|
+| frontend/src/pages/SwitchDetailPage.jsx | Full switch detail page with sortable port table |
+
+### Files Modified
+| File | Change |
+|------|--------|
+| frontend/src/main.jsx | Added SwitchDetailPage import and `/switch/:id` route inside App layout |
+| frontend/src/components/SwitchPanel.jsx | Added `[i]` details button with useNavigate to `/switch/:id` |
+
+---
+
+## v1.9.0 — Tagged VLAN Collection
+
+**Type:** MINOR (new feature)
+
+### Changes
+
+#### Tagged VLAN Support
+- Added SNMP collection of tagged (trunked) VLAN memberships per port using Q-BRIDGE-MIB bitmask OIDs (`dot1qVlanStaticEgressPorts` / `dot1qVlanStaticUntaggedPorts`).
+- New `snmp_bulk_walk_raw()` function for binary OCTET STRING bitmask data (preserves raw bytes instead of decoding to string).
+- New `parse_port_bitmask()` helper to convert Q-BRIDGE port bitmasks into sets of bridge port numbers.
+- Tagged VLANs computed as `EgressPorts - UntaggedPorts` per VLAN, mapped back to ifIndex via bridge port table.
+- Two bitmask walks executed in parallel via `asyncio.gather` for performance.
+- Graceful fallback: tagged VLAN walk failure does not break existing PVID collection.
+- `tagged_vlans` JSONB column added to `ports` table (Alembic migration 011).
+- `tagged_vlans` field added to `IfInfo` dataclass, `PortOut` schema, and scan engine port persistence.
+- Frontend: port tooltip and detail modal now display tagged VLANs alongside native VLAN.
+
+### Files Created
+| File | Description |
+|------|-------------|
+| backend/alembic/versions/011_add_tagged_vlans.py | Migration adding tagged_vlans JSONB column to ports |
+
+### Files Modified
+| File | Change |
+|------|--------|
+| backend/snmp_scanner.py | Added OID constants, snmp_bulk_walk_raw(), parse_port_bitmask(), tagged_vlans field on IfInfo, step 6b tagged VLAN collection |
+| backend/database.py | Added tagged_vlans JSONB column to Port model |
+| backend/scan_engine.py | Added tagged_vlans to port_rows persistence |
+| backend/schemas.py | Added tagged_vlans to PortOut schema with null coercion |
+| frontend/src/components/Port.jsx | Added tagged VLANs display in tooltip |
+| frontend/src/components/PortDetailModal.jsx | Added tagged VLANs row in detail modal |
+
+---
+
+## v1.8.1 — Alembic Migration Fixes + Map Background Upload
+
+**Type:** PATCH (bug fixes)
+
+### Changes
+
+#### Alembic Migration Chain Repair
+- Fixed duplicate revision ID "003" that caused `alembic upgrade head` to fail with "Multiple head revisions". Renumbered `003_add_switch_class_allow_outside_rack.py` to `003b` and chained it after the cascade migration.
+- Added `ondelete="CASCADE"` to `dry_run_results.scan_run_id` FK (model + new migration 010) to prevent IntegrityError when deleting scan runs.
+- Fixed `scan_max_workers` seed value from '4' to '12' in migration 005 to match database.py.
+- Added `compare_type=True` to `alembic/env.py` for better autogenerate column type detection.
+- Corrected impossible date metadata in migration docstrings (003, 004, 005).
+
+#### Map Background Upload Fix
+- Fixed auth token not being sent on upload: replaced broken `import.meta.env.VITE_API_TOKEN` with shared `_getAuthHeader()` reading from localStorage (same pattern as all other API calls).
+- Added `client_max_body_size 25m` to nginx `/api/` location block (default 1 MB was blocking uploads).
+- Added error handling: upload failures now show error detail via alert instead of silently ignoring.
+- Added `/api/map-background` to auth-exempt paths so browser-native `<image>` requests can load the background without auth headers (POST/DELETE remain role-guarded).
+
+### Files Created
+| File | Description |
+|------|-------------|
+| backend/alembic/versions/010_dry_run_cascade.py | Migration adding CASCADE to dry_run_results FK |
+
+### Files Modified
+| File | Change |
+|------|--------|
+| backend/alembic/versions/003b_add_switch_class_allow_outside_rack.py | Renamed from 003, updated revision chain |
+| backend/alembic/versions/004_jsonb_snapshot_columns.py | Updated down_revision to "003b" |
+| backend/alembic/versions/005_settings_to_db.py | Fixed scan_max_workers seed, date |
+| backend/alembic/versions/003_add_cascade_deletes.py | Fixed docstring date |
+| backend/alembic/env.py | Added compare_type=True |
+| backend/database.py | Added ondelete="CASCADE" to DryRunResult FK |
+| backend/shared/auth.py | Added /api/map-background to auth-exempt paths |
+| frontend/src/api.js | Exported _getAuthHeader() |
+| frontend/src/pages/SettingsPage.jsx | Fixed upload auth + error handling |
+| frontend/nginx.conf | Added client_max_body_size 25m |
+
+---
+
 ## v1.8.0 — Port Endpoint Data (MAC/IP on Hover)
 
 **Type:** MINOR (new feature)

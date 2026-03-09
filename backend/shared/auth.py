@@ -22,7 +22,7 @@ if not JWT_SECRET and not _LEGACY_TOKEN:
 
 _bearer = HTTPBearer(auto_error=False)
 
-_AUTH_EXEMPT_PATHS = {"/health", "/api/auth/login", "/metrics"}
+_AUTH_EXEMPT_PATHS = {"/health", "/api/auth/login", "/metrics", "/api/map-background"}
 
 
 def create_token(user_id: int, username: str, role: str) -> str:

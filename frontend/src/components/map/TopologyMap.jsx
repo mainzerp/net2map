@@ -339,22 +339,18 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
         </g>
       )}
 
-      {/* Layer 2: background image at full opacity */}
+      {/* Layer 2: background image + opacity overlay */}
       {mapBgUrl && (
         <g transform={`translate(${zoom.tx},${zoom.ty}) scale(${zoom.scale})`}
            clipPath="url(#bgClip)">
           <image href={mapBgUrl} x={bgX} y={bgY} width={bgW} height={bgH}
                  preserveAspectRatio="xMidYMid meet"
                  style={{pointerEvents:"none"}}/>
+          <rect x={bgFit.x} y={bgFit.y} width={bgFit.w} height={bgFit.h}
+                fill={mapBgColor || "#020817"}
+                opacity={1 - (mapBgOpacity ?? 0.3)}
+                style={{pointerEvents:"none"}}/>
         </g>
-      )}
-
-      {/* Layer 3: opacity overlay (dims image to blend with background color) */}
-      {mapBgUrl && (
-        <rect x={0} y={0} width="100%" height="100%"
-              fill={mapBgColor || "#020817"}
-              opacity={1 - (mapBgOpacity ?? 0.3)}
-              style={{pointerEvents:"none"}}/>
       )}
 
       <g transform={`translate(${zoom.tx},${zoom.ty}) scale(${zoom.scale})`}>

@@ -88,6 +88,10 @@ export default function PortDetailModal({ port, onClose }) {
             <span style={{ color: "#475569" }}>VLAN</span>
             <span>{port.vlan}</span>
           </>}
+          {port.tagged_vlans && port.tagged_vlans.length > 0 && <>
+            <span style={{ color: "#475569" }}>Tagged</span>
+            <span>{port.tagged_vlans.join(", ")}</span>
+          </>}
           <span style={{ color: "#475569" }}>Endpoints</span>
           <span style={{ color: "#22d3ee" }}>{parsedEndpoints.length}</span>
         </div>

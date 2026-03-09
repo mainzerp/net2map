@@ -180,12 +180,16 @@ def bulk_import(kind: str, body: BulkImportRequest, request: Request, db: Sessio
     inserted = 0
     updated = 0
 
+    _PASSWORD_MASK = "********"
+
     if not body.dry_run:
         if kind == "credentials":
             for payload in valid_rows:
                 existing = db.query(Credential).filter(Credential.ip == payload["ip"]).first()
                 if existing:
                     for key, value in payload.items():
+                        if key in ("v3_auth_password", "v3_priv_password") and value == _PASSWORD_MASK:
+                            continue
                         setattr(existing, key, value)
                     updated += 1
                 else:
@@ -196,6 +200,8 @@ def bulk_import(kind: str, body: BulkImportRequest, request: Request, db: Sessio
                 existing = db.query(SnmpProfile).filter(SnmpProfile.label == payload["label"]).first()
                 if existing:
                     for key, value in payload.items():
+                        if key in ("v3_auth_password", "v3_priv_password") and value == _PASSWORD_MASK:
+                            continue
                         setattr(existing, key, value)
                     updated += 1
                 else:

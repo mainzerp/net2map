@@ -13,13 +13,13 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
   const spd      = port.speed_mbps;
   const base     = !active ? "#1e293b" : speedColor(spd);
   const parsedEndpoints = (() => {
+    const raw = port.endpoint_details_json;
+    if (Array.isArray(raw)) return raw;
+    if (!raw) return [];
     try {
-      const raw = port.endpoint_details_json;
-      if (!raw) return [];
       const value = typeof raw === "string" ? JSON.parse(raw) : raw;
       return Array.isArray(value) ? value : [];
-    } catch (e) {
-      console.warn("Port: failed to parse JSON value", raw, e);
+    } catch {
       return [];
     }
   })();
@@ -144,6 +144,7 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
               <span style={{color:"#64748b"}}>Port</span> <span>{port.if_descr}</span>
               <span style={{color:"#475569"}}>Speed</span><span style={{color:speedColor(spd)}}>{speedLabel(spd)}</span>
               {port.vlan > 0 && <><span style={{color:"#475569"}}>VLAN</span><span>{port.vlan}</span></>}
+              {port.tagged_vlans && port.tagged_vlans.length > 0 && <><span style={{color:"#475569"}}>Tagged</span><span>{port.tagged_vlans.join(", ")}</span></>}
               {parsedEndpoints.length > 1 && (
                 <>
                   <span style={{color:"#64748b",alignSelf:"start"}}>List</span>

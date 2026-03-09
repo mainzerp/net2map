@@ -133,10 +133,13 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
                 db.add(AppSetting(**row))
                 inserted["settings"] += 1
 
+        _PASSWORD_MASK = "********"
         for row in valid_profiles:
             existing = db.query(SnmpProfile).filter(SnmpProfile.label == row["label"]).first()
             if existing:
                 for key, value in row.items():
+                    if key in ("v3_auth_password", "v3_priv_password") and value == _PASSWORD_MASK:
+                        continue
                     setattr(existing, key, value)
                 updated["profiles"] += 1
             else:
@@ -147,6 +150,8 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
             existing = db.query(Credential).filter(Credential.ip == row["ip"]).first()
             if existing:
                 for key, value in row.items():
+                    if key in ("v3_auth_password", "v3_priv_password") and value == _PASSWORD_MASK:
+                        continue
                     setattr(existing, key, value)
                 updated["credentials"] += 1
             else:

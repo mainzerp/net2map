@@ -12,10 +12,7 @@ export function useRackOrders() {
       : null;
     const devs = rackDevices.filter(d => {
       if (parsedClassId != null && Number.isFinite(parsedClassId)) return d.class_id === parsedClassId;
-      if (groupKey === "unclassified") return d.class_id == null;
-      if (groupKey === "tor") return d.class_id === 1 || (!d.class_id && d.vendor === "fs");
-      if (groupKey === "access") return d.class_id === 2 || (!d.class_id && d.vendor === "aruba_cx");
-      if (groupKey === "other") return d.class_id == null && d.vendor !== "fs" && d.vendor !== "aruba_cx";
+      if (groupKey === "unclassified" || groupKey === "other") return d.class_id == null;
       return false;
     });
     const ids = devs.map(d => String(d.id));

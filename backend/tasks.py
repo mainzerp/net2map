@@ -1,7 +1,6 @@
 """Celery tasks for NetMap background scan execution."""
 import asyncio
 import logging
-import threading
 from datetime import datetime, timezone
 
 from celery_app import celery_app

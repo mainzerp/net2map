@@ -114,6 +114,8 @@ OID_NETSNMP_ENTERPRISE = "1.3.6.1.4.1.8072"
 
 # VLAN (Q-BRIDGE-MIB)
 OID_DOT1Q_PVID = "1.3.6.1.2.1.17.7.1.4.5.1.1"  # dot1qPvid
+OID_DOT1Q_VLAN_STATIC_EGRESS   = "1.3.6.1.2.1.17.7.1.4.3.1.2"  # dot1qVlanStaticEgressPorts
+OID_DOT1Q_VLAN_STATIC_UNTAGGED = "1.3.6.1.2.1.17.7.1.4.3.1.4"  # dot1qVlanStaticUntaggedPorts
 
 # --- Vendor enterprise OIDs ---------------------------------------------------
 VENDOR_OIDS: Dict[str, str] = {
@@ -144,6 +146,7 @@ class IfInfo:
     speed_mbps:  int = 0
     oper_status: int = 2
     vlan:        int = 0
+    tagged_vlans: List[int] = field(default_factory=list)
 
 
 @dataclass
@@ -317,6 +320,81 @@ async def snmp_bulk_walk(ip: str, port: int, auth,
             except Exception:
                 pass
     return rows
+
+
+async def snmp_bulk_walk_raw(ip: str, port: int, auth,
+                             oid: str, max_rows: int = 500,
+                             timeout: int = 3,
+                             retries: int = 1,
+                             engine: Optional[SnmpEngine] = None) -> List[Tuple[str, bytes]]:
+    """Async GETBULK walk returning raw bytes values (for OCTET STRING bitmasks).
+
+    Identical to snmp_bulk_walk() except values are returned as raw bytes
+    instead of decoded strings, preserving binary bitmask data.
+    """
+    rows: List[Tuple[str, bytes]] = []
+    current_oid = oid
+    bulk_size = 25
+    own_engine = engine is None
+    if own_engine:
+        engine = SnmpEngine()
+    try:
+        while len(rows) < max_rows:
+            try:
+                error_indication, error_status, _, var_binds = await bulkCmd(
+                    engine, auth, _transport(ip, port, timeout, retries), ContextData(),
+                    0, bulk_size,
+                    ObjectType(ObjectIdentity(current_oid)),
+                )
+            except Exception as exc:
+                log.debug("snmp_bulk_walk_raw %s %s: %s", ip, oid, exc)
+                break
+
+            if error_indication or error_status:
+                break
+
+            if not var_binds:
+                break
+
+            advanced = False
+            for row in var_binds:
+                vb = row[0] if isinstance(row, (list, tuple)) else row
+                vb_oid = str(vb[0])
+                try:
+                    vb_val = bytes(vb[1])
+                except Exception:
+                    vb_val = b""
+                if not vb_oid.startswith(oid + ".") and vb_oid != oid:
+                    return rows
+                rows.append((vb_oid, vb_val))
+                current_oid = vb_oid
+                advanced = True
+                if len(rows) >= max_rows:
+                    return rows
+
+            if not advanced:
+                break
+    finally:
+        if own_engine:
+            try:
+                engine.transportDispatcher.closeDispatcher()
+            except Exception:
+                pass
+    return rows
+
+
+def parse_port_bitmask(data: bytes) -> set:
+    """Parse Q-BRIDGE OCTET STRING port bitmask into set of bridge port numbers (1-indexed).
+
+    Byte 0 bit 7 (MSB) = bridge port 1, byte 0 bit 6 = port 2, ...,
+    byte 0 bit 0 = port 8, byte 1 bit 7 = port 9, etc.
+    """
+    ports = set()
+    for byte_idx, byte_val in enumerate(data):
+        for bit in range(8):
+            if byte_val & (0x80 >> bit):
+                ports.add(byte_idx * 8 + bit + 1)
+    return ports
 
 
 # --- Vendor detection ---------------------------------------------------------
@@ -731,6 +809,54 @@ async def _scan_switch_inner(
             ifindex = bridge_to_ifindex.get(bp)
             if ifindex is not None and ifindex in sw.interfaces:
                 sw.interfaces[ifindex].vlan = pvid
+
+        # -- 6b. Tagged VLANs (dot1qVlanStaticEgressPorts / UntaggedPorts) ----
+        try:
+            egress_rows, untagged_rows = await asyncio.gather(
+                snmp_bulk_walk_raw(
+                    ip, snmp_port, auth, OID_DOT1Q_VLAN_STATIC_EGRESS,
+                    timeout=snmp_timeout, retries=snmp_retries, engine=engine,
+                ),
+                snmp_bulk_walk_raw(
+                    ip, snmp_port, auth, OID_DOT1Q_VLAN_STATIC_UNTAGGED,
+                    timeout=snmp_timeout, retries=snmp_retries, engine=engine,
+                ),
+            )
+
+            if egress_rows:
+                egress_by_vlan = {}
+                for oid_s, raw_val in egress_rows:
+                    try:
+                        vlan_id = int(_last_n(oid_s, 1)[0])
+                    except (ValueError, IndexError):
+                        continue
+                    egress_by_vlan[vlan_id] = parse_port_bitmask(raw_val)
+
+                untagged_by_vlan = {}
+                for oid_s, raw_val in untagged_rows:
+                    try:
+                        vlan_id = int(_last_n(oid_s, 1)[0])
+                    except (ValueError, IndexError):
+                        continue
+                    untagged_by_vlan[vlan_id] = parse_port_bitmask(raw_val)
+
+                tagged_by_bp = {}
+                for vlan_id, egress_ports in egress_by_vlan.items():
+                    untagged_ports = untagged_by_vlan.get(vlan_id, set())
+                    tagged_ports = egress_ports - untagged_ports
+                    for bp in tagged_ports:
+                        tagged_by_bp.setdefault(bp, []).append(vlan_id)
+
+                for bp, vlans in tagged_by_bp.items():
+                    ifindex = bridge_to_ifindex.get(bp)
+                    if ifindex is not None and ifindex in sw.interfaces:
+                        sw.interfaces[ifindex].tagged_vlans = sorted(vlans)
+
+                log.debug("Tagged VLANs for %s: %d ports have tagged VLANs",
+                          ip, len(tagged_by_bp))
+        except Exception:
+            log.debug("Tagged VLAN walk failed for %s (static egress tables not supported)", ip)
+
     except Exception:
         log.debug("VLAN walk failed for %s (Q-BRIDGE-MIB not supported)", ip)
 

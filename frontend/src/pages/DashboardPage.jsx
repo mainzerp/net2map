@@ -39,6 +39,7 @@ export default function DashboardPage() {
       clearScanJob();
       loadData(); // refresh dashboard data after scan completes
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [progress]);
 
   const handleStartScan = async () => {

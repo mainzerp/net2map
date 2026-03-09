@@ -937,8 +937,9 @@ async def _execute_scan(
                             "peer_ip": peer_ip,
                             "peer_host": peer_host,
                             "endpoint_count": len(endpoint_details),
-                            "endpoint_details_json": json.dumps(endpoint_details),
+                            "endpoint_details_json": endpoint_details,
                             "vlan": iface.vlan,
+                            "tagged_vlans": iface.tagged_vlans,
                         })
                     if port_rows:
                         db.bulk_insert_mappings(Port, port_rows)
@@ -1048,7 +1049,7 @@ async def _execute_scan(
                 errors.append("Link update failed (rolled back)")
 
     result = ScanResult(
-        scanned=len(credentials),
+        scanned=len(scan_targets),
         found=len(discovered_ips),
         links=link_count,
         errors=errors,
