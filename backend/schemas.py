@@ -298,6 +298,7 @@ class PortOut(BaseModel):
     endpoint_count:        Optional[int] = 0
     endpoint_details_json: Any = []
     vlan:        Optional[int] = 0
+    tagged_vlans: Optional[List[int]] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -310,6 +311,7 @@ class PortOut(BaseModel):
                 "if_index": 0, "if_descr": "", "if_alias": "", "speed_mbps": 0,
                 "oper_status": 0, "peer_mac": "", "peer_ip": "", "peer_host": "",
                 "endpoint_count": 0, "endpoint_details_json": [], "vlan": 0,
+                "tagged_vlans": [],
             }
             for field, fallback in defaults.items():
                 if data.get(field) is None:
@@ -318,6 +320,17 @@ class PortOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class FoundOnPort(BaseModel):
+    """Where an endpoint device was discovered (switch + port)."""
+    switch_name: str = ""
+    switch_ip: str = ""
+    port_name: str = ""
+    port_id: int = 0
+    rack_id: Optional[int] = None
+    peer_mac: str = ""
+    peer_host: str = ""
 
 
 # ─── Device ───────────────────────────────────────────────────────────────────
@@ -347,6 +360,7 @@ class DeviceOut(DeviceBase):
     model_id:      Optional[int] = None
     ports_per_row: Optional[int] = None   # resolved from switch_model
     total_ports:   Optional[int] = None   # port cutoff: ports beyond this index are hidden
+    found_on:      Optional[FoundOnPort] = None
 
 
 class RackPositionUpdate(BaseModel):

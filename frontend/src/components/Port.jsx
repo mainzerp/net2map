@@ -1,13 +1,36 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { speedLabel, speedColor, normPort } from "../api.js";
 import PortDetailModal from "./PortDetailModal.jsx";
 
 // ── Port ─────────────────────────────────────────────────────────────────────
-export default function Port({ port, portKey, portLinkMap, selectedLink, onPortClick, cableColor, interRack }) {
+export default function Port({ port, portKey, portLinkMap, selectedLink, onPortClick, cableColor, interRack, highlighted }) {
   const [hov, setHov] = useState(false);
   const ref = useRef(null);
   const [pos, setPos] = useState({ top:0, left:0 });
   const [showModal, setShowModal] = useState(false);
+
+  // Inject pulse keyframes once
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (document.getElementById("port-highlight-pulse")) return;
+    const style = document.createElement("style");
+    style.id = "port-highlight-pulse";
+    style.textContent = `
+      @keyframes portPulse {
+        0%   { box-shadow: 0 0 4px #38bdf8, 0 0 8px #38bdf8; }
+        50%  { box-shadow: 0 0 12px #38bdf8, 0 0 24px #38bdf8, 0 0 36px rgba(56,189,248,0.3); }
+        100% { box-shadow: 0 0 4px #38bdf8, 0 0 8px #38bdf8; }
+      }
+    `;
+    document.head.appendChild(style);
+  }, []);
+
+  // Scroll into view when highlighted
+  useEffect(() => {
+    if (highlighted && ref.current) {
+      ref.current.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+    }
+  }, [highlighted]);
 
   const active   = port.oper_status === 1;
   const spd      = port.speed_mbps;
@@ -47,6 +70,12 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
   const shadow = hl==="from"||hl==="to"
     ? `0 0 12px ${cc}, 0 0 4px ${cc}`
     : isLinked && !hl ? `0 0 6px ${cc}` : hov && (hasDev || isLinked) ? `0 0 7px ${base}` : active ? `0 0 2px ${base}55` : "none";
+
+  const highlightStyle = highlighted ? {
+    animation: "portPulse 1s ease-in-out infinite",
+    border: "2px solid #38bdf8",
+    zIndex: 10,
+  } : {};
 
   const handleClick = () => {
     if (!isLinked || !onPortClick) return;
@@ -92,6 +121,7 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
           boxShadow: shadow,
           display:"flex", alignItems:"center", justifyContent:"center",
           transition:"all 0.13s", position:"relative",
+          ...highlightStyle,
         }}>
           {isLinked && (
             <div style={{

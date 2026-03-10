@@ -9,7 +9,6 @@ import EngineTabContent       from "../components/settings/ScanSettingsTab.jsx";
 import DnsSettingsTabContent  from "../components/settings/DnsTab.jsx";
 import MapSettingsTabContent  from "../components/settings/MapSettingsTab.jsx";
 import DataImportExportTabContent from "../components/settings/ImportExportTab.jsx";
-import DevicesTabContent          from "../components/settings/DevicesTab.jsx";
 // ===== SettingsPage (main export) =================================================
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState("switches");
@@ -198,7 +197,6 @@ export default function SettingsPage() {
         <div style={{flex:1, overflow:"hidden", display:"flex", width:"100%", padding:"0 32px 20px"}}>
           {activeTab === "switches" && <CredentialsTabContent profiles={profiles} newEntryTrigger={newEntryTrigger} />}
           {activeTab === "profiles" && <SnmpProfilesTabContent profiles={profiles} loading={profLoading} onChanged={refreshProfiles} newEntryTrigger={newEntryTrigger} />}
-          {activeTab === "devices"  && <DevicesTabContent />}
           {activeTab === "data"     && <DataImportExportTabContent onProfilesChanged={refreshProfiles} />}
           {activeTab === "racks"    && <RacksTabContent newEntryTrigger={newEntryTrigger} />}
           {activeTab === "classes"  && <ClassesTabContent newEntryTrigger={newEntryTrigger} />}

@@ -1,5 +1,6 @@
-﻿import { useState, useMemo } from "react";
+﻿import { useState, useMemo, useEffect } from "react";
 import { api, CABLE_COLORS } from "../api.js";
+import useNetmapStore from "../store.js";
 import FilterBar from "../components/map/FilterBar.jsx";
 import TopologyMap from "../components/map/TopologyMap.jsx";
 import RackDetail from "../components/map/RackDetail.jsx";
@@ -12,6 +13,8 @@ import { useRackOrders } from "../hooks/useRackOrders.js";
 export default function MapPage() {
   const { topology, selectedRack, setSelectedRack, loadError, loadTopology } = useTopologyData();
   const { mapBgUrl, mapBgNat, mapBgOpacity, mapBgScale, mapBgColor } = useMapBackground();
+  const highlightPortKey = useNetmapStore(s => s.highlightPortKey);
+  const clearHighlightPortKey = useNetmapStore(s => s.clearHighlightPortKey);
 
   // Derive the full selectedRack object (with up-to-date devices) directly from
   // topology.nodes so RackDetail and reorderDevice always see fresh data after
@@ -29,6 +32,23 @@ export default function MapPage() {
   const [selectedLink, setSelectedLink] = useState(null);
   const [selectedOutsideNode, setSelectedOutsideNode] = useState(null);
   const [detailSwitchId, setDetailSwitchId] = useState(null);
+
+  // Auto-select rack and clear highlight when navigating from Devices/Network page
+  useEffect(() => {
+    if (!highlightPortKey || !topology.nodes.length) return;
+    const colonIdx = highlightPortKey.indexOf(":");
+    if (colonIdx < 0) return;
+    const switchIp = highlightPortKey.slice(0, colonIdx);
+    const node = topology.nodes.find(n => n.ip === switchIp);
+    if (node?.rack_id) {
+      const rack = (topology.racks || []).find(r => r.id === node.rack_id);
+      if (rack) {
+        setSelectedRack(rack);
+      }
+    }
+    const timer = setTimeout(() => clearHighlightPortKey(), 3000);
+    return () => clearTimeout(timer);
+  }, [highlightPortKey, topology.nodes, topology.racks]);
 
   // Clear selected link when switching racks
   const handleSelectRack = (rack) => {
@@ -243,6 +263,7 @@ export default function MapPage() {
               selectedLink={selectedLink}
               onLinkSelect={setSelectedLink}
               onShowDetail={setDetailSwitchId}
+              highlightPortKey={highlightPortKey}
               deviceOrder={selectedRackOrders}
               onReorder={(deviceId, dir, groupKey) =>
                 reorderDevice(deviceId, dir, groupKey, selectedDetail.id, selectedDetail.devices)

@@ -1,5 +1,30 @@
 # Version History
 
+## v1.11.1 — Congruence Fixes
+
+**Type:** PATCH (bug fixes)
+
+### Changes
+
+#### PortOut Schema: tagged_vlans field
+- Added `tagged_vlans: Optional[List[int]] = None` to `PortOut` Pydantic schema so the field is serialized in API responses.
+- Added `"tagged_vlans": []` to the `_coerce_nulls` defaults dict for null-safety.
+
+#### Settings Navigation: Devices tab
+- Added "Devices" entry to the INFRASTRUCTURE group in `NAV_GROUPS` so the already-implemented `DevicesTab` is reachable from the sidebar.
+
+#### Store Default Topology: models key
+- Added `models: []` to the default `topology` state in the Zustand store for consistency with `TopologyOut`.
+
+### Files Modified
+| File | Change |
+|------|--------|
+| backend/schemas.py | Added `tagged_vlans` field and null-coercion default to `PortOut` |
+| frontend/src/pages/SettingsPage.jsx | Added Devices entry to `NAV_GROUPS` INFRASTRUCTURE group |
+| frontend/src/store.js | Added `models: []` to default topology state |
+
+---
+
 ## v1.11.0 — Slide-In Switch Detail Panel
 
 **Type:** MINOR (new feature)

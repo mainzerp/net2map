@@ -4,6 +4,8 @@ import { getStoredToken, getStoredUser, logout } from "./api.js";
 const NAV = [
   { to: "/",         label: "Dashboard" },
   { to: "/map",      label: "Topology" },
+  { to: "/devices",  label: "Devices" },
+  { to: "/network",  label: "Network" },
   { to: "/logs",     label: "Logs" },
   { to: "/settings", label: "Settings" },
 ];

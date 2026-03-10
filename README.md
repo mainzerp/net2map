@@ -25,6 +25,16 @@ Voraussetzung: Docker + Docker Compose
 docker compose up --build -d
 ```
 
+> **Hinweis:** Verwende immer `--build`, damit Frontend-Abhaengigkeiten aus
+> `package-lock.json` korrekt installiert werden und Aenderungen am Code in
+> die Container uebernommen werden.
+>
+> Falls trotzdem alte Versionen auftauchen, erzwinge einen vollstaendigen
+> Neuaufbau ohne Cache:
+> ```bash
+> docker compose build --no-cache && docker compose up -d
+> ```
+
 Danach ist die UI erreichbar unter:
 
 - http://localhost:3000
@@ -173,6 +183,22 @@ Direct dependencies are listed in `backend/requirements.txt`. For production dep
 pip install pip-tools
 pip-compile requirements.txt -o requirements.lock
 ```
+
+### Frontend (Node.js)
+
+`frontend/package-lock.json` is committed to the repository. It pins every
+transitive dependency so that Docker builds (and CI) always install the exact
+same versions via `npm ci`.
+
+**Updating dependencies:**
+
+```bash
+cd frontend
+npm install            # updates package-lock.json
+npm audit fix          # optional -- apply security patches
+```
+
+Commit the updated `package-lock.json` together with any `package.json` changes.
 
 ### Vulnerability Scanning
 

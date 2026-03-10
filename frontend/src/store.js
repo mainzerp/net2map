@@ -3,7 +3,7 @@ import { api, API, _getAuthHeader } from "./api.js";
 
 const useNetmapStore = create((set, get) => ({
   // ── Topology slice ───────────────────────────────────────────────────────
-  topology: { nodes: [], links: [], racks: [], classes: [] },
+  topology: { nodes: [], links: [], racks: [], classes: [], models: [] },
   selectedRack: null,
   loadError: null,
 
@@ -30,6 +30,10 @@ const useNetmapStore = create((set, get) => ({
       return { selectedRack: next };
     });
   },
+
+  highlightPortKey: null,
+  setHighlightPortKey: (key) => set({ highlightPortKey: key }),
+  clearHighlightPortKey: () => set({ highlightPortKey: null }),
 
   restoreSelectedRack: (data) => {
     let savedId;

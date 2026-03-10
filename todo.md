@@ -39,9 +39,7 @@
 
 ## DevOps / Reliability
 
-- [ ] **Health endpoints for compose/k8s** -- Add explicit liveness/readiness endpoints for backend and wire them into deployment probes
 - [ ] **Environment-based configuration matrix** -- Centralize runtime config via env vars (worker defaults, DNS fallback behavior, logging level, feature flags)
-- [ ] **CI pipeline for lint/test/build** -- Run backend + frontend checks automatically before merge/release
 
 ## Network Map & Access Control (Future)
 
@@ -52,10 +50,4 @@
 - [ ] **Rogue device detection** -- Alert on unknown MAC addresses appearing on access ports that are not in the allowed endpoints list
 - [ ] **Interactive port shutdown/bounce** -- Allow admins to administratively down or bounce a port directly from the map UI (requires write credentials)
 - [ ] **Logical topology overlays** -- Toggle map views to show Spanning Tree (STP) root paths, blocked ports, or specific VLAN topologies
-- [ ] **Endpoint search & locate** -- Global search bar to find a specific IP/MAC and highlight the exact switch and port it is connected to
-
-
-
-switches können ja racks classes und models zugeordnet werden. das edit form im switches tab sollte widerspielgeln, wenn ein switch über die anderen seiten eine zuordnung bekommen hat. momenta zeigt das edit form auf der switches page nicht an, ob ein switch schon z.b. einen rack zugeordnet ist
-
-geht noch nicht
+- [x] **Endpoint search & locate** -- Global search bar to find a specific IP/MAC and highlight the exact switch and port it is connected to
