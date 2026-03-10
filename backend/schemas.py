@@ -1,6 +1,6 @@
 """Pydantic schemas for request / response validation."""
 from datetime import datetime
-from typing import Literal, Optional, List
+from typing import Any, Literal, Optional, List
 from pydantic import BaseModel, ConfigDict, field_serializer, model_validator
 
 
@@ -48,7 +48,7 @@ class UserOut(BaseModel):
     email: str
     role: str
     is_active: bool
-    created_at: datetime
+    created_at: Optional[datetime] = None
     class Config:
         from_attributes = True
 
@@ -109,8 +109,8 @@ class RackUpdate(BaseModel):
 
 class RackOut(RackBase):
     id:         int
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -138,8 +138,8 @@ class SwitchClassUpdate(BaseModel):
 
 class SwitchClassOut(SwitchClassBase):
     id:         int
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -167,8 +167,8 @@ class SwitchModelUpdate(BaseModel):
 
 class SwitchModelOut(SwitchModelBase):
     id:         int
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -206,8 +206,8 @@ class SnmpProfileUpdate(BaseModel):
 
 class SnmpProfileOut(SnmpProfileBase):
     id:         int
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     @field_serializer("v3_auth_password", "v3_priv_password")
     def _mask_password(self, v: str) -> str:
@@ -272,8 +272,8 @@ class CredentialUpdate(BaseModel):
 
 class CredentialOut(CredentialBase):
     id:         int
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     @field_serializer("v3_auth_password", "v3_priv_password")
     def _mask_password(self, v: str) -> str:
@@ -296,9 +296,8 @@ class PortOut(BaseModel):
     peer_ip:     Optional[str] = ""
     peer_host:   Optional[str] = ""
     endpoint_count:        Optional[int] = 0
-    endpoint_details_json: Optional[list] = []
+    endpoint_details_json: Any = []
     vlan:        Optional[int] = 0
-    tagged_vlans: Optional[list] = []
 
     @model_validator(mode="before")
     @classmethod
@@ -311,7 +310,6 @@ class PortOut(BaseModel):
                 "if_index": 0, "if_descr": "", "if_alias": "", "speed_mbps": 0,
                 "oper_status": 0, "peer_mac": "", "peer_ip": "", "peer_host": "",
                 "endpoint_count": 0, "endpoint_details_json": [], "vlan": 0,
-                "tagged_vlans": [],
             }
             for field, fallback in defaults.items():
                 if data.get(field) is None:
@@ -429,7 +427,7 @@ class ScanRunOut(BaseModel):
     removed_devices:   List[str] = []
     new_links:         List[str] = []
     removed_links:     List[str] = []
-    created_at:        datetime
+    created_at:        Optional[datetime] = None
     switch_metrics:    List[ScanSwitchMetric] = []
 
     class Config:
