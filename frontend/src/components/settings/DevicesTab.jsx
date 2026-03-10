@@ -7,12 +7,27 @@ function DevicesTabContent() {
   const [togglingId, setTogglingId] = useState(null);
   const [selected, setSelected] = useState(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [racks, setRacks]           = useState([]);
+  const [classes, setClasses]       = useState([]);
+  const [models, setModels]         = useState([]);
+  const [editState, setEditState]   = useState({ id: null, open: false });
+  const [form, setForm]             = useState({ rack_id: null, class_id: null, model_id: null });
+  const [err, setErr]               = useState("");
 
   const refresh = useCallback(() => {
     setLoading(true);
-    api.get("/api/devices")
-      .then(d => { setDevices(Array.isArray(d) ? d : []); setLoading(false); })
-      .catch(() => { setDevices([]); setLoading(false); });
+    Promise.allSettled([
+      api.get("/api/devices"),
+      api.get("/api/racks"),
+      api.get("/api/switch-classes"),
+      api.get("/api/switch-models"),
+    ]).then(([devRes, racksRes, classesRes, modelsRes]) => {
+      setDevices(devRes.status === "fulfilled" && Array.isArray(devRes.value) ? devRes.value : []);
+      setRacks(racksRes.status === "fulfilled" ? racksRes.value || [] : []);
+      setClasses(classesRes.status === "fulfilled" ? classesRes.value || [] : []);
+      setModels(modelsRes.status === "fulfilled" ? modelsRes.value || [] : []);
+      setLoading(false);
+    });
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -50,10 +65,54 @@ function DevicesTabContent() {
     }
   };
 
+  const resetForm = () => {
+    setForm({ rack_id: null, class_id: null, model_id: null });
+    setEditState({ id: null, open: false });
+    setErr("");
+  };
+
+  const startEdit = (dev) => {
+    setForm({
+      rack_id: dev.rack_id ?? null,
+      class_id: dev.class_id ?? null,
+      model_id: dev.model_id ?? null,
+    });
+    setEditState({ id: dev.id, open: true });
+    setErr("");
+  };
+
+  const submitEdit = async (e) => {
+    e.preventDefault();
+    setErr("");
+    try {
+      await api.patch(`/api/topology/devices/${editState.id}/meta`, {
+        rack_id: form.rack_id,
+        class_id: form.class_id,
+        model_id: form.model_id,
+      });
+      api.invalidate("/api/topology", "/api/devices");
+      resetForm();
+      refresh();
+    } catch (ex) {
+      setErr(String(ex));
+    }
+  };
+
+  const rackMap  = Object.fromEntries(racks.map(r => [r.id, r]));
+  const classMap = Object.fromEntries(classes.map(c => [c.id, c]));
+  const modelMap = Object.fromEntries(models.map(m => [m.id, m]));
+
   const INPUT_ROW = {
     display: "flex", alignItems: "center", gap: 10,
     padding: "8px 12px",
     borderBottom: "1px solid #0f172a",
+  };
+
+  const sel = {
+    backgroundColor: "#0c0f18", border: "1px solid #1e293b", borderRadius: 5,
+    color: "#e2e8f0", padding: "5px 8px",
+    fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11, lineHeight: 1.3,
+    boxSizing: "border-box", width: "100%", cursor: "pointer",
   };
 
   const active  = devices.filter(d => !d.ignored);
@@ -98,6 +157,33 @@ function DevicesTabContent() {
                 ignored
               </span>
             )}
+            {dev.rack_id && rackMap[dev.rack_id] && (
+              <span style={{
+                color: "#a78bfa", fontSize: 10,
+                backgroundColor: "#1e1035", padding: "1px 5px",
+                borderRadius: 3, border: "1px solid #3b1f7e"
+              }}>
+                {rackMap[dev.rack_id].label}
+              </span>
+            )}
+            {dev.class_id && classMap[dev.class_id] && (
+              <span style={{
+                color: classMap[dev.class_id].color || "#38bdf8", fontSize: 10,
+                backgroundColor: "#0c1a2e", padding: "1px 5px",
+                borderRadius: 3, border: `1px solid ${classMap[dev.class_id].color || "#1e3a5f"}`
+              }}>
+                {classMap[dev.class_id].label}
+              </span>
+            )}
+            {dev.model_id && modelMap[dev.model_id] && (
+              <span style={{
+                color: "#fbbf24", fontSize: 10,
+                backgroundColor: "#1a1500", padding: "1px 5px",
+                borderRadius: 3, border: "1px solid #854d0e"
+              }}>
+                {modelMap[dev.model_id].name}
+              </span>
+            )}
           </div>
           {dev.vendor && (
             <div style={{ color: "#475569", fontSize: 10, marginTop: 2 }}>
@@ -105,6 +191,23 @@ function DevicesTabContent() {
             </div>
           )}
         </div>
+        <button
+          onClick={() => startEdit(dev)}
+          style={{
+            flexShrink: 0,
+            backgroundColor: "#0c1a2e",
+            border: "1px solid #1e3a5f",
+            color: "#7dd3fc",
+            borderRadius: 5,
+            padding: "4px 10px",
+            cursor: "pointer",
+            fontFamily: "'Inter', system-ui, sans-serif",
+            fontSize: 10,
+            fontWeight: 600,
+          }}
+        >
+          Edit
+        </button>
         <button
           disabled={isToggling}
           onClick={() => toggleIgnored(dev)}
@@ -135,6 +238,95 @@ function DevicesTabContent() {
         Ignored devices are excluded from scans and hidden from the topology map.
         They remain in the database and can be re-enabled at any time.
       </div>
+
+      {editState.open && (
+        <div
+          onClick={e => { if (e.target === e.currentTarget) resetForm(); }}
+          style={{
+            position: "fixed", inset: 0, zIndex: 200,
+            backgroundColor: "rgba(2,8,23,0.75)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <form onSubmit={submitEdit} style={{
+            width: 420, maxHeight: "calc(100vh - 80px)", overflowY: "auto",
+            backgroundColor: "#0a0e18", border: "1px solid #1e293b", borderRadius: 12,
+            padding: "20px", boxShadow: "0 20px 40px rgba(0,0,0,0.6)",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <div style={{ color: "#94a3b8", fontSize: 10, letterSpacing: 1 }}>EDIT DEVICE</div>
+              <button type="button" onClick={resetForm}
+                style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 2px" }}>
+                &#x2715;
+              </button>
+            </div>
+
+            <div style={{ marginBottom: 12, padding: "8px 10px", backgroundColor: "#0c0f18", borderRadius: 6, border: "1px solid #1e293b" }}>
+              <div style={{ color: "#e2e8f0", fontSize: 12, fontWeight: 600 }}>
+                {(() => { const d = devices.find(d => d.id === editState.id); return d ? (d.sys_name || d.ip) : ""; })()}
+              </div>
+              <div style={{ color: "#475569", fontSize: 10 }}>
+                {(() => { const d = devices.find(d => d.id === editState.id); return d?.ip || ""; })()}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+              <label style={{ fontSize: 10, color: "#94a3b8", display: "block", userSelect: "none" }}>
+                Rack
+                <select
+                  value={form.rack_id ?? ""}
+                  onChange={e => setForm(p => ({ ...p, rack_id: e.target.value ? +e.target.value : null }))}
+                  style={{ ...sel, marginTop: 3 }}
+                >
+                  <option value="">-- No rack --</option>
+                  {racks.map(r => (
+                    <option key={r.id} value={r.id}>{r.label}{r.room ? ` / ${r.room}` : ""}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ fontSize: 10, color: "#94a3b8", display: "block", userSelect: "none" }}>
+                Class
+                <select
+                  value={form.class_id ?? ""}
+                  onChange={e => setForm(p => ({ ...p, class_id: e.target.value ? +e.target.value : null }))}
+                  style={{ ...sel, marginTop: 3 }}
+                >
+                  <option value="">-- No class --</option>
+                  {classes.map(c => (
+                    <option key={c.id} value={c.id}>{c.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ fontSize: 10, color: "#94a3b8", display: "block", userSelect: "none" }}>
+                Model
+                <select
+                  value={form.model_id ?? ""}
+                  onChange={e => setForm(p => ({ ...p, model_id: e.target.value ? +e.target.value : null }))}
+                  style={{ ...sel, marginTop: 3 }}
+                >
+                  <option value="">-- No model --</option>
+                  {[...models].sort((a, b) => a.name.localeCompare(b.name)).map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            {err && <div style={{ color: "#f87171", fontSize: 11, marginBottom: 8 }}>{err}</div>}
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" onClick={resetForm}
+                style={{ background: "none", border: "1px solid #1e293b", color: "#64748b", borderRadius: 5, padding: "5px 14px", cursor: "pointer", fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11 }}>
+                Cancel
+              </button>
+              <button type="submit"
+                style={{ backgroundColor: "#164e63", border: "1px solid #22d3ee", color: "#22d3ee", borderRadius: 5, padding: "5px 14px", cursor: "pointer", fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11, fontWeight: 600 }}>
+                Save
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Bulk action toolbar */}
       {selected.size > 0 && (
