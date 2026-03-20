@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import { speedLabel, speedColor, normPort } from "../api.js";
-import PortDetailModal from "./PortDetailModal.jsx";
+import { speedLabel, speedColor, normPort } from "../api";
+import PortDetailModal from "./PortDetailModal";
 
 // ── Port ─────────────────────────────────────────────────────────────────────
 export default function Port({ port, portKey, portLinkMap, selectedLink, onPortClick, cableColor, interRack, highlighted }) {

@@ -12,6 +12,7 @@ from routers.bulk import _normalize_bool, _normalize_optional_int
 from schemas import CredentialCreate, GlobalConfigExportOut, GlobalConfigImportRequest, SnmpProfileCreate
 from shared.auth import require_role
 from shared.audit import log_audit
+from shared.crypto import encrypt
 from shared.errors import api_error
 
 router = APIRouter()
@@ -32,7 +33,7 @@ def export_global_config(request: Request, db: Session = Depends(get_db)):
             {
                 "label": p.label,
                 "snmp_version": p.snmp_version,
-                "community": p.community,
+                "community": "********" if p.community else "",
                 "v3_security_level": p.v3_security_level,
                 "v3_username": p.v3_username,
                 "v3_auth_protocol": p.v3_auth_protocol,
@@ -47,10 +48,9 @@ def export_global_config(request: Request, db: Session = Depends(get_db)):
                 "label": c.label,
                 "ip": c.ip,
                 "snmp_port": c.snmp_port,
-                "location": c.location,
                 "enabled": bool(c.enabled),
                 "snmp_version": c.snmp_version,
-                "community": c.community,
+                "community": "********" if c.community else "",
                 "v3_security_level": c.v3_security_level,
                 "v3_username": c.v3_username,
                 "v3_auth_protocol": c.v3_auth_protocol,
@@ -58,10 +58,7 @@ def export_global_config(request: Request, db: Session = Depends(get_db)):
                 "v3_priv_protocol": c.v3_priv_protocol,
                 "v3_priv_password": "********" if c.v3_priv_password else "",
                 "profile_id": c.profile_id,
-                "rack_id": c.rack_id,
-                "class_id": c.class_id,
-                "vendor": c.vendor,
-                "model": c.model,
+                "device_id": c.device_id,
             }
             for c in db.query(Credential).order_by(Credential.id).all()
         ],
@@ -111,7 +108,7 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
     for i, row in enumerate(credential_rows, start=1):
         try:
             normalized = dict(row)
-            for key in ["profile_id", "rack_id", "class_id", "snmp_port"]:
+            for key in ["profile_id", "device_id", "snmp_port"]:
                 if key in normalized:
                     normalized[key] = _normalize_optional_int(normalized.get(key))
             if "enabled" in normalized:
@@ -135,10 +132,13 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
 
         _PASSWORD_MASK = "********"
         for row in valid_profiles:
+            for pwd_field in ("v3_auth_password", "v3_priv_password"):
+                if row.get(pwd_field) and row[pwd_field] != _PASSWORD_MASK:
+                    row[pwd_field] = encrypt(row[pwd_field])
             existing = db.query(SnmpProfile).filter(SnmpProfile.label == row["label"]).first()
             if existing:
                 for key, value in row.items():
-                    if key in ("v3_auth_password", "v3_priv_password") and value == _PASSWORD_MASK:
+                    if key in ("v3_auth_password", "v3_priv_password", "community") and value == _PASSWORD_MASK:
                         continue
                     setattr(existing, key, value)
                 updated["profiles"] += 1
@@ -147,10 +147,13 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
                 inserted["profiles"] += 1
 
         for row in valid_credentials:
+            for pwd_field in ("v3_auth_password", "v3_priv_password"):
+                if row.get(pwd_field) and row[pwd_field] != _PASSWORD_MASK:
+                    row[pwd_field] = encrypt(row[pwd_field])
             existing = db.query(Credential).filter(Credential.ip == row["ip"]).first()
             if existing:
                 for key, value in row.items():
-                    if key in ("v3_auth_password", "v3_priv_password") and value == _PASSWORD_MASK:
+                    if key in ("v3_auth_password", "v3_priv_password", "community") and value == _PASSWORD_MASK:
                         continue
                     setattr(existing, key, value)
                 updated["credentials"] += 1

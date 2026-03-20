@@ -12,17 +12,24 @@ The tool is designed for network administrators who need a clear, up-to-date pic
 
 | Layer | Technology |
 |---|---|
-| Backend | Python, FastAPI, SQLAlchemy, Pydantic, PySNMP |
-| Database | SQLite (via SQLAlchemy ORM, WAL mode) |
-| Frontend | React 18, React Router v6, Vite |
+| Backend | Python, FastAPI, SQLAlchemy, Pydantic, PySNMP, Celery |
+| Database | PostgreSQL 16 (via SQLAlchemy ORM, connection pooling) |
+| Cache / Broker | Redis (Celery broker, WebSocket tickets, session data) |
+| Task Queue | Celery worker + Celery Beat (periodic scan scheduling) |
+| Frontend | React 18, React Router v6, Vite, TypeScript (partial) |
+| Monitoring | prometheus-client (6 metrics, /metrics endpoint) |
 | Serving | Nginx (static assets + reverse proxy to backend) |
-| Deployment | Docker, Docker Compose |
+| Deployment | Docker, Docker Compose (6 services) |
 
 ## Architecture
 
-- **`backend/`** – FastAPI application exposing a REST API. Handles SNMP scanning, LLDP topology discovery, MAC address collection, DNS PTR lookups, and all CRUD operations for devices, racks, credentials, and settings. Persists all data in a SQLite file mounted as a Docker volume.
-- **`frontend/`** – Single-page React application built with Vite. Served by an Nginx container that also proxies `/api` requests to the backend container.
-- **`docker-compose.yml`** – Defines both services (`netmap-backend`, `netmap-frontend`) on a shared bridge network. The frontend is reachable at `http://localhost:3000`.
+- **`backend/`** -- FastAPI application exposing a REST API. Handles SNMP scanning, LLDP topology discovery, MAC address collection, DNS PTR lookups, and all CRUD operations for devices, racks, credentials, and settings. Uses SQLAlchemy with PostgreSQL and Alembic for schema migrations.
+- **`frontend/`** -- Single-page React application built with Vite, with TypeScript for the API layer (api.ts). Served by an Nginx container that also proxies `/api` requests to the backend container.
+- **`celery worker`** -- Background scan execution and dry-run jobs via Celery, using Redis as the message broker.
+- **`celery-beat`** -- Periodic scan scheduling via the `scheduler_tick` Celery task.
+- **`redis`** -- Celery task broker, WebSocket ticket store (30s TTL), and general caching.
+- **`postgres`** -- Primary data store with connection pooling (pool_size=10, max_overflow=20).
+- **`docker-compose.yml`** -- Defines 6 services (`netmap-backend`, `netmap-frontend`, `netmap-celery`, `celery-beat`, `redis`, `postgres`) on a shared bridge network. The frontend is reachable at `http://localhost:3000`.
 
 ## Key Features
 
@@ -35,17 +42,29 @@ The tool is designed for network administrators who need a clear, up-to-date pic
 - **Scan Scheduling** – Background scheduler runs periodic discovery, link, and MAC scans based on configurable intervals stored as app settings.
 - **Scan Metrics** – Each scan run records total duration, per-switch duration, success/failure status, and effective worker count.
 - **DNS Settings** – Custom DNS resolver IPs for PTR lookups are configurable through the UI.
-- **Import / Export** – Bulk import/export of devices and a full global config export/import are supported via the API.
-- **Logs** – A rolling in-memory log buffer (up to 5,000 entries) is exposed via the API and displayed in the Logs page.
+- **Import / Export** -- Bulk import/export of devices and a full global config export/import are supported via the API.
+- **Logs** -- A rolling in-memory log buffer (up to 5,000 entries) is exposed via the API and displayed in the Logs page.
+- **Authentication / RBAC** -- JWT-based auth with admin/operator/viewer roles, login page, user management.
+- **Tagged VLAN Collection** -- Q-BRIDGE-MIB bitmask parsing for tagged VLAN memberships per port.
+- **Dry-Run Scanning** -- Preview scan results before committing to database.
+- **Credential Fallback Chains** -- Priority-ordered credentials per IP with automatic fallback.
+- **Bulk Device Operations** -- Multi-select ignore/re-enable from device table.
+- **Endpoint Search & Locate** -- Global IP/MAC search highlighting exact switch and port.
+- **Prometheus Metrics** -- 6 metrics with MetricsMiddleware and authenticated /metrics endpoint.
+- **WebSocket Scan Progress** -- Real-time scan status updates via ticket-authenticated WebSocket.
+- **Audit Logging** -- Persistent audit trail for security-sensitive operations.
 
 ## Frontend Pages
 
 | Page | Description |
 |---|---|
-| Dashboard | Overview of discovered devices and recent scan status |
-| Map | Interactive topology map with draggable device nodes and LLDP links |
+| Login | Authentication page with JWT login form |
+| Dashboard | Overview of discovered devices, scan status, and network statistics |
+| Map | Interactive topology map with draggable device nodes, LLDP links, rack detail slide-in, and endpoint search |
+| Network | Network-level views and VLAN information |
+| Devices | Device listing with bulk operations, ignore/re-enable, and metadata editing |
 | Logs | Live log feed from the backend |
-| Settings | SNMP credentials/profiles, scan settings, DNS settings, rack and switch class management |
+| Settings | SNMP credentials/profiles, scan settings, DNS settings, rack and switch class management, user management |
 
 ## API
 
@@ -61,11 +80,21 @@ The FastAPI backend auto-generates OpenAPI docs at `http://localhost:8000/docs`.
 - `/api/switch-classes` – Manage switch role classes
 - `/api/topology` – Retrieve LLDP link graph
 - `/api/logs` – Retrieve buffered log events
-- `/api/config/export` and `/api/config/import` – Full configuration backup/restore
+- `/api/config/export` and `/api/config/import` -- Full configuration backup/restore
+- `/api/auth` -- Login, logout, token refresh, WebSocket ticket exchange
+- `/api/users` -- User CRUD with role management (admin only)
+- `/api/audit` -- Audit log retrieval
+- `/api/scan/jobs` -- Background scan job management
+- `/api/scan/dry-run` -- Dry-run scan preview
+- `/api/stats` -- Network statistics
+- `/api/switch-models` -- Switch model management
+- `/api/health` -- Health check endpoint
+- `/metrics` -- Prometheus metrics (authenticated)
+- `/ws/scan-progress` -- WebSocket for real-time scan progress (ticket-authenticated)
 
 ## Data Persistence
 
-All data is stored in a single SQLite database file (`netmap.db`) mounted via a named Docker volume (`netmap-data`). WAL journal mode is enabled for better read/write concurrency.
+Primary data is stored in PostgreSQL 16 with connection pooling (pool_size=10, max_overflow=20). Schema migrations are managed by Alembic. Redis is used as the Celery task broker, for WebSocket ticket storage (30s TTL), and as a general cache. Data volumes: `netmap-pgdata` (PostgreSQL) and `netmap-redis` (Redis).
 
 ## Development Setup
 
@@ -81,7 +110,15 @@ docker compose up --build -d
 cd backend
 python -m venv .venv && .venv\Scripts\activate
 pip install -r requirements.txt
+# Requires: PostgreSQL and Redis running locally
+# Set DATABASE_URL, REDIS_URL env vars
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+# Celery worker (separate terminal)
+celery -A celery_app worker --loglevel=info
+
+# Celery Beat (separate terminal, optional)
+celery -A celery_app beat --loglevel=info
 
 # Frontend
 cd frontend

@@ -1,7 +1,9 @@
 """Pydantic schemas for request / response validation."""
 from datetime import datetime
 from typing import Any, Literal, Optional, List
-from pydantic import BaseModel, ConfigDict, field_serializer, model_validator
+import re
+
+from pydantic import BaseModel, ConfigDict, field_serializer, field_validator, model_validator
 
 
 # ─── Structured Error Response ────────────────────────────────────────────────
@@ -36,11 +38,25 @@ class UserCreate(BaseModel):
     password: str
     role: UserRole = "viewer"
 
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v):
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        return v
+
 class UserUpdate(BaseModel):
     email: Optional[str] = None
     password: Optional[str] = None
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v):
+        if v is not None and len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        return v
 
 class UserOut(BaseModel):
     id: int
@@ -224,7 +240,6 @@ class CredentialBase(BaseModel):
     ip:           str
     priority:     int  = 0
     snmp_port:    int  = 161
-    location:     str  = ""
     enabled:      bool = True
     # v2c
     snmp_version: SnmpVersion  = "v2c"
@@ -238,14 +253,20 @@ class CredentialBase(BaseModel):
     v3_priv_password:  str           = ""
     # Optional assignments
     profile_id:   Optional[int] = None
-    rack_id:      Optional[int] = None
-    class_id:     Optional[int] = None
-    vendor:       str = ""
-    model:        str = ""
+    device_id:    Optional[int] = None
 
 
 class CredentialCreate(CredentialBase):
-    pass
+
+    @field_validator("ip")
+    @classmethod
+    def validate_ip(cls, v):
+        v = v.strip()
+        if not v:
+            raise ValueError("IP address or hostname is required")
+        if re.search(r'[\s;|&`$]', v):
+            raise ValueError("IP address contains invalid characters")
+        return v
 
 
 class CredentialUpdate(BaseModel):
@@ -253,7 +274,6 @@ class CredentialUpdate(BaseModel):
     ip:                Optional[str]           = None
     priority:          Optional[int]           = None
     snmp_port:         Optional[int]           = None
-    location:          Optional[str]           = None
     enabled:           Optional[bool]          = None
     snmp_version:      Optional[SnmpVersion]   = None
     community:         Optional[str]           = None
@@ -264,10 +284,7 @@ class CredentialUpdate(BaseModel):
     v3_priv_protocol:  Optional[PrivProtocol]  = None
     v3_priv_password:  Optional[str]           = None
     profile_id:        Optional[int]           = None
-    rack_id:           Optional[int]           = None
-    class_id:          Optional[int]           = None
-    vendor:            Optional[str]           = None
-    model:             Optional[str]           = None
+    device_id:         Optional[int]           = None
 
 
 class CredentialOut(CredentialBase):
@@ -347,6 +364,9 @@ class DeviceBase(BaseModel):
     map_x:     float = 100.0
     map_y:     float = 100.0
     ignored:   bool  = False
+    label:     str   = ""
+    enabled:   bool  = True
+    is_managed: bool = False
 
 
 class DeviceOut(DeviceBase):
@@ -383,6 +403,8 @@ class DeviceMetaUpdate(BaseModel):
     class_id: Optional[int] = None
     model_id: Optional[int] = None
     ignored:  Optional[bool] = None
+    label:    Optional[str] = None
+    enabled:  Optional[bool] = None
 
 
 class BulkDeviceMetaUpdate(BaseModel):

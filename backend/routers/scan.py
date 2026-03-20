@@ -38,8 +38,10 @@ def start_scan_job(request: Request):
     return result
 
 
-@router.post("/api/scan/dry-run/jobs")
-def start_dry_run_job():
+@router.post("/api/scan/dry-run/jobs",
+             dependencies=[require_role("admin", "operator")])
+@limiter.limit("3/minute")
+def start_dry_run_job(request: Request):
     """Start a background dry-run discovery job. Returns job ID immediately.
     Poll /api/scan/jobs/{job_id} for results; result will contain a 'preview' key."""
     return _start_job(dry_run=True)

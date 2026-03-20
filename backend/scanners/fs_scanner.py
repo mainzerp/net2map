@@ -11,7 +11,7 @@ _MODEL_FS = re.compile(
 _VIRTUAL_FS = ("loopback", "vlan", "mgmt", "null", "stack")
 
 
-class FSScanner(VendorScanner):
+class FSScanner(VendorScanner, vendor_id="fs"):
 
     def extract_model(self, sys_descr: str) -> str:
         m = _MODEL_FS.search(sys_descr or "")

@@ -4,6 +4,14 @@ from abc import ABC, abstractmethod
 
 class VendorScanner(ABC):
     """Base class that every vendor scanner must implement."""
+    _registry: dict[str, type["VendorScanner"]] = {}
+    vendor_id: str = ""
+
+    def __init_subclass__(cls, vendor_id: str = "", **kwargs):
+        super().__init_subclass__(**kwargs)
+        if vendor_id:
+            cls.vendor_id = vendor_id
+            VendorScanner._registry[vendor_id] = cls
 
     @abstractmethod
     def extract_model(self, sys_descr: str) -> str:

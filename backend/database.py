@@ -1,5 +1,4 @@
 """SQLAlchemy database setup and models."""
-import os
 from datetime import datetime, timezone
 from sqlalchemy import (
     create_engine, Column, Integer, String, Boolean,
@@ -8,7 +7,9 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://netmap:netmap_pw@postgres/netmap")
+from config import settings
+
+DATABASE_URL = settings.database_url
 
 _engine_kwargs = {}
 if DATABASE_URL.startswith("postgresql"):
@@ -113,7 +114,6 @@ class Credential(Base):
     ip          = Column(String, nullable=False, index=True)
     priority    = Column(Integer, default=0)               # lower = tried first
     snmp_port   = Column(Integer, default=161)
-    location    = Column(String, default="")              # e.g. rack label / room
     enabled     = Column(Boolean, default=True)
     created_at  = Column(DateTime, server_default=func.now())
     updated_at  = Column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -137,13 +137,9 @@ class Credential(Base):
     profile_id = Column(Integer, ForeignKey("snmp_profiles.id"), nullable=True)
     profile    = relationship("SnmpProfile", back_populates="credentials")
 
-    # Optional assignment to a managed rack and switch class
-    rack_id    = Column(Integer, ForeignKey("racks.id"), nullable=True)
-    class_id   = Column(Integer, ForeignKey("switch_classes.id"), nullable=True)
-
-    # Optional manual override for vendor and model (empty string means autodetect)
-    vendor     = Column(String, default="")
-    model      = Column(String, default="")
+    # FK link to the discovered Device
+    device_id  = Column(Integer, ForeignKey("devices.id", ondelete="SET NULL"), nullable=True, index=True)
+    device     = relationship("Device", back_populates="credentials", lazy="joined")
 
 
 class Device(Base):
@@ -170,10 +166,16 @@ class Device(Base):
     class_id     = Column(Integer, ForeignKey("switch_classes.id"), nullable=True)
     model_id     = Column(Integer, ForeignKey("switch_models.id"), nullable=True)
 
+    # Consolidation fields (metadata now lives here, not on Credential)
+    label        = Column(String, default="")
+    enabled      = Column(Boolean, default=True, nullable=False)
+    is_managed   = Column(Boolean, default=False, nullable=False)
+
     ports        = relationship("Port", back_populates="device", cascade="all, delete-orphan", lazy="selectin")
     rack         = relationship("Rack", back_populates="devices", lazy="joined")
     switch_class = relationship("SwitchClass", back_populates="devices", lazy="joined")
     switch_model = relationship("SwitchModel", back_populates="devices", lazy="joined")
+    credentials  = relationship("Credential", back_populates="device", lazy="selectin")
 
 
 class Port(Base):

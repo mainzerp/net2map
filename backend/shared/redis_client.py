@@ -1,8 +1,9 @@
 """Redis client with lazy connection pool and graceful fallback."""
 import logging
-import os
 
-REDIS_URL = os.getenv("REDIS_URL", "")
+from config import settings
+
+REDIS_URL = settings.redis_url
 
 _pool = None
 _log = logging.getLogger(__name__)

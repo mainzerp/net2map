@@ -14,7 +14,7 @@ _VIRTUAL_GENERIC = (
 )
 
 
-class GenericScanner(VendorScanner):
+class GenericScanner(VendorScanner, vendor_id="generic"):
 
     def extract_model(self, sys_descr: str) -> str:
         m = _MODEL_GENERIC.search(sys_descr or "")

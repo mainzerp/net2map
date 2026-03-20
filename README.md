@@ -121,6 +121,16 @@ docker buildx build --build-arg VITE_API_URL=http://your-backend:8000 -t netmap-
 - **SNMP Credentials**: API responses mask SNMP v3 passwords. However, if you enable `SECRET_TOKEN`, ensure it is kept secret.
 - **Encryption at Rest**: Set `ENCRYPTION_KEY` to encrypt SNMP passwords in the database. Generate a key with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
 
+## Production Deployment
+
+Before deploying NetMap to production, ensure the following requirements are met:
+
+1. **TLS/HTTPS**: NetMap does not include built-in TLS. You MUST place a TLS-terminating reverse proxy in front of the application. See the TLS / HTTPS Setup section below.
+2. **Authentication**: Set `JWT_SECRET` (recommended) or `SECRET_TOKEN` to enable authentication. Without either, all endpoints are accessible without credentials.
+3. **Encryption at Rest**: Set `ENCRYPTION_KEY` to encrypt SNMP passwords in the database. Without it, passwords are stored in plaintext.
+4. **Strong Passwords**: Use strong, unique values for `POSTGRES_PASSWORD`, `DEFAULT_ADMIN_PASSWORD`, and all secrets. Never use the example values in production.
+5. **CORS**: Set `CORS_ORIGIN` to your actual domain (e.g. `https://netmap.example.com`). Do not use `*` in production.
+
 ## TLS / HTTPS Setup
 
 NetMap ships without TLS. To secure traffic in production, place a TLS-terminating reverse proxy in front of the frontend container. Common options:

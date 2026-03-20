@@ -6,6 +6,8 @@ import re
 from defusedxml import ElementTree as SafeET
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from schemas import MapSettingsOut, MapSettingsUpdate
 from shared.auth import require_role
@@ -24,6 +26,7 @@ from shared.file_settings import (
 )
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 
 def _sanitize_svg(raw: bytes) -> bytes:
@@ -41,6 +44,7 @@ def _sanitize_svg(raw: bytes) -> bytes:
 
 @router.post("/api/map-background",
              dependencies=[require_role("admin", "operator")])
+@limiter.limit("5/minute")
 async def upload_map_background(request: Request, file: UploadFile = File(...)):
     """Upload or replace the map background image."""
     ext = os.path.splitext(file.filename or "")[1].lower()

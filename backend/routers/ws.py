@@ -71,13 +71,13 @@ async def scan_progress_ws(ws: WebSocket, token: str = Query(default="")):
 def _authenticate_ws(token: str) -> None:
     """Validate token for WebSocket connections.
 
-    WebSockets cannot use standard HTTP auth headers, so the token is
-    passed as a query parameter. If auth is disabled on the server,
-    this is a no-op.
+    Accepts either a single-use ticket (preferred) or a raw JWT (fallback).
+    Tickets are looked up in Redis and consumed (deleted) after use to
+    prevent replay. If auth is disabled on the server, this is a no-op.
     """
-    import os
-    jwt_secret = os.getenv("JWT_SECRET", os.getenv("SECRET_TOKEN", ""))
-    legacy_token = os.getenv("SECRET_TOKEN", "")
+    from config import settings as _cfg
+    jwt_secret = _cfg.jwt_secret or _cfg.secret_token
+    legacy_token = _cfg.secret_token
 
     if not jwt_secret and not legacy_token:
         return  # auth disabled
@@ -85,9 +85,22 @@ def _authenticate_ws(token: str) -> None:
     if not token:
         raise WebSocketException(code=1008, reason="Authentication required")
 
+    # Try ticket-based auth first (preferred path)
+    from shared.redis_client import get_redis
+    r = get_redis()
+    if r:
+        import json
+        ticket_key = f"ws_ticket:{token}"
+        ticket_data = r.get(ticket_key)
+        if ticket_data:
+            r.delete(ticket_key)  # single-use: consume immediately
+            return  # ticket valid
+
+    # Fallback: legacy single-token
     if legacy_token and token == legacy_token:
         return
 
+    # Fallback: raw JWT (for clients that haven't migrated)
     try:
         import jwt as pyjwt
         pyjwt.decode(token, jwt_secret, algorithms=["HS256"])

@@ -11,7 +11,7 @@ _MODEL_ARUBA = re.compile(
 _VIRTUAL_ARUBA = ("loopback", "vlan", "tunnel", "mgmt", "oobm", "lag")
 
 
-class ArubaCXScanner(VendorScanner):
+class ArubaCXScanner(VendorScanner, vendor_id="aruba_cx"):
 
     def extract_model(self, sys_descr: str) -> str:
         m = _MODEL_ARUBA.search(sys_descr or "")

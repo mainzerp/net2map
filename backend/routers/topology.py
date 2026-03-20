@@ -12,7 +12,6 @@ from database import Device, Port as PortModel, TopologyLink, get_db
 from database import Rack as RackModel
 from database import SwitchClass as SwitchClassModel
 from database import SwitchModel as SwitchModelModel
-from database import Credential
 from schemas import (
     BulkDeviceMetaUpdate, DeviceMetaUpdate, DeviceOut, DevicePositionUpdate,
     FoundOnPort,
@@ -91,11 +90,10 @@ def get_topology(request: Request, db: Session = Depends(get_db)):
             headers={"ETag": topo_cache["etag"], "Cache-Control": "no-cache"},
         )
 
-    # Only show devices that have a matching credential entry (assigned switches)
-    cred_ips = {c.ip for c in db.query(Credential.ip).all()}
+    # Only show managed devices that are not ignored
     nodes   = db.query(Device).filter(
         Device.ignored == False,
-        Device.ip.in_(cred_ips),
+        Device.is_managed == True,
     ).all()
     links   = db.query(TopologyLink).all()
     racks   = db.query(RackModel).order_by(RackModel.id).all()
@@ -118,7 +116,7 @@ def get_topology(request: Request, db: Session = Depends(get_db)):
 
     result  = TopologyOut(nodes=node_dicts, links=links, racks=racks, classes=classes, models=models)
     body = result.model_dump_json()
-    etag = f'"{ hashlib.sha256(body.encode()).hexdigest()[:32]}"'
+    etag = f'"v{topo_version}"'
 
     _set_topo_cache({"version": topo_version, "body": body, "etag": etag})
 
@@ -173,6 +171,7 @@ def bulk_update_device_meta(body: BulkDeviceMetaUpdate, request: Request, db: Se
     if not updates:
         api_error(400, "NO_FIELDS", "No fields to update")
     count = db.query(Device).filter(Device.id.in_(body.device_ids)).update(updates, synchronize_session="fetch")
+
     db.commit()
     _bump_topo_version()
     log_audit(request, "bulk_update", "device_meta", "", {"device_ids": body.device_ids, "fields": list(updates.keys())})
@@ -226,6 +225,10 @@ def update_device_meta(
         device.model_id = model_id
     if "ignored" in payload and payload["ignored"] is not None:
         device.ignored = payload["ignored"]
+    if "label" in payload:
+        device.label = payload["label"]
+    if "enabled" in payload:
+        device.enabled = payload["enabled"]
 
     db.commit()
     db.refresh(device)
@@ -250,11 +253,10 @@ def list_all_devices(
     """Returns devices, optionally filtered by role (network/endpoint)."""
     query = db.query(Device)
     if role in ("network", "endpoint"):
-        cred_ips = {c.ip for c in db.query(Credential.ip).all()}
         if role == "network":
-            query = query.filter(Device.ip.in_(cred_ips))
+            query = query.filter(Device.is_managed == True)
         else:
-            query = query.filter(~Device.ip.in_(cred_ips))
+            query = query.filter(Device.is_managed == False)
     devices = query.order_by(Device.ip).all()
     models  = db.query(SwitchModelModel).all()
     model_ppr = {m.id: m.ports_per_row for m in models}

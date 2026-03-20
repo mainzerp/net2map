@@ -15,7 +15,7 @@ _VIRTUAL_OPNSENSE = (
 )
 
 
-class OPNsenseScanner(VendorScanner):
+class OPNsenseScanner(VendorScanner, vendor_id="opnsense"):
 
     def extract_model(self, sys_descr: str) -> str:
         m = _MODEL_OPNSENSE.search(sys_descr or "")

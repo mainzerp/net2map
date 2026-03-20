@@ -20,6 +20,7 @@ from schemas import (
 )
 from shared.auth import require_role
 from shared.audit import log_audit
+from shared.crypto import encrypt
 from shared.errors import api_error
 
 router = APIRouter()
@@ -33,12 +34,12 @@ PROFILE_BULK_FIELDS = [
 ]
 
 CREDENTIAL_BULK_FIELDS = [
-    "label", "ip", "snmp_port", "location", "enabled",
+    "label", "ip", "snmp_port", "enabled",
     "snmp_version", "community",
     "v3_security_level", "v3_username",
     "v3_auth_protocol", "v3_auth_password",
     "v3_priv_protocol", "v3_priv_password",
-    "profile_id", "rack_id", "class_id", "vendor", "model",
+    "profile_id", "device_id",
 ]
 
 
@@ -75,7 +76,7 @@ def _parse_bulk_rows(kind: str, body: BulkImportRequest) -> List[dict]:
         row = {k: v for k, v in (src or {}).items()}
 
         if kind == "credentials":
-            for key in ["profile_id", "rack_id", "class_id", "snmp_port"]:
+            for key in ["profile_id", "device_id", "snmp_port"]:
                 if key in row:
                     row[key] = _normalize_optional_int(row.get(key))
             if "enabled" in row:
@@ -129,10 +130,9 @@ def bulk_export(kind: str, request: Request, fmt: str = "json", db: Session = De
                 "label": c.label,
                 "ip": c.ip,
                 "snmp_port": c.snmp_port,
-                "location": c.location,
                 "enabled": bool(c.enabled),
                 "snmp_version": c.snmp_version,
-                "community": c.community,
+                "community": "********" if c.community else "",
                 "v3_security_level": c.v3_security_level,
                 "v3_username": c.v3_username,
                 "v3_auth_protocol": c.v3_auth_protocol,
@@ -140,10 +140,7 @@ def bulk_export(kind: str, request: Request, fmt: str = "json", db: Session = De
                 "v3_priv_protocol": c.v3_priv_protocol,
                 "v3_priv_password": "********" if c.v3_priv_password else "",
                 "profile_id": c.profile_id,
-                "rack_id": c.rack_id,
-                "class_id": c.class_id,
-                "vendor": c.vendor,
-                "model": c.model,
+                "device_id": c.device_id,
             })
     else:
         rows = []
@@ -151,7 +148,7 @@ def bulk_export(kind: str, request: Request, fmt: str = "json", db: Session = De
             rows.append({
                 "label": p.label,
                 "snmp_version": p.snmp_version,
-                "community": p.community,
+                "community": "********" if p.community else "",
                 "v3_security_level": p.v3_security_level,
                 "v3_username": p.v3_username,
                 "v3_auth_protocol": p.v3_auth_protocol,
@@ -185,10 +182,13 @@ def bulk_import(kind: str, body: BulkImportRequest, request: Request, db: Sessio
     if not body.dry_run:
         if kind == "credentials":
             for payload in valid_rows:
+                for pwd_field in ("v3_auth_password", "v3_priv_password"):
+                    if payload.get(pwd_field) and payload[pwd_field] != _PASSWORD_MASK:
+                        payload[pwd_field] = encrypt(payload[pwd_field])
                 existing = db.query(Credential).filter(Credential.ip == payload["ip"]).first()
                 if existing:
                     for key, value in payload.items():
-                        if key in ("v3_auth_password", "v3_priv_password") and value == _PASSWORD_MASK:
+                        if key in ("v3_auth_password", "v3_priv_password", "community") and value == _PASSWORD_MASK:
                             continue
                         setattr(existing, key, value)
                     updated += 1
@@ -197,10 +197,13 @@ def bulk_import(kind: str, body: BulkImportRequest, request: Request, db: Sessio
                     inserted += 1
         else:
             for payload in valid_rows:
+                for pwd_field in ("v3_auth_password", "v3_priv_password"):
+                    if payload.get(pwd_field) and payload[pwd_field] != _PASSWORD_MASK:
+                        payload[pwd_field] = encrypt(payload[pwd_field])
                 existing = db.query(SnmpProfile).filter(SnmpProfile.label == payload["label"]).first()
                 if existing:
                     for key, value in payload.items():
-                        if key in ("v3_auth_password", "v3_priv_password") and value == _PASSWORD_MASK:
+                        if key in ("v3_auth_password", "v3_priv_password", "community") and value == _PASSWORD_MASK:
                             continue
                         setattr(existing, key, value)
                     updated += 1

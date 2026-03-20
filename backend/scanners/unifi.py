@@ -11,7 +11,7 @@ _MODEL_UNIFI = re.compile(
 _VIRTUAL_UNIFI = ("loopback", "vlan", "bridge", "cpu", "mgmt")
 
 
-class UniFiScanner(VendorScanner):
+class UniFiScanner(VendorScanner, vendor_id="unifi"):
 
     def extract_model(self, sys_descr: str) -> str:
         m = _MODEL_UNIFI.search(sys_descr or "")

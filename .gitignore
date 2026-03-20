@@ -42,3 +42,6 @@ bundle_debug.js
 todo.md
 .env.*
 !.env.example
+
+# Database backups
+backups/

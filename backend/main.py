@@ -1,6 +1,5 @@
 ﻿"""FastAPI application entry point -- NetMap backend."""
 import logging
-import os
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -15,6 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from database import create_tables, get_db
+from config import settings as app_settings
 from scan_engine import _background_scheduler
 from shared.auth import _require_auth
 from shared.metrics import REQUEST_LATENCY, REQUEST_TOTAL
@@ -25,12 +25,18 @@ from routers import (
     map_bg, scan_settings, bulk, config, logs, auth, audit, ws,
 )
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+logging.basicConfig(
+    level=getattr(logging, app_settings.log_level.upper(), logging.INFO),
+    format="%(levelname)s %(name)s: %(message)s",
+)
 _log = logging.getLogger(__name__)
 
-CORS_ORIGIN = os.getenv("CORS_ORIGIN", "http://localhost:3000")
+CORS_ORIGIN = app_settings.cors_origin
 if CORS_ORIGIN == "*":
-    _log.warning("CORS_ORIGIN is set to '*' -- this is insecure in production")
+    _log.warning(
+        "CORS_ORIGIN is set to '*' -- this is insecure in production. "
+        "Set CORS_ORIGIN to the specific frontend URL (e.g. https://netmap.example.com)"
+    )
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -43,8 +49,26 @@ async def lifespan(app: FastAPI):
     else:
         _log.info("Starting single-worker backend (in-process state requires workers=1)")
     create_tables()
-    threading.Thread(target=_background_scheduler, daemon=True).start()
+    if not app_settings.jwt_secret and not app_settings.secret_token:
+        _log.critical(
+            "SECURITY: No authentication configured (JWT_SECRET and SECRET_TOKEN are both unset). "
+            "All API endpoints are accessible without authentication. "
+            "Set JWT_SECRET or SECRET_TOKEN before deploying to production."
+        )
+    if not app_settings.encryption_key:
+        _log.critical(
+            "SECURITY: ENCRYPTION_KEY is not set. SNMP passwords will be stored in PLAINTEXT. "
+            'Generate a key with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
+        )
+    if not get_redis():
+        threading.Thread(target=_background_scheduler, daemon=True).start()
+    else:
+        _log.info("Celery Beat scheduler available (Redis connected); skipping thread-based scheduler")
     yield
+    # Shutdown cleanup
+    from scan_engine.scheduler import shutdown_scheduler
+    _log.info("Shutting down: signaling scheduler to stop")
+    shutdown_scheduler()
 
 
 app = FastAPI(title="NetMap API", version="1.0.0", dependencies=[Depends(_require_auth)], lifespan=lifespan)
@@ -73,7 +97,26 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         return response
 
 
+_SKIP_LOG_PATHS = {"/health", "/metrics", "/ws"}
+
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        if request.url.path in _SKIP_LOG_PATHS or request.url.path.startswith("/ws"):
+            return await call_next(request)
+        start = time.perf_counter()
+        response = await call_next(request)
+        duration_ms = (time.perf_counter() - start) * 1000
+        _log.info(
+            "request method=%s path=%s status=%d duration_ms=%.1f",
+            request.method, request.url.path, response.status_code, duration_ms,
+        )
+        return response
+
+
 app.add_middleware(MetricsMiddleware)
+if app_settings.request_log_enabled:
+    app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(health.router)
 app.include_router(settings.router)

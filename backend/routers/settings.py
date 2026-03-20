@@ -2,6 +2,8 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from database import AppSetting, Device, Port, ScanRun, get_db
@@ -11,6 +13,7 @@ from shared.auth import require_role
 from shared.audit import log_audit
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 
 @router.get("/api/settings", response_model=List[AppSettingOut])
@@ -20,6 +23,7 @@ def list_settings(db: Session = Depends(get_db)):
 
 @router.put("/api/settings/{key}", response_model=AppSettingOut,
             dependencies=[require_role("admin", "operator")])
+@limiter.limit("10/minute")
 def update_setting(key: str, body: AppSettingUpdate, request: Request, db: Session = Depends(get_db)):
     setting = db.query(AppSetting).filter(AppSetting.key == key).first()
     if not setting:

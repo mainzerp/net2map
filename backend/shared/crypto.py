@@ -1,8 +1,9 @@
 """Fernet-based encryption for sensitive fields (SNMP passwords)."""
 import logging
-import os
 
-_KEY = os.getenv("ENCRYPTION_KEY", "")
+from config import settings
+
+_KEY = settings.encryption_key
 if not _KEY:
     logging.getLogger(__name__).warning(
         "ENCRYPTION_KEY not set -- passwords stored unencrypted"

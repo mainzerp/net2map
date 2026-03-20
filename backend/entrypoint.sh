@@ -36,6 +36,29 @@ print('[entrypoint] ERROR: PostgreSQL not reachable after 60s')
 sys.exit(1)
 "
 
+echo "[entrypoint] Waiting for Redis..."
+python3 -c "
+import os, time, sys, socket
+url = os.environ.get('REDIS_URL', '')
+if not url:
+    print('[entrypoint] No REDIS_URL set, skipping Redis check.')
+    sys.exit(0)
+try:
+    host = url.split('://')[1].split(':')[0].split('/')[0]
+    port = int(url.split('://')[1].split(':')[1].split('/')[0]) if ':' in url.split('://')[1] else 6379
+except Exception:
+    host, port = 'redis', 6379
+for i in range(30):
+    try:
+        socket.create_connection((host, port), timeout=2).close()
+        print(f'[entrypoint] Redis at {host}:{port} is ready.')
+        sys.exit(0)
+    except OSError:
+        time.sleep(1)
+print('[entrypoint] WARNING: Redis not reachable after 30s, continuing anyway')
+sys.exit(0)
+"
+
 echo "[entrypoint] Running Alembic migrations..."
 gosu appuser alembic -c /app/alembic.ini upgrade head
 

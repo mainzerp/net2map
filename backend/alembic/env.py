@@ -1,10 +1,10 @@
 """Alembic environment configuration for switch-map."""
-import os
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
+from config import settings as app_settings
 
 # ---------------------------------------------------------------------------
 # Pull the Alembic Config object (gives access to .ini values)
@@ -13,10 +13,9 @@ config = context.config
 
 # Override sqlalchemy.url from environment so the same ini works in Docker
 # and in local bare-Python dev.
-_db_url = os.environ.get("DATABASE_URL")
-if not _db_url:
+if not app_settings.database_url:
     raise RuntimeError("DATABASE_URL environment variable is required for migrations")
-config.set_main_option("sqlalchemy.url", _db_url)
+config.set_main_option("sqlalchemy.url", app_settings.database_url)
 
 # ---------------------------------------------------------------------------
 # Logging setup from alembic.ini

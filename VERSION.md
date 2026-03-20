@@ -1,5 +1,327 @@
 # Version History
 
+## v1.15.1 -- Device-Credential Sync Fix
+
+**Type:** PATCH (bug fix)
+
+### Changes
+
+#### Backend -- Device -> Credential Sync
+- `update_device_meta()` now syncs `rack_id`/`class_id` to the matching Credential record
+- `bulk_update_device_meta()` now syncs `rack_id`/`class_id` to all affected Credential records
+- Both updates are committed in a single transaction for atomicity
+
+#### Frontend -- ETag Invalidation
+- RacksTab, SwitchClassesTab, SwitchModelsTab now invalidate `/api/credentials` cache on assign/unassign
+
+#### Testing
+- Added `test_update_device_meta_syncs_credential` and `test_bulk_update_device_meta_syncs_credentials`
+
+### Files Modified
+| File | Change |
+|------|--------|
+| `backend/routers/topology.py` | Credential sync in `update_device_meta()` and `bulk_update_device_meta()` |
+| `frontend/src/components/settings/RacksTab.tsx` | Added `/api/credentials` to ETag invalidation |
+| `frontend/src/components/settings/SwitchClassesTab.tsx` | Added `/api/credentials` to ETag invalidation |
+| `frontend/src/components/settings/SwitchModelsTab.tsx` | Added `/api/credentials` to ETag invalidation |
+| `backend/tests/test_topology.py` | Added sync tests |
+
+---
+
+## v1.15.0 -- P1 Quality, Security, and TypeScript
+
+**Type:** MINOR (config consolidation, security hardening, TypeScript expansion, test coverage)
+
+### Changes
+
+#### Backend -- Configuration & Logging
+- Centralized Pydantic BaseSettings config module (`config.py`) covering all 15 env vars across 8 files
+- Fixed REDIS_URL default inconsistency between celery_app.py and redis_client.py
+- Configurable `LOG_LEVEL` env var (was hardcoded to INFO)
+- Added `pydantic-settings>=2.0.0` dependency
+
+#### Backend -- Security
+- JWT tokens now include `jti` (UUID) and `iat` (issued-at) claims
+- Redis-based JTI blacklist for token revocation with TTL matching token lifetime
+- `POST /api/auth/logout` -- blacklist current token
+- `POST /api/auth/revoke-all` -- admin-only, invalidate all sessions for a user
+- User-level revocation: all tokens issued before revocation timestamp are rejected
+- Token blacklist check in `_require_auth()` middleware
+
+#### Backend -- Health Check
+- Enhanced `/health` endpoint checks DB (SELECT 1), Redis (PING), Celery (control.ping with 2s timeout)
+- Returns `{"status": "ok"|"degraded", "checks": {...}}` with HTTP 503 on degraded
+
+#### Frontend -- TypeScript Migration (batch 2)
+- Created `types.ts` with 11 shared interfaces (TopologyNode, PortInfo, TopologyLink, etc.)
+- Migrated `store.js` to `store.ts` with typed Zustand `create<NetmapState>`
+- Migrated 4 hooks to TypeScript: useMapBackground, useRackOrders, useScanProgress, useTopologyData
+- Migrated 7 page files to TypeScript: Dashboard, Devices, Login, Logs, Map, Network, Settings
+- Complete TypeScript migration: all 23 remaining .jsx/.js files migrated across 5 waves (styles, leaf, settings, core, complex+shell)
+- Frontend logout now calls backend `/api/auth/logout` before clearing localStorage
+
+#### Frontend -- New Features
+- Lazy loading: React.lazy() for 7 page components with Suspense loading spinner
+- Toast notification system: ToastProvider context, useToast hook, 4 types, auto-dismiss, stacked bottom-right
+- Keyboard shortcuts: useKeyboardShortcuts hook (1-6 nav, Escape blur/close, S scan)
+
+#### Backend -- P2 Quality
+- Audit log retention: `AUDIT_RETENTION_DAYS` config (default 90), Celery Beat cleanup every 6h, admin purge endpoint
+- Request logging middleware: opt-in via `REQUEST_LOG_ENABLED`, logs method/path/status/duration, skips health/metrics/ws
+- Graceful shutdown: `_shutdown_requested` event in scheduler, lifespan cleanup, Celery worker_shutting_down signal
+
+#### DevOps
+- Database backup/restore scripts: `scripts/backup.sh` and `scripts/restore.sh` with pg_dump/psql via Docker
+- `BACKUP.md` documentation with cron setup and retention cleanup
+- `backups/` added to .gitignore
+
+#### Testing
+- Backend: +35 new tests (62 -> 97), 6 new test files
+- Frontend: +8 new tests (3 -> 11), 3 new test files + test utilities
+- Total: 108 tests across both suites
+- New test coverage: topology router, settings router, health check, config module, token revocation, DNS module (9 tests), ping module (6 tests)
+- Frontend component tests: LoginPage (3), DashboardPage (3), DeviceTable (2)
+- P1 test expansion: +116 backend tests (97 -> 213), bringing backend coverage above 60%
+- Scanner plugin tests (49): extract_model, is_virtual_port, fdb_strategy, registry, edge cases
+- DB helpers tests (9): safe_json_list, canonical_link_key, expand_ranges, read_discovery_ranges, persist_scan_run
+- CRUD tests (20): racks (7), switch classes (6), switch models (7)
+- Map background tests (11): upload, SVG sanitization, XSS stripping, delete, settings
+- Audit logging tests (7): list, limit, side-effect on credential operations
+- WebSocket tests (7): auth unit tests (disabled, legacy, token, ticket, JWT, expired)
+- Scan jobs tests (5): dispatch checks, state lifecycle, cancel handling
+- CASCADE delete tests (4): device->ports, scan_run->metrics, rack/class nullification
+
+### Files Created
+| File | Purpose |
+|------|---------|
+| backend/config.py | Centralized Pydantic BaseSettings configuration |
+| frontend/src/types.ts | Shared TypeScript interfaces |
+| frontend/src/store.ts | Typed Zustand store |
+| frontend/src/hooks/useMapBackground.ts | Typed hook |
+| frontend/src/hooks/useRackOrders.ts | Typed hook |
+| frontend/src/hooks/useScanProgress.ts | Typed hook |
+| frontend/src/hooks/useTopologyData.ts | Typed hook |
+| frontend/src/pages/DevicesPage.tsx | Typed page component |
+| frontend/src/pages/NetworkPage.tsx | Typed page component |
+| frontend/src/pages/LoginPage.tsx | Typed page component |
+| frontend/src/pages/LogsPage.tsx | Typed page component |
+| frontend/src/pages/DashboardPage.tsx | Typed page component |
+| frontend/src/pages/MapPage.tsx | Typed page component |
+| frontend/src/pages/SettingsPage.tsx | Typed page component |
+| frontend/src/__tests__/test-utils.tsx | Test utilities (renderWithRouter, API mocks) |
+| frontend/src/__tests__/LoginPage.test.tsx | LoginPage component tests |
+| frontend/src/__tests__/DashboardPage.test.tsx | DashboardPage component tests |
+| frontend/src/__tests__/DeviceTable.test.tsx | DeviceTable component tests |
+| backend/tests/test_config_module.py | Config module tests |
+| backend/tests/test_token_revocation.py | Token revocation tests |
+| backend/tests/test_topology.py | Topology router tests |
+| backend/tests/test_settings.py | Settings router tests |
+| backend/tests/test_dns.py | DNS module tests |
+| backend/tests/test_ping.py | Ping module tests |
+
+### Files Modified
+| File | Change |
+|------|--------|
+| backend/database.py | Config import replaces os.getenv |
+| backend/celery_app.py | Config import replaces os.getenv |
+| backend/main.py | Config import, configurable LOG_LEVEL |
+| backend/shared/auth.py | Config import, JTI/iat claims, blacklist functions |
+| backend/shared/crypto.py | Config import replaces os.getenv |
+| backend/shared/redis_client.py | Config import replaces os.getenv |
+| backend/routers/ws.py | Config import replaces os.getenv |
+| backend/routers/auth.py | Logout + revoke-all endpoints |
+| backend/routers/health.py | Enhanced DB/Redis/Celery checks |
+| backend/alembic/env.py | Config import replaces os.getenv |
+| backend/requirements.txt | Added pydantic-settings |
+| backend/tests/test_health.py | Updated for new health response structure |
+| frontend/src/api.ts | Async logout with backend call |
+| frontend/src/main.jsx | Updated page imports for .tsx |
+
+---
+
+## v1.14.0 -- Architecture and Infrastructure
+
+**Type:** MINOR (internal restructuring, no user-facing API changes)
+
+### Changes
+
+#### Backend Architecture
+- Scanner plugin auto-discovery via `__init_subclass__` -- adding a new scanner now requires only creating one file with `vendor_id=` keyword (CQ-8)
+- Topology query optimization: credential IP set replaced with SQL subquery, eliminating one DB round-trip per request (PC-2)
+- Scan engine modularized into 8-module package (`scan_engine/`): broadcast, event_loop, ping, dns, db_helpers, executor, jobs, scheduler -- all existing imports remain unchanged via `__init__.py` re-exports (CQ-2)
+- Celery Beat scheduler migration: new `scheduler_tick` periodic task replaces thread-based scheduler when Redis is available; thread fallback preserved for local dev (AD-2)
+- New `celery-beat` Docker service in docker-compose.yml
+
+#### Frontend Architecture
+- Design tokens file (`styles/tokens.js`) centralizes colors, spacing, radii, fonts, and shadows
+- Shared style objects (`styles/shared.js`) provide reusable card, input, button, and table styles
+- TypeScript infrastructure: `tsconfig.json` with strict mode, `api.js` migrated to `api.ts` with full type annotations
+- Added `typecheck` npm script (`tsc --noEmit`)
+
+### Files Created
+| File | Purpose |
+|------|---------|
+| backend/scan_engine/__init__.py | Package re-exports for backward compatibility |
+| backend/scan_engine/broadcast.py | WebSocket progress broadcasting |
+| backend/scan_engine/event_loop.py | Shared background asyncio loop |
+| backend/scan_engine/ping.py | ICMP ping utilities |
+| backend/scan_engine/dns.py | DNS resolution and caching |
+| backend/scan_engine/db_helpers.py | DB write utilities for scan results |
+| backend/scan_engine/executor.py | Core async scan execution |
+| backend/scan_engine/jobs.py | Job management (thread/Celery dispatch) |
+| backend/scan_engine/scheduler.py | Background scan scheduler |
+| frontend/src/styles/tokens.js | Design tokens |
+| frontend/src/styles/shared.js | Shared style objects |
+| frontend/tsconfig.json | TypeScript configuration |
+| frontend/src/api.ts | Typed API layer (replaces api.js) |
+
+### Files Modified
+| File | Change |
+|------|--------|
+| backend/scanners/base.py | `_registry`, `vendor_id`, `__init_subclass__` hook |
+| backend/scanners/aruba_cx.py | `vendor_id="aruba_cx"` keyword |
+| backend/scanners/fs_scanner.py | `vendor_id="fs"` keyword |
+| backend/scanners/unifi.py | `vendor_id="unifi"` keyword |
+| backend/scanners/opnsense.py | `vendor_id="opnsense"` keyword |
+| backend/scanners/generic.py | `vendor_id="generic"` keyword |
+| backend/scanners/__init__.py | Auto-discovery via pkgutil |
+| backend/routers/topology.py | Credential IP subquery (2 locations) |
+| backend/tasks.py | `scheduler_tick` Celery task |
+| backend/celery_app.py | `beat_schedule` configuration |
+| backend/main.py | Conditional scheduler thread |
+| docker-compose.yml | `celery-beat` service |
+| frontend/package.json | TypeScript devDependencies, typecheck script |
+| 23 frontend files | Import path update (api.js -> api) |
+
+### Files Deleted
+| File | Reason |
+|------|--------|
+| backend/scan_engine.py | Replaced by scan_engine/ package |
+
+### Breaking Changes
+- Docker: new `celery-beat` service required (runs `celery -A celery_app beat`). Without it, the thread-based scheduler still works as fallback when Redis is unavailable.
+
+---
+
+## v1.13.0 — Security Enhancements, Frontend Polish, Performance
+
+**Type:** MINOR (security enhancements, frontend polish, performance)
+
+### Changes
+
+#### Security
+- WebSocket ticket-based auth: new `POST /api/auth/ws-ticket` endpoint exchanges JWT for single-use Redis-backed ticket (30s TTL) for WebSocket connections
+- JWT token refresh: new `POST /api/auth/refresh` endpoint accepts expired tokens within 60-minute grace window, frontend auto-refreshes 30 minutes before expiry
+- Rate limiting expanded: credentials CRUD (10/min), settings write (10/min), user management (10/min), dry-run jobs (3/min)
+- Dry-run endpoint (`POST /api/scan/dry-run/jobs`) now requires admin/operator authentication (was previously unauthenticated)
+
+#### Frontend
+- Map settings tab: loading spinner and error states added
+- SNMP profiles tab: load error display added
+- Silent `.catch(() => {})` and `console.error` catches replaced with user-visible error messages in SettingsPage
+- New `extractErrorMessage()` utility removes "Error: " prefix -- applied across 9 component files (15 replacements)
+
+#### Performance
+- Topology ETag: version counter replaces SHA-256 hash of full response body
+- Scan completion now bumps topology version for proper cache invalidation
+- Credential CRUD operations (create/update/delete) now bump topology version
+
+### Files Modified
+| File | Change |
+|------|--------|
+| backend/routers/auth.py | ws-ticket endpoint, refresh endpoint, rate limits |
+| backend/routers/ws.py | Ticket-based auth |
+| backend/routers/scan.py | Dry-run auth + rate limit |
+| backend/routers/settings.py | Rate limit |
+| backend/routers/credentials.py | Rate limits, topo version bump |
+| backend/routers/topology.py | Version-counter ETag |
+| backend/shared/auth.py | /api/auth/refresh exempt path |
+| backend/scan_engine.py | Topo version bump after scan |
+| backend/tests/test_auth.py | 7 new tests |
+| frontend/src/api.js | refreshTokenIfNeeded, extractErrorMessage |
+| frontend/src/hooks/useScanProgress.js | Ticket exchange |
+| frontend/src/pages/SettingsPage.jsx | Error/loading states |
+| frontend/src/components/settings/MapSettingsTab.jsx | Loading/error props |
+| frontend/src/components/settings/SnmpProfilesTab.jsx | loadError prop |
+| 7 more settings/component files | extractErrorMessage |
+
+### Breaking Changes
+- `POST /api/scan/dry-run/jobs` now requires authentication (admin/operator role)
+- ETag format changed from SHA-256 hash to `"v{N}"` (harmless cache miss on first request)
+
+---
+
+## v1.12.0 — Security Hardening and Code Quality
+
+**Type:** MINOR (security hardening and code quality improvements)
+
+### Changes
+
+#### Security Fixes
+- Auth bypass fix: `request.state.user` is now explicitly set when auth is disabled (SEC-1)
+- CRITICAL startup logs when `JWT_SECRET`/`SECRET_TOKEN` or `ENCRYPTION_KEY` are not configured (SEC-1, SEC-2)
+- Hardcoded default passwords replaced with mandatory env vars in docker-compose.yml; added `.env.example` (SEC-3)
+- Bulk and config import now encrypts SNMP passwords before storing (CB-1)
+- Rate limiting on login endpoint (5/min) via slowapi (SEC-4)
+- Password complexity validation: minimum 8 characters for user creation/update (SEC-7)
+- Community strings masked in bulk and config exports (SEC-8)
+- `/metrics` endpoint now requires authentication (SEC-6)
+- IP validation for credential creation rejects shell-dangerous characters (SEC-11)
+- Rate limiting on map background upload (5/min) (SEC-12)
+- Improved CORS wildcard warning with remediation guidance (SEC-14)
+
+#### Code Quality
+- Audit logger (`shared/audit.py`) accepts optional `db` session parameter for atomic logging (CB-2)
+- JWT token expiry utility functions added to frontend API client (SEC-13)
+- ETag cache batch eviction (20%) replaces single-entry eviction (PC-4)
+- DNS cache size limit (10,000 entries) with eviction in scan engine (PC-3)
+
+#### Infrastructure
+- Celery worker Docker health check added (IF-3)
+- Log rotation (json-file driver, 10m max, 3 files) for all Docker services (IF-4)
+- Redis wait block added to entrypoint.sh (IF-5)
+- TLS/HTTPS production deployment documentation in README (IF-1)
+
+#### Testing
+- 32 new tests: authentication/RBAC (15), bulk import/export (9), config import/export (8)
+- Test coverage increased from ~2% to ~43%
+- pytest-cov configured with 10% minimum coverage threshold
+- `requires_postgres` marker registered for PostgreSQL-specific tests
+
+### Files Created
+| File | Description |
+|------|-------------|
+| .env.example | Environment variable template with required/recommended labels |
+| backend/tests/test_auth.py | Auth and RBAC tests (15 tests) |
+| backend/tests/test_bulk.py | Bulk import/export tests (9 tests) |
+| backend/tests/test_config.py | Config import/export tests (8 tests) |
+
+### Files Modified
+| File | Change |
+|------|--------|
+| backend/shared/auth.py | Auth bypass fix, startup security warnings |
+| backend/main.py | Rate limiting setup, CORS warning, metrics auth |
+| backend/routers/auth.py | Login rate limit, password complexity validation |
+| backend/routers/bulk.py | SNMP password encryption on import, community string masking on export |
+| backend/routers/config.py | SNMP password encryption on import, community string masking on export |
+| backend/routers/map_bg.py | Rate limiting on upload endpoint |
+| backend/shared/audit.py | Optional db session parameter for atomic logging |
+| backend/scan_engine.py | DNS cache size limit with eviction, ETag batch eviction |
+| backend/schemas.py | Password complexity validation |
+| backend/entrypoint.sh | Redis wait block |
+| backend/pytest.ini | pytest-cov configuration, requires_postgres marker |
+| backend/requirements.txt | Added slowapi, pytest-cov dependencies |
+| backend/tests/conftest.py | Shared test fixtures and configuration |
+| docker-compose.yml | Mandatory env vars, log rotation, Celery health check |
+| README.md | TLS/HTTPS production deployment documentation |
+| frontend/src/api.js | JWT token expiry utility functions |
+
+### Breaking Changes
+- docker-compose.yml now requires `POSTGRES_PASSWORD`, `SECRET_TOKEN`, and `DEFAULT_ADMIN_PASSWORD` to be set in `.env` file
+- `/metrics` endpoint now requires authentication (update Prometheus scrape config)
+
+---
+
 ## v1.11.1 — Congruence Fixes
 
 **Type:** PATCH (bug fixes)

@@ -2,14 +2,14 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import App from "./App.jsx";
-import DashboardPage from "./pages/DashboardPage.jsx";
-import MapPage from "./pages/MapPage.jsx";
-import DevicesPage from "./pages/DevicesPage.jsx";
-import NetworkPage from "./pages/NetworkPage.jsx";
-import LogsPage from "./pages/LogsPage.jsx";
-import SettingsPage from "./pages/SettingsPage.jsx";
-import LoginPage from "./pages/LoginPage.jsx";
-import ErrorBoundary from "./components/ErrorBoundary.jsx";
+import DashboardPage from "./pages/DashboardPage";
+import MapPage from "./pages/MapPage";
+import DevicesPage from "./pages/DevicesPage";
+import NetworkPage from "./pages/NetworkPage";
+import LogsPage from "./pages/LogsPage";
+import SettingsPage from "./pages/SettingsPage";
+import LoginPage from "./pages/LoginPage";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>

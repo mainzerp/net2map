@@ -23,6 +23,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import database as _db_mod
+from database import User
+from shared.auth import create_token, hash_password
 from main import app
 
 # In-memory SQLite engine with shared cache so all connections see the same DB
@@ -37,6 +39,12 @@ TestSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # imports that use database.SessionLocal also hit the test database.
 _db_mod.engine = engine
 _db_mod.SessionLocal = TestSession
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "requires_postgres: test requires PostgreSQL (skipped with SQLite)"
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -72,3 +80,31 @@ def client(db):
 @pytest.fixture
 def auth_headers():
     return {"Authorization": "Bearer test-token"}
+
+
+@pytest.fixture
+def jwt_headers(db):
+    """Create a test admin user and return JWT auth headers."""
+    user = User(
+        username="testadmin", email="admin@test.com",
+        hashed_pw=hash_password("TestPass123"), role="admin", is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    token = create_token(user.id, user.username, user.role)
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def viewer_jwt_headers(db):
+    """Create a test viewer user and return JWT auth headers."""
+    user = User(
+        username="testviewer", email="viewer@test.com",
+        hashed_pw=hash_password("ViewPass123"), role="viewer", is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    token = create_token(user.id, user.username, user.role)
+    return {"Authorization": f"Bearer {token}"}

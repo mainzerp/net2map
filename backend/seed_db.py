@@ -282,6 +282,9 @@ def seed(db: Session):
             map_y     = cy + oy,
             rack_id   = mr.id,
             class_id  = cls_tor.id,
+            label     = f"{rack['label']} TOR-1 -- {FS_MODEL}",
+            is_managed = True,
+            enabled   = True,
         )
         db.add(fs1); db.flush()
         for p in make_fs_ports(fs1.id, ri, 0):
@@ -300,6 +303,9 @@ def seed(db: Session):
             map_y     = cy + oy,
             rack_id   = mr.id,
             class_id  = cls_tor.id,
+            label     = f"{rack['label']} TOR-2 -- {FS_MODEL}",
+            is_managed = True,
+            enabled   = True,
         )
         db.add(fs2); db.flush()
         for p in make_fs_ports(fs2.id, ri, 1):
@@ -318,6 +324,9 @@ def seed(db: Session):
             map_y     = cy + oy,
             rack_id   = mr.id,
             class_id  = cls_acc.id,
+            label     = f"{rack['label']} ACC-1 -- {ARUBA_CX_6300['model']}",
+            is_managed = True,
+            enabled   = True,
         )
         db.add(aruba1); db.flush()
         for p in make_aruba_6300_ports(aruba1.id, ri, 2):
@@ -336,6 +345,9 @@ def seed(db: Session):
             map_y     = cy + oy,
             rack_id   = mr.id,
             class_id  = cls_acc.id,
+            label     = f"{rack['label']} ACC-2 -- {ARUBA_CX_6300['model']}",
+            is_managed = True,
+            enabled   = True,
         )
         db.add(aruba2); db.flush()
         for p in make_aruba_6300_ports(aruba2.id, ri, 3):
@@ -354,6 +366,9 @@ def seed(db: Session):
             map_y     = cy + oy,
             rack_id   = mr.id,
             class_id  = cls_acc.id,
+            label     = f"{rack['label']} ACC-3 -- {ARUBA_CX_6200['model']}",
+            is_managed = True,
+            enabled   = True,
         )
         db.add(aruba3); db.flush()
         for p in make_aruba_6200_ports(aruba3.id, ri, 4):
@@ -368,11 +383,11 @@ def seed(db: Session):
         for sw, role in [(fs1,"TOR-1"),(fs2,"TOR-2"),(aruba1,"ACC-1"),(aruba2,"ACC-2"),(aruba3,"ACC-3")]:
             is_fs = sw.vendor == "fs"
             db.add(Credential(
-                label             = f"{rack['label']} {role} – {sw.model}",
+                label             = f"{rack['label']} {role} -- {sw.model}",
                 ip                = sw.ip,
                 snmp_port         = 161,
-                location          = location,
                 enabled           = True,
+                device_id         = sw.id,
                 profile_id        = prof_fs.id if is_fs else prof_aruba.id,
                 snmp_version      = "v3",
                 community         = "public",
