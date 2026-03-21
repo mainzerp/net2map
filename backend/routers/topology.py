@@ -2,7 +2,6 @@
 import hashlib
 import json
 import time
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
@@ -14,7 +13,6 @@ from database import SwitchClass as SwitchClassModel
 from database import SwitchModel as SwitchModelModel
 from schemas import (
     BulkDeviceMetaUpdate, DeviceMetaUpdate, DeviceOut, DevicePositionUpdate,
-    FoundOnPort,
     RackOut, RackPositionUpdate, TopologyOut,
 )
 from shared.auth import require_role
@@ -90,10 +88,9 @@ def get_topology(request: Request, db: Session = Depends(get_db)):
             headers={"ETag": topo_cache["etag"], "Cache-Control": "no-cache"},
         )
 
-    # Only show managed devices that are not ignored
+    # Only show devices that are not ignored
     nodes   = db.query(Device).filter(
         Device.ignored == False,
-        Device.is_managed == True,
     ).all()
     links   = db.query(TopologyLink).all()
     racks   = db.query(RackModel).order_by(RackModel.id).all()
@@ -248,42 +245,12 @@ def update_device_meta(
 def list_all_devices(
     request: Request,
     db: Session = Depends(get_db),
-    role: Optional[str] = None,
 ):
-    """Returns devices, optionally filtered by role (network/endpoint)."""
-    query = db.query(Device)
-    if role in ("network", "endpoint"):
-        if role == "network":
-            query = query.filter(Device.is_managed == True)
-        else:
-            query = query.filter(Device.is_managed == False)
-    devices = query.order_by(Device.ip).all()
+    """Returns all network devices."""
+    devices = db.query(Device).order_by(Device.ip).all()
     models  = db.query(SwitchModelModel).all()
     model_ppr = {m.id: m.ports_per_row for m in models}
     model_tp  = {m.id: m.total_ports   for m in models}
-
-    # Build found_on lookup for devices whose IP appears as peer_ip on a port
-    device_ips = [d.ip for d in devices]
-    found_on_map = {}
-    if device_ips:
-        matching_ports = (
-            db.query(PortModel, Device)
-            .join(Device, Device.id == PortModel.device_id)
-            .filter(PortModel.peer_ip.in_(device_ips))
-            .all()
-        )
-        for port_row, switch_row in matching_ports:
-            ep_ip = port_row.peer_ip
-            if ep_ip and ep_ip not in found_on_map:
-                found_on_map[ep_ip] = FoundOnPort(
-                    switch_name=switch_row.sys_name or "",
-                    switch_ip=switch_row.ip or "",
-                    port_name=port_row.if_descr or "",
-                    port_id=port_row.id,
-                    rack_id=switch_row.rack_id,
-                    peer_mac=port_row.peer_mac or "",
-                    peer_host=port_row.peer_host or "",
-                )
 
     result = []
     for d in devices:
@@ -292,8 +259,6 @@ def list_all_devices(
             dout.ports_per_row = model_ppr[d.model_id]
         if d.model_id and d.model_id in model_tp:
             dout.total_ports = model_tp[d.model_id]
-        if d.ip in found_on_map:
-            dout.found_on = found_on_map[d.ip]
         result.append(dout)
     body = json.dumps([d.model_dump() for d in result], default=str)
     etag = f'"{ hashlib.sha256(body.encode()).hexdigest()[:32]}"'

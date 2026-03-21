@@ -67,9 +67,7 @@ export default function SwitchDetailSlideIn({ deviceId, nodes, topologyLinks, ra
     { key: "speed_mbps",    label: "SPEED",         align: "right" },
     { key: "vlan",          label: "NATIVE VLAN",   align: "right" },
     { key: "tagged_vlans",  label: "TAGGED VLANS",  align: "left" },
-    { key: "peer_mac",      label: "MAC ADDRESS",   align: "left" },
-    { key: "peer_ip",       label: "IP",            align: "left" },
-    { key: "peer_host",     label: "HOSTNAME",      align: "left" },
+    { key: "endpoint_count",label: "ENDPOINTS",     align: "right" },
   ];
 
   const handleSort = (col: string) => {
@@ -238,25 +236,8 @@ export default function SwitchDetailSlideIn({ deviceId, nodes, topologyLinks, ra
                             ? port.tagged_vlans.join(", ")
                             : "-"}
                         </td>
-                        <td style={{ padding: "8px 10px", color: "#94a3b8", fontFamily: "monospace", fontSize: 10 }}>
-                          {port.peer_mac || "-"}
-                        </td>
-                        <td style={{ padding: "8px 10px", color: "#94a3b8", fontFamily: "monospace", fontSize: 10 }}>
-                          {partnerIp && (
-                            <span style={{ color: cableColor || "#22d3ee" }} title="Link partner">
-                              {partnerIp}
-                            </span>
-                          )}
-                          {partnerIp && port.peer_ip && (
-                            <span style={{ color: "#334155" }}>{" | "}</span>
-                          )}
-                          {port.peer_ip && (
-                            <span>{port.peer_ip}</span>
-                          )}
-                          {!partnerIp && !port.peer_ip && "-"}
-                        </td>
-                        <td style={{ padding: "8px 10px", color: "#94a3b8" }}>
-                          {port.peer_host || "-"}
+                        <td style={{ padding: "8px 10px", color: "#22d3ee", textAlign: "right" }}>
+                          {port.endpoint_count || 0}
                         </td>
                       </tr>
                     );

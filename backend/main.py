@@ -23,6 +23,7 @@ from routers import (
     health, settings, credentials, snmp_profiles, racks,
     switch_classes, switch_models, scan, scan_runs, topology,
     map_bg, scan_settings, bulk, config, logs, auth, audit, ws,
+    endpoints,
 )
 
 logging.basicConfig(
@@ -136,6 +137,7 @@ app.include_router(logs.router)
 app.include_router(auth.router)
 app.include_router(audit.router)
 app.include_router(ws.router)
+app.include_router(endpoints.router)
 
 
 @app.get("/metrics", include_in_schema=False)

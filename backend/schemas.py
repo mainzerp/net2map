@@ -309,11 +309,7 @@ class PortOut(BaseModel):
     if_alias:    Optional[str] = ""
     speed_mbps:  Optional[int] = 0
     oper_status: Optional[int] = 0
-    peer_mac:    Optional[str] = ""
-    peer_ip:     Optional[str] = ""
-    peer_host:   Optional[str] = ""
-    endpoint_count:        Optional[int] = 0
-    endpoint_details_json: Any = []
+    endpoint_count: int = 0
     vlan:        Optional[int] = 0
     tagged_vlans: Optional[List[int]] = None
 
@@ -321,33 +317,25 @@ class PortOut(BaseModel):
     @classmethod
     def _coerce_nulls(cls, data):
         if hasattr(data, "__dict__"):
-            # ORM object — convert to dict-like via __dict__
+            # ORM object -- convert to dict-like via __dict__
             data = {k: v for k, v in data.__dict__.items() if not k.startswith("_")}
         if isinstance(data, dict):
             defaults = {
                 "if_index": 0, "if_descr": "", "if_alias": "", "speed_mbps": 0,
-                "oper_status": 0, "peer_mac": "", "peer_ip": "", "peer_host": "",
-                "endpoint_count": 0, "endpoint_details_json": [], "vlan": 0,
+                "oper_status": 0, "vlan": 0,
                 "tagged_vlans": [],
             }
             for field, fallback in defaults.items():
                 if data.get(field) is None:
                     data[field] = fallback
+            # Compute endpoint_count from associations if present
+            if "endpoint_count" not in data or data.get("endpoint_count") is None:
+                assocs = data.get("endpoint_associations")
+                data["endpoint_count"] = len(assocs) if assocs else 0
         return data
 
     class Config:
         from_attributes = True
-
-
-class FoundOnPort(BaseModel):
-    """Where an endpoint device was discovered (switch + port)."""
-    switch_name: str = ""
-    switch_ip: str = ""
-    port_name: str = ""
-    port_id: int = 0
-    rack_id: Optional[int] = None
-    peer_mac: str = ""
-    peer_host: str = ""
 
 
 # ─── Device ───────────────────────────────────────────────────────────────────
@@ -366,7 +354,6 @@ class DeviceBase(BaseModel):
     ignored:   bool  = False
     label:     str   = ""
     enabled:   bool  = True
-    is_managed: bool = False
 
 
 class DeviceOut(DeviceBase):
@@ -380,7 +367,6 @@ class DeviceOut(DeviceBase):
     model_id:      Optional[int] = None
     ports_per_row: Optional[int] = None   # resolved from switch_model
     total_ports:   Optional[int] = None   # port cutoff: ports beyond this index are hidden
-    found_on:      Optional[FoundOnPort] = None
 
 
 class RackPositionUpdate(BaseModel):
@@ -412,6 +398,46 @@ class BulkDeviceMetaUpdate(BaseModel):
     ignored: Optional[bool] = None
     rack_id: Optional[int] = None
     class_id: Optional[int] = None
+
+
+# ─── Endpoint ─────────────────────────────────────────────────────────────────
+
+class EndpointPortInfo(BaseModel):
+    """Port where an endpoint was seen."""
+    port_id: int
+    switch_ip: str = ""
+    switch_name: str = ""
+    port_name: str = ""
+    vlan_id: Optional[int] = None
+    last_seen: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class EndpointOut(BaseModel):
+    id: int
+    mac: str
+    ip: Optional[str] = None
+    hostname: Optional[str] = None
+    first_seen: Optional[datetime] = None
+    last_seen: Optional[datetime] = None
+    ignored: bool = False
+    notes: Optional[str] = None
+    found_on: List[EndpointPortInfo] = []
+
+    class Config:
+        from_attributes = True
+
+
+class EndpointUpdate(BaseModel):
+    ignored: Optional[bool] = None
+    notes: Optional[str] = None
+
+
+class BulkEndpointUpdate(BaseModel):
+    endpoint_ids: List[int]
+    ignored: Optional[bool] = None
 
 
 # ─── Topology Link ────────────────────────────────────────────────────────────

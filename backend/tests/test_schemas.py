@@ -8,6 +8,10 @@ from schemas import (
     MapSettingsUpdate,
     ErrorDetail,
     APIError,
+    EndpointOut,
+    EndpointPortInfo,
+    EndpointUpdate,
+    BulkEndpointUpdate,
 )
 
 
@@ -90,3 +94,32 @@ def test_map_settings_clamps_scale():
 def test_map_settings_truncates_bg_color():
     m = MapSettingsUpdate(bg_color="a" * 50)
     assert len(m.bg_color) == 20
+
+
+# ── Endpoint schemas ──────────────────────────────────────────────────────────
+
+def test_endpoint_out_defaults():
+    ep = EndpointOut(id=1, mac="aa:bb:cc:dd:ee:ff")
+    assert ep.ip is None
+    assert ep.hostname is None
+    assert ep.ignored is False
+    assert ep.notes is None
+    assert ep.found_on == []
+
+
+def test_endpoint_port_info():
+    info = EndpointPortInfo(port_id=1, switch_ip="10.0.0.1", switch_name="sw1", port_name="eth0")
+    assert info.vlan_id is None
+    assert info.last_seen is None
+
+
+def test_endpoint_update_partial():
+    u = EndpointUpdate(ignored=True)
+    assert u.ignored is True
+    assert u.notes is None
+
+
+def test_bulk_endpoint_update():
+    b = BulkEndpointUpdate(endpoint_ids=[1, 2, 3], ignored=True)
+    assert len(b.endpoint_ids) == 3
+    assert b.ignored is True

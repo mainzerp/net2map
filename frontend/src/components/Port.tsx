@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { speedLabel, speedColor, normPort } from "../api";
-import type { PortInfo, TopologyLink, EndpointDetail } from "../types";
+import type { PortInfo, TopologyLink } from "../types";
 import PortDetailModal from "./PortDetailModal";
 
 interface PortLinkMapEntry {
@@ -52,22 +52,7 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
   const active   = port.oper_status === 1;
   const spd      = (port.speed_mbps ?? port.speed ?? 0);
   const base     = !active ? "#1e293b" : speedColor(spd);
-  const parsedEndpoints: EndpointDetail[] = (() => {
-    const raw = port.endpoint_details_json;
-    if (Array.isArray(raw)) return raw as EndpointDetail[];
-    if (!raw) return [];
-    try {
-      const value = typeof raw === "string" ? JSON.parse(raw) : raw;
-      return Array.isArray(value) ? value as EndpointDetail[] : [];
-    } catch {
-      return [];
-    }
-  })();
-  const endpointCount = Math.max(
-    Number(port.endpoint_count || 0),
-    parsedEndpoints.length,
-    (port.peer_ip || port.peer_mac) ? 1 : 0,
-  );
+  const endpointCount = Number(port.endpoint_count || 0);
   const hasDev   = endpointCount > 0;
 
   const linkEntry = portLinkMap && portKey ? portLinkMap[portKey] : null;
@@ -183,26 +168,10 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
           {hasDev && (
             <div style={{display:"grid",gridTemplateColumns:"60px 1fr",rowGap:3}}>
               <span style={{color:"#64748b"}}>Hosts</span><span style={{color:endpointCount > 1 ? "#22d3ee" : "#94a3b8"}}>{endpointCount}</span>
-              {port.peer_ip   && <><span style={{color:"#64748b"}}>IP</span>   <span style={{color:"#7dd3fc"}}>{port.peer_ip}</span></>}
-              {port.peer_host && <><span style={{color:"#64748b"}}>Host</span> <span style={{color:"#e2e8f0"}}>{port.peer_host}</span></>}
-              {port.peer_mac  && <><span style={{color:"#64748b"}}>MAC</span>  <span>{port.peer_mac}</span></>}
               <span style={{color:"#64748b"}}>Port</span> <span>{port.if_descr}</span>
               <span style={{color:"#475569"}}>Speed</span><span style={{color:speedColor(spd)}}>{speedLabel(spd)}</span>
               {port.vlan != null && port.vlan > 0 && <><span style={{color:"#475569"}}>VLAN</span><span>{port.vlan}</span></>}
               {port.tagged_vlans && port.tagged_vlans.length > 0 && <><span style={{color:"#475569"}}>Tagged</span><span>{port.tagged_vlans.join(", ")}</span></>}
-              {parsedEndpoints.length > 1 && (
-                <>
-                  <span style={{color:"#64748b",alignSelf:"start"}}>List</span>
-                  <div style={{display:"flex",flexDirection:"column",gap:2,maxHeight:80,overflowY:"auto"}}>
-                    {parsedEndpoints.map((ep, idx) => (
-                      <span key={`${ep.ip || ep.mac || "ep"}-${idx}`} style={{color:"#94a3b8"}}>
-                        {(ep.host || ep.ip || ep.mac || "unknown")}
-                        {ep.ip ? ` (${ep.ip})` : ""}
-                      </span>
-                    ))}
-                  </div>
-                </>
-              )}
             </div>
           )}
         </div>

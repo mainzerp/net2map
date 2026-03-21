@@ -49,7 +49,6 @@ describe("DeviceTable", () => {
 
     renderWithRouter(
       <DeviceTable
-        role="network"
         title="Network Devices"
         subtitle="Managed switches"
         activeLabel="Active"
@@ -79,7 +78,6 @@ describe("DeviceTable", () => {
 
     renderWithRouter(
       <DeviceTable
-        role="network"
         title="Network Devices"
         subtitle="Managed switches"
         activeLabel="Active"

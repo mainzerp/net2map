@@ -29,7 +29,8 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 from database import (
-    Base, Credential, Device, Port, TopologyLink, SnmpProfile,
+    Base, Credential, Device, Endpoint, EndpointPortAssociation,
+    Port, TopologyLink, SnmpProfile,
     SwitchClass, Rack as RackModel, create_tables,
 )
 from sqlalchemy.orm import Session
@@ -104,9 +105,6 @@ def make_fs_ports(device_id: int, rack_idx: int, sw_idx: int) -> list[Port]:
             if_alias    = f"access-port-{i}",
             speed_mbps  = 25_000,
             oper_status = 1 if rng.random() > 0.3 else 2,
-            peer_mac    = rand_mac() if rng.random() > 0.5 else "",
-            peer_ip     = rand_ip(rack_idx, sw_idx, i) if rng.random() > 0.5 else "",
-            peer_host   = f"server-{rack_idx+1:02d}-{i:02d}.corp.local" if rng.random() > 0.5 else "",
             vlan        = rng.choice([10, 20, 30, 40, 100]),
         ))
     for i in range(21, 23):         # 100G QSFP28 uplinks
@@ -117,9 +115,6 @@ def make_fs_ports(device_id: int, rack_idx: int, sw_idx: int) -> list[Port]:
             if_alias    = f"uplink-{i-20}",
             speed_mbps  = 100_000,
             oper_status = 1,
-            peer_mac    = rand_mac(),
-            peer_ip     = "",
-            peer_host   = "",
             vlan        = 1,
         ))
     return ports
@@ -136,9 +131,6 @@ def make_aruba_6300_ports(device_id: int, rack_idx: int, sw_idx: int) -> list[Po
             if_alias    = f"access-{i}",
             speed_mbps  = 1_000,
             oper_status = 1 if rng.random() > 0.35 else 2,
-            peer_mac    = rand_mac() if rng.random() > 0.4 else "",
-            peer_ip     = rand_ip(rack_idx, sw_idx, i) if rng.random() > 0.4 else "",
-            peer_host   = f"wks-{rack_idx+1:02d}-{i:02d}.corp.local" if rng.random() > 0.4 else "",
             vlan        = rng.choice([10, 20, 30, 40, 100]),
         ))
     for i in range(25, 29):
@@ -149,9 +141,6 @@ def make_aruba_6300_ports(device_id: int, rack_idx: int, sw_idx: int) -> list[Po
             if_alias    = "uplink" if i < 27 else "unused",
             speed_mbps  = 10_000,
             oper_status = 1 if i < 27 else 2,
-            peer_mac    = rand_mac(),
-            peer_ip     = "",
-            peer_host   = "",
             vlan        = 1,
         ))
     return ports
@@ -168,9 +157,6 @@ def make_aruba_6200_ports(device_id: int, rack_idx: int, sw_idx: int) -> list[Po
             if_alias    = f"access-{i}",
             speed_mbps  = 1_000,
             oper_status = 1 if rng.random() > 0.35 else 2,
-            peer_mac    = rand_mac() if rng.random() > 0.4 else "",
-            peer_ip     = rand_ip(rack_idx, sw_idx, i) if rng.random() > 0.4 else "",
-            peer_host   = f"srv-{rack_idx+1:02d}-{i:02d}.corp.local" if rng.random() > 0.4 else "",
             vlan        = rng.choice([10, 20, 30, 40, 100]),
         ))
     for i in range(49, 53):
@@ -181,9 +167,6 @@ def make_aruba_6200_ports(device_id: int, rack_idx: int, sw_idx: int) -> list[Po
             if_alias    = "uplink" if i == 49 else "unused",
             speed_mbps  = 10_000,
             oper_status = 1 if i == 49 else 2,
-            peer_mac    = rand_mac(),
-            peer_ip     = "",
-            peer_host   = "",
             vlan        = 1,
         ))
     return ports
@@ -283,7 +266,6 @@ def seed(db: Session):
             rack_id   = mr.id,
             class_id  = cls_tor.id,
             label     = f"{rack['label']} TOR-1 -- {FS_MODEL}",
-            is_managed = True,
             enabled   = True,
         )
         db.add(fs1); db.flush()
@@ -304,7 +286,6 @@ def seed(db: Session):
             rack_id   = mr.id,
             class_id  = cls_tor.id,
             label     = f"{rack['label']} TOR-2 -- {FS_MODEL}",
-            is_managed = True,
             enabled   = True,
         )
         db.add(fs2); db.flush()
@@ -325,7 +306,6 @@ def seed(db: Session):
             rack_id   = mr.id,
             class_id  = cls_acc.id,
             label     = f"{rack['label']} ACC-1 -- {ARUBA_CX_6300['model']}",
-            is_managed = True,
             enabled   = True,
         )
         db.add(aruba1); db.flush()
@@ -346,7 +326,6 @@ def seed(db: Session):
             rack_id   = mr.id,
             class_id  = cls_acc.id,
             label     = f"{rack['label']} ACC-2 -- {ARUBA_CX_6300['model']}",
-            is_managed = True,
             enabled   = True,
         )
         db.add(aruba2); db.flush()
@@ -367,7 +346,6 @@ def seed(db: Session):
             rack_id   = mr.id,
             class_id  = cls_acc.id,
             label     = f"{rack['label']} ACC-3 -- {ARUBA_CX_6200['model']}",
-            is_managed = True,
             enabled   = True,
         )
         db.add(aruba3); db.flush()

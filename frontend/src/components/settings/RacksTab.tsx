@@ -37,7 +37,7 @@ function RacksTabContent({ newEntryTrigger }: RacksTabContentProps) {
 
   const refreshAll = () => {
     setLoading(true);
-    Promise.allSettled([api.get("/api/racks"), api.get("/api/devices?role=network")])
+    Promise.allSettled([api.get("/api/racks"), api.get("/api/devices")])
       .then(([racksRes, topoRes]) => {
         if (racksRes.status === "fulfilled") setRacks(racksRes.value);
         else setRacks([]);
@@ -74,14 +74,14 @@ function RacksTabContent({ newEntryTrigger }: RacksTabContentProps) {
     const devId = assignSel[rackId];
     if (!devId) return;
     await api.patch(`/api/topology/devices/${devId}/meta`, { rack_id: rackId });
-    api.invalidate("/api/topology", "/api/racks", "/api/devices?role=network", "/api/credentials");
+    api.invalidate("/api/topology", "/api/racks", "/api/devices", "/api/credentials");
     setAssignSel(prev => ({ ...prev, [rackId]: "" }));
     refreshAll();
   };
 
   const unassignDevice = async (devId: number) => {
     await api.patch(`/api/topology/devices/${devId}/meta`, { rack_id: null });
-    api.invalidate("/api/topology", "/api/racks", "/api/devices?role=network", "/api/credentials");
+    api.invalidate("/api/topology", "/api/racks", "/api/devices", "/api/credentials");
     refreshAll();
   };
 

@@ -6,7 +6,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
-from database import AppSetting, Device, Port, ScanRun, get_db
+from database import AppSetting, Device, Endpoint, Port, ScanRun, get_db
 from database import Rack as RackModel
 from schemas import AppSettingOut, AppSettingUpdate
 from shared.auth import require_role
@@ -44,12 +44,14 @@ def get_stats(db: Session = Depends(get_db)):
     port_count = db.query(Port).count()
     port_up = db.query(Port).filter(Port.oper_status == 1).count()
     rack_count = db.query(RackModel).count()
+    endpoint_count = db.query(Endpoint).count()
     latest_scan = db.query(ScanRun).order_by(ScanRun.created_at.desc()).first()
     return {
         "device_count": device_count,
         "port_count": port_count,
         "port_up_count": port_up,
         "rack_count": rack_count,
+        "endpoint_count": endpoint_count,
         "last_scan_at": latest_scan.created_at if latest_scan else None,
         "last_scan_status": latest_scan.status if latest_scan else None,
     }

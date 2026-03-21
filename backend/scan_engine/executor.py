@@ -11,14 +11,15 @@ from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from database import (
-    AppSetting, Credential, Device, Port, SessionLocal, SnmpProfile,
+    AppSetting, Credential, Device, Endpoint, EndpointPortAssociation,
+    Port, SessionLocal, SnmpProfile,
     ScanRun, ScanRunSwitchMetric, TopologyLink, DryRunResult,
 )
 from schemas import ScanResult, ScanSwitchMetric
 from shared.file_settings import _read_dns_settings, _read_scan_settings
 from shared.state import _log_event
 from shared.crypto import decrypt
-from shared.metrics import SCAN_ACTIVE, SCAN_DURATION, SCAN_TOTAL, DEVICE_COUNT, PORT_COUNT
+from shared.metrics import SCAN_ACTIVE, SCAN_DURATION, SCAN_TOTAL, DEVICE_COUNT, PORT_COUNT, ENDPOINT_COUNT
 from snmp_scanner import (
     LldpNeighbor, SwitchData, auto_layout, extract_model,
     is_virtual, scan_switch, speed_label,
@@ -520,17 +521,20 @@ async def _execute_scan(
             device.ping_rtt_ms = ping_rtt if ping_ok else 0
             device.last_ping = datetime.now(timezone.utc)
             if cred:
-                device.is_managed = True
                 if not device.label and cred.label:
                     device.label = cred.label
                 if not cred.device_id:
                     cred.device_id = device.id
         else:
+            # Only create Device rows for SNMP-discovered hosts (sw is not None)
+            # Ping-only discoveries are tracked as endpoints via FDB/ARP data
+            if sw is None:
+                continue
             x, y = layout.get(ip, (100.0, 100.0))
             new_device = Device(
                 ip=ip,
                 sys_name=sw.sys_name if sw else ip,
-                sys_descr=sw.sys_descr if sw else "Discovered by ping (SNMP unavailable)",
+                sys_descr=sw.sys_descr if sw else "",
                 model=model,
                 vendor=vendor,
                 location=sw.location if sw else "",
@@ -539,7 +543,6 @@ async def _execute_scan(
                 last_ping=datetime.now(timezone.utc),
                 map_x=x,
                 map_y=y,
-                is_managed=cred is not None,
                 label=cred.label if cred else "",
                 enabled=True,
             )
@@ -608,25 +611,17 @@ async def _execute_scan(
 
                     db.query(Port).filter(Port.device_id == device.id).delete()
                     port_rows = []
+                    new_port_objects = []
                     for iface in sw.interfaces.values():
                         if is_virtual(iface.descr, sw.vendor):
                             continue
 
-                        peer_mac = ""
-                        peer_ip = ""
-                        peer_host = ""
                         endpoint_entries: List[tuple[str, str, str]] = []
                         if iface.index in peers_by_ifindex and peers_by_ifindex[iface.index]:
                             endpoint_entries = sorted(
                                 peers_by_ifindex[iface.index],
                                 key=lambda x: (x[1] == "", x[1], x[0])
                             )
-                            peer_mac, peer_ip, peer_host = endpoint_entries[0]
-
-                        endpoint_details = [
-                            {"mac": mac, "ip": ip_addr, "host": host}
-                            for mac, ip_addr, host in endpoint_entries
-                        ]
 
                         port_rows.append({
                             "device_id": device.id,
@@ -635,16 +630,49 @@ async def _execute_scan(
                             "if_alias": iface.alias,
                             "speed_mbps": iface.speed_mbps,
                             "oper_status": iface.oper_status,
-                            "peer_mac": peer_mac,
-                            "peer_ip": peer_ip,
-                            "peer_host": peer_host,
-                            "endpoint_count": len(endpoint_details),
-                            "endpoint_details_json": endpoint_details,
                             "vlan": iface.vlan,
                             "tagged_vlans": iface.tagged_vlans,
+                            "_endpoint_entries": endpoint_entries,
                         })
                     if port_rows:
-                        db.bulk_insert_mappings(Port, port_rows)
+                        for pr in port_rows:
+                            ep_entries = pr.pop("_endpoint_entries", [])
+                            port_obj = Port(**pr)
+                            db.add(port_obj)
+                            db.flush()
+                            # Create/update endpoints and associations
+                            for mac, ep_ip, ep_host in ep_entries:
+                                if not mac:
+                                    continue
+                                endpoint = db.query(Endpoint).filter(Endpoint.mac == mac).first()
+                                if endpoint:
+                                    if ep_ip:
+                                        endpoint.ip = ep_ip
+                                    if ep_host:
+                                        endpoint.hostname = ep_host
+                                    endpoint.last_seen = datetime.now(timezone.utc)
+                                else:
+                                    endpoint = Endpoint(
+                                        mac=mac,
+                                        ip=ep_ip or None,
+                                        hostname=ep_host or None,
+                                    )
+                                    db.add(endpoint)
+                                    db.flush()
+                                # Upsert association
+                                assoc = db.query(EndpointPortAssociation).filter(
+                                    EndpointPortAssociation.endpoint_id == endpoint.id,
+                                    EndpointPortAssociation.port_id == port_obj.id,
+                                ).first()
+                                if assoc:
+                                    assoc.vlan_id = iface.vlan if iface.vlan else None
+                                    assoc.last_seen = datetime.now(timezone.utc)
+                                else:
+                                    db.add(EndpointPortAssociation(
+                                        endpoint_id=endpoint.id,
+                                        port_id=port_obj.id,
+                                        vlan_id=iface.vlan if iface.vlan else None,
+                                    ))
                     db.commit()
             except Exception:
                 db.rollback()
@@ -800,5 +828,6 @@ async def _execute_scan(
     DEVICE_COUNT.set(db.query(Device).count())
     PORT_COUNT.labels(status="up").set(db.query(Port).filter(Port.oper_status == 1).count())
     PORT_COUNT.labels(status="down").set(db.query(Port).filter(Port.oper_status == 2).count())
+    ENDPOINT_COUNT.set(db.query(Endpoint).count())
 
     return result

@@ -39,7 +39,7 @@ function ModelsTabContent({ newEntryTrigger }: ModelsTabContentProps) {
 
   const refreshAll = () => {
     setLoading(true);
-    Promise.allSettled([api.get("/api/switch-models"), api.get("/api/devices?role=network")])
+    Promise.allSettled([api.get("/api/switch-models"), api.get("/api/devices")])
       .then(([modelsRes, topoRes]) => {
         if (modelsRes.status === "fulfilled") setModels(modelsRes.value);
         else setModels([]);
@@ -89,14 +89,14 @@ function ModelsTabContent({ newEntryTrigger }: ModelsTabContentProps) {
     const devId = assignSel[modelId];
     if (!devId) return;
     await api.patch(`/api/topology/devices/${devId}/meta`, { model_id: modelId });
-    api.invalidate("/api/topology", "/api/devices?role=network", "/api/credentials");
+    api.invalidate("/api/topology", "/api/devices", "/api/credentials");
     setAssignSel(prev => ({ ...prev, [modelId]: "" }));
     refreshAll();
   };
 
   const unassignDevice = async (devId: number) => {
     await api.patch(`/api/topology/devices/${devId}/meta`, { model_id: null });
-    api.invalidate("/api/topology", "/api/devices?role=network", "/api/credentials");
+    api.invalidate("/api/topology", "/api/devices", "/api/credentials");
     refreshAll();
   };
 

@@ -18,14 +18,14 @@ def test_topology_returns_structure(client, auth_headers, db):
 
 
 def test_topology_includes_seeded_device(client, auth_headers, db):
-    """Devices with is_managed=True appear in topology nodes."""
+    """Devices appear in topology nodes."""
     rack = RackModel(label="Rack-1", room="Room A")
     db.add(rack)
     db.flush()
 
     dev = Device(
         sys_name="core-sw-01", ip="10.0.0.1", vendor="generic",
-        rack_id=rack.id, is_managed=True,
+        rack_id=rack.id,
     )
     db.add(dev)
     db.flush()
@@ -51,7 +51,7 @@ def test_topology_excludes_ignored_devices(client, auth_headers, db):
     """Ignored devices should not appear in topology."""
     dev = Device(
         sys_name="ignored-sw", ip="10.0.0.99", vendor="generic",
-        ignored=True, is_managed=True,
+        ignored=True,
     )
     db.add(dev)
     db.commit()
@@ -63,17 +63,17 @@ def test_topology_excludes_ignored_devices(client, auth_headers, db):
     assert "10.0.0.99" not in ips
 
 
-def test_topology_excludes_device_without_is_managed(client, auth_headers, db):
-    """Devices with is_managed=False (default) are excluded from topology."""
-    dev = Device(sys_name="orphan", ip="192.168.99.1", vendor="generic")
+def test_devices_list_returns_all_devices(client, auth_headers, db):
+    """GET /api/devices returns all devices."""
+    dev = Device(sys_name="dev1", ip="192.168.99.1", vendor="generic")
     db.add(dev)
     db.commit()
 
     with patch("routers.topology._get_topo_cache", return_value={}):
-        r = client.get("/api/topology", headers=auth_headers)
+        r = client.get("/api/devices", headers=auth_headers)
     data = r.json()
-    ips = [n["ip"] for n in data["nodes"]]
-    assert "192.168.99.1" not in ips
+    ips = [d["ip"] for d in data]
+    assert "192.168.99.1" in ips
 
 
 def test_update_device_meta_does_not_sync_credential(client, auth_headers, db):
@@ -86,7 +86,7 @@ def test_update_device_meta_does_not_sync_credential(client, auth_headers, db):
     db.add(sc)
     db.flush()
 
-    dev = Device(sys_name="sync-sw", ip="10.0.0.50", vendor="generic", is_managed=True)
+    dev = Device(sys_name="sync-sw", ip="10.0.0.50", vendor="generic")
     db.add(dev)
     db.flush()
 
@@ -120,8 +120,8 @@ def test_bulk_update_device_meta_does_not_sync_credentials(client, auth_headers,
     db.add(sc)
     db.flush()
 
-    dev1 = Device(sys_name="bulk-sw1", ip="10.0.0.60", vendor="generic", is_managed=True)
-    dev2 = Device(sys_name="bulk-sw2", ip="10.0.0.61", vendor="generic", is_managed=True)
+    dev1 = Device(sys_name="bulk-sw1", ip="10.0.0.60", vendor="generic")
+    dev2 = Device(sys_name="bulk-sw2", ip="10.0.0.61", vendor="generic")
     db.add_all([dev1, dev2])
     db.flush()
 

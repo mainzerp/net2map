@@ -169,7 +169,6 @@ class Device(Base):
     # Consolidation fields (metadata now lives here, not on Credential)
     label        = Column(String, default="")
     enabled      = Column(Boolean, default=True, nullable=False)
-    is_managed   = Column(Boolean, default=False, nullable=False)
 
     ports        = relationship("Port", back_populates="device", cascade="all, delete-orphan", lazy="selectin")
     rack         = relationship("Rack", back_populates="devices", lazy="joined")
@@ -189,16 +188,50 @@ class Port(Base):
     if_alias     = Column(String, default="")
     speed_mbps   = Column(Integer, default=0)
     oper_status  = Column(Integer, default=2)             # 1=up, 2=down
-    # connected end-device info (from ARP / MAC table)
-    peer_mac     = Column(String, default="")
-    peer_ip      = Column(String, default="")
-    peer_host    = Column(String, default="")
-    endpoint_count = Column(Integer, default=0)
-    endpoint_details_json = Column(JSONB, default=list)
     vlan         = Column(Integer, default=0)
     tagged_vlans = Column(JSONB, default=list)
 
     device = relationship("Device", back_populates="ports")
+    endpoint_associations = relationship(
+        "EndpointPortAssociation", back_populates="port",
+        cascade="all, delete-orphan", lazy="selectin",
+    )
+
+
+class Endpoint(Base):
+    """Discovered endpoint device (MAC/IP found on a switch port)."""
+    __tablename__ = "endpoints"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    mac        = Column(String, nullable=False, unique=True, index=True)
+    ip         = Column(String, nullable=True, index=True)
+    hostname   = Column(String, nullable=True)
+    first_seen = Column(DateTime, server_default=func.now())
+    last_seen  = Column(DateTime, server_default=func.now())
+    ignored    = Column(Boolean, default=False, nullable=False)
+    notes      = Column(Text, nullable=True)
+
+    port_associations = relationship(
+        "EndpointPortAssociation", back_populates="endpoint",
+        cascade="all, delete-orphan", lazy="selectin",
+    )
+
+
+class EndpointPortAssociation(Base):
+    """Many-to-many link between endpoints and ports."""
+    __tablename__ = "endpoint_port_associations"
+    __table_args__ = (
+        UniqueConstraint("endpoint_id", "port_id", name="uq_epa_endpoint_port"),
+    )
+
+    id          = Column(Integer, primary_key=True, index=True)
+    endpoint_id = Column(Integer, ForeignKey("endpoints.id", ondelete="CASCADE"), nullable=False, index=True)
+    port_id     = Column(Integer, ForeignKey("ports.id", ondelete="CASCADE"), nullable=False, index=True)
+    vlan_id     = Column(Integer, nullable=True)
+    last_seen   = Column(DateTime, server_default=func.now())
+
+    endpoint = relationship("Endpoint", back_populates="port_associations")
+    port     = relationship("Port", back_populates="endpoint_associations")
 
 
 class TopologyLink(Base):

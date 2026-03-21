@@ -57,6 +57,10 @@
 - [x] **Topology endpoint optimization** -- Version-counter ETag replaces SHA-256 body hash; scan completion and credential CRUD now bump topology version (v1.13.0)
 - [x] **N+1 query reduction in topology** -- Credential IP set replaced with SQL subquery in get_topology() and list_all_devices() (v1.14.0)
 
+### Data Architecture (v1.16.0)
+
+- [x] **Endpoint table separation** -- Separated endpoint devices from network devices into dedicated `endpoints` and `endpoint_port_associations` tables; new `/api/endpoints` CRUD router; new `EndpointTable` frontend component; removed `is_managed` column; migration 013 handles data migration (v1.16.0)
+
 ---
 
 ## Open Items

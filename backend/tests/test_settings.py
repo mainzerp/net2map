@@ -65,3 +65,4 @@ def test_stats_endpoint(client, auth_headers):
     assert "port_count" in data
     assert "port_up_count" in data
     assert "rack_count" in data
+    assert "endpoint_count" in data

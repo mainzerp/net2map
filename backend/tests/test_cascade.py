@@ -9,6 +9,8 @@ from sqlalchemy import text
 from database import (
     Credential,
     Device,
+    Endpoint,
+    EndpointPortAssociation,
     Port,
     Rack,
     ScanRun,
@@ -112,7 +114,7 @@ def test_class_delete_nullifies_device_class_id(db):
 
 def test_device_delete_nullifies_credential_device_id(db):
     """Deleting a Device sets credential.device_id to NULL (ondelete=SET NULL)."""
-    dev = Device(ip="10.99.0.6", sys_name="cascade-sw6", is_managed=True)
+    dev = Device(ip="10.99.0.6", sys_name="cascade-sw6")
     db.add(dev)
     db.flush()
 
@@ -128,3 +130,59 @@ def test_device_delete_nullifies_credential_device_id(db):
     db.refresh(cred)
     assert cred.device_id is None
     assert db.query(Credential).filter_by(ip="10.99.0.6").first() is not None
+
+
+def test_device_delete_cascades_endpoint_port_associations(db):
+    """Deleting a Device cascades ports -> cascades endpoint_port_associations."""
+    dev = Device(ip="10.99.0.7", sys_name="cascade-sw7")
+    db.add(dev)
+    db.flush()
+
+    port = Port(device_id=dev.id, if_index=1, if_descr="GE0/1")
+    db.add(port)
+    db.flush()
+
+    ep = Endpoint(mac="aa:bb:cc:dd:ee:99", ip="10.99.0.200")
+    db.add(ep)
+    db.flush()
+
+    assoc = EndpointPortAssociation(endpoint_id=ep.id, port_id=port.id, vlan_id=10)
+    db.add(assoc)
+    db.commit()
+
+    assert db.query(EndpointPortAssociation).count() == 1
+
+    db.delete(dev)
+    db.commit()
+
+    # Association removed (port gone), but endpoint remains
+    assert db.query(EndpointPortAssociation).count() == 0
+    assert db.query(Endpoint).filter_by(mac="aa:bb:cc:dd:ee:99").first() is not None
+
+
+def test_endpoint_delete_cascades_associations(db):
+    """Deleting an Endpoint removes its EndpointPortAssociations."""
+    dev = Device(ip="10.99.0.8", sys_name="cascade-sw8")
+    db.add(dev)
+    db.flush()
+
+    port = Port(device_id=dev.id, if_index=1, if_descr="GE0/1")
+    db.add(port)
+    db.flush()
+
+    ep = Endpoint(mac="aa:bb:cc:dd:ee:aa", ip="10.99.0.201")
+    db.add(ep)
+    db.flush()
+
+    assoc = EndpointPortAssociation(endpoint_id=ep.id, port_id=port.id)
+    db.add(assoc)
+    db.commit()
+
+    assert db.query(EndpointPortAssociation).count() == 1
+
+    db.delete(ep)
+    db.commit()
+
+    assert db.query(EndpointPortAssociation).count() == 0
+    # Port and device remain
+    assert db.query(Port).filter_by(device_id=dev.id).first() is not None

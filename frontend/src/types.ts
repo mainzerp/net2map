@@ -1,12 +1,5 @@
 // ── API response types ───────────────────────────────────────────────────────
 
-export interface FoundOnPort {
-  mac: string;
-  ip: string;
-  hostname: string;
-  vlan: number | null;
-}
-
 export interface PortInfo {
   id?: number;
   port_id: string;
@@ -19,12 +12,7 @@ export interface PortInfo {
   vlan: number | null;
   tagged_vlans: number[];
   poe_status: string | null;
-  found_on_port: FoundOnPort[];
-  peer_ip?: string;
-  peer_mac?: string;
-  peer_host?: string;
-  endpoint_details_json?: string | unknown[] | null;
-  endpoint_count?: number;
+  endpoint_count: number;
   [key: string]: unknown;
 }
 
@@ -53,7 +41,6 @@ export interface TopologyNode {
   location?: string;
   label?: string;
   enabled?: boolean;
-  is_managed?: boolean;
   [key: string]: unknown;
 }
 
@@ -160,7 +147,6 @@ export interface NetmapState {
 // ── Component prop types (shared across pages) ──────────────────────────────
 
 export interface DeviceTableProps {
-  role: "network" | "endpoint";
   title: string;
   subtitle: string;
   activeLabel: string;
@@ -187,13 +173,26 @@ export interface PortLinkEntry {
   role: "local" | "remote";
 }
 
-// -- Endpoint detail (parsed from endpoint_details_json) ----------------------
-export interface EndpointDetail {
-  mac?: string;
-  ip?: string;
-  host?: string;
-  vlan?: number | null;
-  [key: string]: unknown;
+// -- Endpoint (separate endpoint table) ----------------------------------------
+export interface EndpointPortInfo {
+  port_id: number;
+  switch_ip: string;
+  switch_name: string;
+  port_name: string;
+  vlan_id: number | null;
+  last_seen: string | null;
+}
+
+export interface Endpoint {
+  id: number;
+  mac: string;
+  ip: string | null;
+  hostname: string | null;
+  first_seen: string | null;
+  last_seen: string | null;
+  ignored: boolean;
+  notes: string | null;
+  found_on: EndpointPortInfo[];
 }
 
 // -- Credential (CredentialsTab CRUD) -----------------------------------------

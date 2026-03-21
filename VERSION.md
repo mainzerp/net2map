@@ -1,5 +1,86 @@
 # Version History
 
+## v1.16.0 -- Endpoint Table Separation
+
+**Type:** MINOR (new feature, backward-compatible data migration)
+
+### Changes
+
+#### Backend -- Database Schema
+- New `endpoints` table: MAC-based identity for discovered end devices (mac, ip, hostname, first_seen, last_seen, ignored, notes)
+- New `endpoint_port_associations` table: many-to-many relationship between endpoints and switch ports (with vlan_id, last_seen)
+- Removed `is_managed` column from `devices` table (all devices are now network devices)
+- Removed `peer_mac`, `peer_ip`, `peer_host`, `endpoint_count`, `endpoint_details_json` columns from `ports` table
+- Alembic migration 013: creates new tables, migrates endpoint data from ports/devices, drops old columns
+
+#### Backend -- API
+- New `/api/endpoints` router with full CRUD: list (GET), get single (GET), update (PATCH), bulk update (PATCH), delete (DELETE)
+- ETag-based caching on endpoint list
+- Role-based auth on mutating endpoints
+- Audit logging for all endpoint operations
+- `/api/stats` now includes `endpoint_count`
+- `/api/topology` no longer filters by `is_managed`
+- `/api/devices` no longer accepts `role` query parameter
+
+#### Backend -- Scan Engine
+- Scan executor now creates `Endpoint` + `EndpointPortAssociation` records instead of storing peer data on ports
+- Ping-only discoveries (no switch context) skip Device creation
+- New `ENDPOINT_COUNT` Prometheus gauge metric
+
+#### Frontend -- Pages & Components
+- New `EndpointTable` component: dedicated table for endpoint devices with MAC, IP, hostname, timestamps, found-on-port, ignore/bulk-ignore
+- DevicesPage now renders `EndpointTable` (fetches from `/api/endpoints`)
+- `DeviceTable` simplified to network-only (removed role prop, found_on logic, endpoint columns)
+- NetworkPage simplified (no role prop)
+- Settings tabs (RacksTab, SwitchClassesTab, SwitchModelsTab) updated to fetch `/api/devices` without role filter
+
+#### Frontend -- Types
+- Added `Endpoint` and `EndpointPortInfo` interfaces
+- Removed `FoundOnPort` and `EndpointDetail` interfaces
+- Removed `is_managed` from `TopologyNode`
+- Removed `peer_mac`, `peer_ip`, `peer_host`, `endpoint_details_json` from `PortInfo`
+- Removed `role` from `DeviceTableProps`
+
+#### Testing
+- New `test_endpoints.py`: endpoint CRUD, bulk update, delete with cascade
+- Updated `test_topology.py`: removed `is_managed` references, added devices list test
+- Updated `test_cascade.py`: added endpoint cascade tests (device->port->association, endpoint->association)
+- Updated `test_settings.py`: added `endpoint_count` assertion
+- Updated `test_schemas.py`: added endpoint schema validation tests
+- New `EndpointTable.test.tsx`: endpoint table rendering and found_on display
+- Updated `DeviceTable.test.tsx`: removed role prop
+
+### Files Modified
+| File | Change |
+|------|--------|
+| `backend/database.py` | Added Endpoint, EndpointPortAssociation models; removed is_managed, peer_* columns |
+| `backend/alembic/versions/013_separate_endpoints.py` | Migration: create tables, migrate data, drop columns |
+| `backend/schemas.py` | Added EndpointOut, EndpointPortInfo, EndpointUpdate, BulkEndpointUpdate; removed FoundOnPort |
+| `backend/routers/endpoints.py` | New CRUD router for /api/endpoints |
+| `backend/routers/topology.py` | Removed is_managed filter and role param |
+| `backend/main.py` | Registered endpoints router |
+| `backend/scan_engine/executor.py` | Endpoint/association creation instead of peer_* storage |
+| `backend/routers/settings.py` | Added endpoint_count to stats |
+| `backend/shared/metrics.py` | Added ENDPOINT_COUNT gauge |
+| `backend/seed_db.py` | Removed is_managed and peer_* from seed data |
+| `frontend/src/types.ts` | Added Endpoint types, removed legacy types |
+| `frontend/src/components/DeviceTable.tsx` | Simplified to network-only |
+| `frontend/src/components/EndpointTable.tsx` | New endpoint table component |
+| `frontend/src/pages/DevicesPage.tsx` | Uses EndpointTable |
+| `frontend/src/pages/NetworkPage.tsx` | Removed role prop |
+| `frontend/src/components/settings/RacksTab.tsx` | Removed ?role=network |
+| `frontend/src/components/settings/SwitchClassesTab.tsx` | Removed ?role=network |
+| `frontend/src/components/settings/SwitchModelsTab.tsx` | Removed ?role=network |
+| `backend/tests/test_endpoints.py` | New endpoint CRUD tests |
+| `backend/tests/test_topology.py` | Removed is_managed references |
+| `backend/tests/test_cascade.py` | Added endpoint cascade tests |
+| `backend/tests/test_settings.py` | Added endpoint_count assertion |
+| `backend/tests/test_schemas.py` | Added endpoint schema tests |
+| `frontend/src/__tests__/DeviceTable.test.tsx` | Removed role prop |
+| `frontend/src/__tests__/EndpointTable.test.tsx` | New endpoint table tests |
+
+---
+
 ## v1.15.1 -- Device-Credential Sync Fix
 
 **Type:** PATCH (bug fix)

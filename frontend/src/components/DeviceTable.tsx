@@ -1,7 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
-import { api, extractErrorMessage, normPort } from "../api";
-import useNetmapStore from "../store";
+import { api, extractErrorMessage } from "../api";
 import type { DeviceTableProps, RackInfo, SwitchClass, SwitchModel } from "../types";
 
 interface DeviceRecord {
@@ -15,14 +13,6 @@ interface DeviceRecord {
   rack_id?: number | null;
   class_id?: number | null;
   model_id?: number | null;
-  found_on?: {
-    rack_id?: number;
-    switch_ip?: string;
-    switch_name?: string;
-    port_name?: string;
-    peer_host?: string;
-    peer_mac?: string;
-  };
 }
 
 interface EditState {
@@ -44,13 +34,9 @@ interface SortState {
 interface ColumnDef {
   key: string;
   label: string;
-  networkOnly?: boolean;
 }
 
-export default function DeviceTable({ role, title, subtitle, activeLabel, ignoredLabel, emptyMessage }: DeviceTableProps) {
-  const navigate = useNavigate();
-  const setSelectedRack = useNetmapStore(s => s.setSelectedRack);
-  const setHighlightPortKey = useNetmapStore(s => s.setHighlightPortKey);
+export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel, emptyMessage }: DeviceTableProps) {
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [togglingId, setTogglingId] = useState<number | null>(null);
@@ -68,7 +54,7 @@ export default function DeviceTable({ role, title, subtitle, activeLabel, ignore
   const refresh = useCallback(() => {
     setLoading(true);
     Promise.allSettled([
-      api.get(`/api/devices?role=${role}`),
+      api.get("/api/devices"),
       api.get("/api/racks"),
       api.get("/api/switch-classes"),
       api.get("/api/switch-models"),
@@ -79,12 +65,12 @@ export default function DeviceTable({ role, title, subtitle, activeLabel, ignore
       setModels(modelsRes.status === "fulfilled" ? modelsRes.value || [] : []);
       setLoading(false);
     });
-  }, [role]);
+  }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
 
   const invalidateAll = () => {
-    api.invalidate("/api/topology", "/api/devices", "/api/devices?role=endpoint", "/api/devices?role=network");
+    api.invalidate("/api/topology", "/api/devices");
   };
 
   const toggleIgnored = async (dev: DeviceRecord) => {
@@ -157,31 +143,15 @@ export default function DeviceTable({ role, title, subtitle, activeLabel, ignore
   const classMap = Object.fromEntries(classes.map(c => [c.id, c]));
   const modelMap = Object.fromEntries(models.map(m => [m.id, m]));
 
-  const goToPort = (dev: DeviceRecord) => {
-    const fo = dev.found_on;
-    if (!fo) return;
-    if (fo.rack_id) {
-      setSelectedRack({ id: fo.rack_id } as { id: number; label: string; location: string; devices: never[] });
-    }
-    const portKey = `${fo.switch_ip}:${normPort(fo.port_name || "")}`;
-    setHighlightPortKey(portKey);
-    navigate("/map");
-  };
-
   /* ---- Search ---- */
   const getSearchableText = (dev: DeviceRecord) => {
     const parts = [
       dev.sys_name || "",
       dev.ip || "",
-      dev.found_on?.peer_host || "",
-      dev.found_on?.peer_mac || "",
       dev.mac || "",
       dev.rack_id && rackMap[dev.rack_id] ? rackMap[dev.rack_id].label : "",
       dev.class_id && classMap[dev.class_id] ? classMap[dev.class_id].label : "",
       dev.model_id && modelMap[dev.model_id] ? modelMap[dev.model_id].name : "",
-      dev.found_on?.switch_name || "",
-      dev.found_on?.switch_ip || "",
-      dev.found_on?.port_name || "",
       dev.vendor || "",
     ];
     return parts.join(" ").toLowerCase();
@@ -204,15 +174,10 @@ export default function DeviceTable({ role, title, subtitle, activeLabel, ignore
     switch (column) {
       case "name": return (dev.sys_name || dev.ip || "").toLowerCase();
       case "ip": return dev.ip || "";
-      case "dns": return (dev.found_on?.peer_host || "").toLowerCase();
-      case "mac": return (dev.found_on?.peer_mac || dev.mac || "").toLowerCase();
+      case "mac": return (dev.mac || "").toLowerCase();
       case "rack": return (dev.rack_id && rackMap[dev.rack_id] ? rackMap[dev.rack_id].label : "").toLowerCase();
       case "class": return (dev.class_id && classMap[dev.class_id] ? classMap[dev.class_id].label : "").toLowerCase();
       case "model": return (dev.model_id && modelMap[dev.model_id] ? modelMap[dev.model_id].name : "").toLowerCase();
-      case "port": {
-        const fo = dev.found_on;
-        return fo?.switch_ip ? `${fo.switch_name || fo.switch_ip}:${fo.port_name}`.toLowerCase() : "";
-      }
       default: return "";
     }
   };
@@ -292,14 +257,12 @@ export default function DeviceTable({ role, title, subtitle, activeLabel, ignore
   const allColumns: ColumnDef[] = [
     { key: "name",  label: "Name" },
     { key: "ip",    label: "IP" },
-    { key: "dns",   label: "DNS" },
     { key: "mac",   label: "MAC" },
     { key: "rack",  label: "Rack" },
-    { key: "class", label: "Class", networkOnly: true },
-    { key: "model", label: "Model", networkOnly: true },
-    { key: "port",  label: "Port" },
+    { key: "class", label: "Class" },
+    { key: "model", label: "Model" },
   ];
-  const columns = allColumns.filter(c => !c.networkOnly || role === "network");
+  const columns = allColumns;
 
   const renderSortArrow = (colKey: string) => {
     if (sort.column !== colKey) return null;
@@ -326,7 +289,6 @@ export default function DeviceTable({ role, title, subtitle, activeLabel, ignore
 
   const renderRow = (dev: DeviceRecord) => {
     const isToggling = togglingId === dev.id;
-    const fo = dev.found_on;
     return (
       <tr key={dev.id} style={{ opacity: dev.ignored ? 0.45 : 1 }}>
         <td style={tdBase}>
@@ -339,7 +301,7 @@ export default function DeviceTable({ role, title, subtitle, activeLabel, ignore
         </td>
         <td style={{ ...tdBase, color: dev.ignored ? "#475569" : "#e2e8f0", fontWeight: 600, fontSize: 12, maxWidth: 220 }}>
           {dev.sys_name || dev.ip}
-          {role === "network" && dev.vendor && (
+          {dev.vendor && (
             <div style={{ color: "#475569", fontSize: 10, fontWeight: 400, marginTop: 1 }}>
               {dev.vendor}{dev.model ? ` -- ${dev.model}` : ""}
             </div>
@@ -348,15 +310,12 @@ export default function DeviceTable({ role, title, subtitle, activeLabel, ignore
         <td style={{ ...tdBase, color: "#94a3b8", fontFamily: "monospace", fontSize: 11 }}>
           {dev.ip}
         </td>
-        <td style={{ ...tdBase, color: "#94a3b8" }}>
-          {fo?.peer_host || ""}
-        </td>
         <td style={{ ...tdBase, color: "#64748b", fontFamily: "monospace" }}>
-          {fo?.peer_mac || dev.mac || ""}
+          {dev.mac || ""}
         </td>
         <td style={tdBase}>
           {(() => {
-            const rId = dev.rack_id || (role === "endpoint" && dev.found_on?.rack_id) || null;
+            const rId = dev.rack_id || null;
             if (!rId || !rackMap[rId]) return null;
             return (
               <span style={{
@@ -369,46 +328,25 @@ export default function DeviceTable({ role, title, subtitle, activeLabel, ignore
             );
           })()}
         </td>
-        {role === "network" && (
-          <td style={tdBase}>
-            {dev.class_id && classMap[dev.class_id] && (
-              <span style={{
-                color: classMap[dev.class_id].color || "#38bdf8", fontSize: 10,
-                backgroundColor: "#0c1a2e", padding: "1px 5px",
-                borderRadius: 3, border: `1px solid ${classMap[dev.class_id].color || "#1e3a5f"}`,
-              }}>
-                {classMap[dev.class_id].label}
-              </span>
-            )}
-          </td>
-        )}
-        {role === "network" && (
-          <td style={tdBase}>
-            {dev.model_id && modelMap[dev.model_id] && (
-              <span style={{
-                color: "#fbbf24", fontSize: 10,
-                backgroundColor: "#1a1500", padding: "1px 5px",
-                borderRadius: 3, border: "1px solid #854d0e",
-              }}>
-                {modelMap[dev.model_id].name}
-              </span>
-            )}
-          </td>
-        )}
         <td style={tdBase}>
-          {fo && fo.switch_ip && (
-            <span
-              onClick={(e) => { e.stopPropagation(); goToPort(dev); }}
-              title={`Found on ${fo.switch_name || fo.switch_ip} port ${fo.port_name}`}
-              style={{
-                color: "#38bdf8", fontSize: 10,
-                backgroundColor: "#0c1a2e", padding: "1px 5px",
-                borderRadius: 3, border: "1px solid #1e3a5f",
-                cursor: "pointer",
-                display: "inline-flex", alignItems: "center", gap: 3,
-              }}
-            >
-              {fo.switch_name || fo.switch_ip}:{fo.port_name}
+          {dev.class_id && classMap[dev.class_id] && (
+            <span style={{
+              color: classMap[dev.class_id].color || "#38bdf8", fontSize: 10,
+              backgroundColor: "#0c1a2e", padding: "1px 5px",
+              borderRadius: 3, border: `1px solid ${classMap[dev.class_id].color || "#1e3a5f"}`,
+            }}>
+              {classMap[dev.class_id].label}
+            </span>
+          )}
+        </td>
+        <td style={tdBase}>
+          {dev.model_id && modelMap[dev.model_id] && (
+            <span style={{
+              color: "#fbbf24", fontSize: 10,
+              backgroundColor: "#1a1500", padding: "1px 5px",
+              borderRadius: 3, border: "1px solid #854d0e",
+            }}>
+              {modelMap[dev.model_id].name}
             </span>
           )}
         </td>
@@ -561,8 +499,7 @@ export default function DeviceTable({ role, title, subtitle, activeLabel, ignore
                       ))}
                     </select>
                   </label>
-                  {role === "network" && (
-                    <label style={{ fontSize: 10, color: "#94a3b8", display: "block", userSelect: "none" }}>
+                  <label style={{ fontSize: 10, color: "#94a3b8", display: "block", userSelect: "none" }}>
                       Class
                       <select
                         value={form.class_id ?? ""}
@@ -575,9 +512,7 @@ export default function DeviceTable({ role, title, subtitle, activeLabel, ignore
                         ))}
                       </select>
                     </label>
-                  )}
-                  {role === "network" && (
-                    <label style={{ fontSize: 10, color: "#94a3b8", display: "block", userSelect: "none" }}>
+                  <label style={{ fontSize: 10, color: "#94a3b8", display: "block", userSelect: "none" }}>
                       Model
                       <select
                         value={form.model_id ?? ""}
@@ -590,7 +525,6 @@ export default function DeviceTable({ role, title, subtitle, activeLabel, ignore
                         ))}
                       </select>
                     </label>
-                  )}
                 </div>
                 {err && <div style={{ color: "#f87171", fontSize: 11, marginBottom: 8 }}>{err}</div>}
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>

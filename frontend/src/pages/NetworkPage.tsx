@@ -3,7 +3,6 @@ import DeviceTable from "../components/DeviceTable";
 export default function NetworkPage() {
   return (
     <DeviceTable
-      role="network"
       title="Network"
       subtitle="Managed network equipment (switches, routers, firewalls)"
       activeLabel="ACTIVE NETWORK DEVICES"

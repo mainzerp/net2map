@@ -38,7 +38,7 @@ function ClassesTabContent({ newEntryTrigger }: ClassesTabContentProps) {
 
   const refreshAll = () => {
     setLoading(true);
-    Promise.allSettled([api.get("/api/switch-classes"), api.get("/api/devices?role=network")])
+    Promise.allSettled([api.get("/api/switch-classes"), api.get("/api/devices")])
       .then(([classesRes, topoRes]) => {
         if (classesRes.status === "fulfilled") setClasses(classesRes.value);
         else setClasses([]);
@@ -81,7 +81,7 @@ function ClassesTabContent({ newEntryTrigger }: ClassesTabContentProps) {
     setErr("");
     try {
       await api.patch(`/api/topology/devices/${devId}/meta`, { class_id: classId });
-      api.invalidate("/api/topology", "/api/devices?role=network", "/api/credentials");
+      api.invalidate("/api/topology", "/api/devices", "/api/credentials");
       setAssignSel(prev => ({ ...prev, [classId]: "" }));
       refreshAll();
     } catch (ex) { setErr(extractErrorMessage(ex)); }
@@ -91,7 +91,7 @@ function ClassesTabContent({ newEntryTrigger }: ClassesTabContentProps) {
     setErr("");
     try {
       await api.patch(`/api/topology/devices/${devId}/meta`, { class_id: null });
-      api.invalidate("/api/topology", "/api/devices?role=network", "/api/credentials");
+      api.invalidate("/api/topology", "/api/devices", "/api/credentials");
       refreshAll();
     } catch (ex) { setErr(extractErrorMessage(ex)); }
   };
