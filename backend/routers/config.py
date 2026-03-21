@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 from database import AppSetting, Credential, SnmpProfile, get_db
 from routers.bulk import _normalize_bool, _normalize_optional_int
 from schemas import CredentialCreate, GlobalConfigExportOut, GlobalConfigImportRequest, SnmpProfileCreate
-from shared.auth import require_role
 from shared.audit import log_audit
+from shared.auth import require_role
 from shared.crypto import encrypt
 from shared.errors import api_error
 

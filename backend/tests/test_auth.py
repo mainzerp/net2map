@@ -1,9 +1,7 @@
 """Tests for authentication, JWT tokens, and role-based access control."""
-import pytest
 
 from database import User
-from shared.auth import create_token, hash_password, verify_password
-
+from shared.auth import create_token, hash_password
 
 # -- Login tests ---------------------------------------------------------------
 
@@ -82,9 +80,11 @@ def test_missing_token_returns_401(client):
 
 def test_expired_jwt_token_returns_401(client, db):
     """An expired JWT token returns 401."""
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
+
     import jwt as pyjwt
-    from shared.auth import JWT_SECRET, JWT_ALGORITHM
+
+    from shared.auth import JWT_ALGORITHM, JWT_SECRET
 
     user = User(
         username="exptest", email="e@test.com",
@@ -188,7 +188,7 @@ def test_ws_ticket_requires_auth(client):
 
 def test_ws_ticket_returns_ticket(client, jwt_headers):
     """WS ticket endpoint returns a ticket when authenticated (requires Redis mock)."""
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import MagicMock, patch
     mock_redis = MagicMock()
     with patch("routers.auth.get_redis", return_value=mock_redis):
         r = client.post("/api/auth/ws-ticket", headers=jwt_headers)

@@ -1,8 +1,19 @@
 """SQLAlchemy database setup and models."""
 from datetime import datetime, timezone
+
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Boolean,
-    DateTime, Float, ForeignKey, Text, UniqueConstraint, func, text,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    create_engine,
+    func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker

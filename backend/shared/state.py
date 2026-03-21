@@ -8,7 +8,7 @@ import threading
 import time
 from collections import deque
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from shared.redis_client import get_redis
 

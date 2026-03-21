@@ -27,6 +27,7 @@ celery_app.conf.beat_schedule = {
 
 from celery.signals import worker_shutting_down
 
+
 @worker_shutting_down.connect
 def on_worker_shutdown(sig, how, exitcode, **kwargs):
     import logging

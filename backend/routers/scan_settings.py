@@ -16,11 +16,10 @@ from schemas import (
     ScanSettingsOut,
     ScanSettingsUpdate,
 )
-from shared.auth import require_role
 from shared.audit import log_audit
+from shared.auth import require_role
 from shared.errors import api_error
 from shared.file_settings import (
-    _normalize_dns_servers,
     _read_dns_settings,
     _read_scan_settings,
     _write_dns_settings,

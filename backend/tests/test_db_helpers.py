@@ -1,5 +1,4 @@
 """Tests for scan_engine/db_helpers.py utility functions."""
-import importlib
 import sys
 
 # Remove scan_engine mock so we can import the real module
@@ -14,7 +13,6 @@ _expand_ranges_to_ips = _dbh._expand_ranges_to_ips
 
 from database import AppSetting, ScanRun, ScanRunSwitchMetric  # noqa: E402
 from schemas import ScanResult, ScanSwitchMetric  # noqa: E402
-
 
 # -- _safe_json_list ----------------------------------------------------------
 

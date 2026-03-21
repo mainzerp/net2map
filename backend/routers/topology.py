@@ -1,22 +1,26 @@
 """Topology query and device/rack position/meta update endpoints."""
 import hashlib
 import json
-import time
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from database import Device, Port as PortModel, TopologyLink, get_db
+from database import Device, TopologyLink, get_db
 from database import Rack as RackModel
 from database import SwitchClass as SwitchClassModel
 from database import SwitchModel as SwitchModelModel
 from schemas import (
-    BulkDeviceMetaUpdate, DeviceMetaUpdate, DeviceOut, DevicePositionUpdate,
-    RackOut, RackPositionUpdate, TopologyOut,
+    BulkDeviceMetaUpdate,
+    DeviceMetaUpdate,
+    DeviceOut,
+    DevicePositionUpdate,
+    RackOut,
+    RackPositionUpdate,
+    TopologyOut,
 )
-from shared.auth import require_role
 from shared.audit import log_audit
+from shared.auth import require_role
 from shared.errors import api_error
 from shared.redis_client import get_redis
 
@@ -90,7 +94,7 @@ def get_topology(request: Request, db: Session = Depends(get_db)):
 
     # Only show devices that are not ignored
     nodes   = db.query(Device).filter(
-        Device.ignored == False,
+        Device.ignored.is_(False),
     ).all()
     links   = db.query(TopologyLink).all()
     racks   = db.query(RackModel).order_by(RackModel.id).all()

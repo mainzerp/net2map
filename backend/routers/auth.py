@@ -10,9 +10,18 @@ from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from database import User, get_db
-from schemas import LoginRequest, TokenResponse, UserCreate, UserUpdate, UserOut
-from shared.auth import create_token, hash_password, verify_password, require_role, JWT_SECRET, JWT_ALGORITHM, blacklist_token, blacklist_all_user_tokens
+from schemas import LoginRequest, TokenResponse, UserCreate, UserOut, UserUpdate
 from shared.audit import log_audit
+from shared.auth import (
+    JWT_ALGORITHM,
+    JWT_SECRET,
+    blacklist_all_user_tokens,
+    blacklist_token,
+    create_token,
+    hash_password,
+    require_role,
+    verify_password,
+)
 from shared.errors import api_error
 from shared.redis_client import get_redis
 
@@ -24,7 +33,7 @@ limiter = Limiter(key_func=get_remote_address)
 @limiter.limit("5/minute")
 def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
     user = db.query(User).filter(
-        User.username == body.username, User.is_active == True
+        User.username == body.username, User.is_active.is_(True)
     ).first()
     if not user or not verify_password(body.password, user.hashed_pw):
         api_error(401, "AUTH_INVALID_CREDENTIALS", "Invalid username or password")
@@ -90,7 +99,7 @@ def refresh_token(request: Request, db: Session = Depends(get_db)):
             api_error(401, "AUTH_INVALID", "Invalid token")
 
     user = db.query(User).filter(
-        User.id == user_info["id"], User.is_active == True
+        User.id == user_info["id"], User.is_active.is_(True)
     ).first()
     if not user:
         api_error(401, "AUTH_USER_INACTIVE", "User account is inactive or deleted")

@@ -5,3 +5,11 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "W", "F", "I"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/versions/*.py" = ["E402"]
+"tests/conftest.py" = ["E402"]
+"tests/test_dns.py" = ["E402"]
+"tests/test_ping.py" = ["E402"]
+"celery_app.py" = ["E402"]
+"snmp_scanner.py" = ["E402"]

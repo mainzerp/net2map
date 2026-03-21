@@ -3,7 +3,6 @@ import json
 
 from database import Credential, SnmpProfile
 
-
 # -- Bulk export tests ---------------------------------------------------------
 
 def test_bulk_export_credentials_masks_passwords(client, auth_headers, db):

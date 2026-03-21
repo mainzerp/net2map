@@ -1,5 +1,5 @@
 """Prometheus metrics for the NetMap backend."""
-from prometheus_client import Counter, Histogram, Gauge
+from prometheus_client import Counter, Gauge, Histogram
 
 SCAN_DURATION = Histogram("netmap_scan_duration_seconds", "Scan execution duration", ["scan_type"])
 SCAN_TOTAL = Counter("netmap_scans_total", "Total number of scans", ["scan_type", "status"])

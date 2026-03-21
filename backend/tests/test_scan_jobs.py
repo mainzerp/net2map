@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
+import shared.state as _st
 from shared.state import (
     SCAN_JOBS,
     SCAN_JOBS_LOCK,
@@ -18,7 +19,6 @@ from shared.state import (
     set_scan_job,
     update_scan_job,
 )
-import shared.state as _st
 
 
 @pytest.fixture(autouse=True)

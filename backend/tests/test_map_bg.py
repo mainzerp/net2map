@@ -1,17 +1,15 @@
 """Tests for map background upload, retrieval, deletion, and map settings."""
 import io
 import os
-from unittest.mock import patch
 
 import pytest
-from database import AuditLog
 
 
 # Disable slowapi rate-limiting during tests by resetting limiter storage
 @pytest.fixture(autouse=True)
 def _reset_rate_limiter():
-    from main import app
     import routers.map_bg as _mbg
+    from main import app
     app.state.limiter.reset()
     _mbg.limiter.reset()
     yield
@@ -25,7 +23,8 @@ def _reset_rate_limiter():
 
 def _png_bytes():
     """Minimal valid PNG (1x1 transparent pixel)."""
-    import struct, zlib
+    import struct
+    import zlib
     sig = b"\x89PNG\r\n\x1a\n"
     ihdr_data = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
     ihdr_crc = zlib.crc32(b"IHDR" + ihdr_data) & 0xffffffff

@@ -1,14 +1,13 @@
 """Phase T1: Scanner plugin tests -- registry, parse/transform, edge cases."""
 import pytest
 
-from scanners.base import VendorScanner
+from scanners import SCANNER_REGISTRY, get_scanner
 from scanners.aruba_cx import ArubaCXScanner
+from scanners.base import VendorScanner
 from scanners.fs_scanner import FSScanner
-from scanners.unifi import UniFiScanner
-from scanners.opnsense import OPNsenseScanner
 from scanners.generic import GenericScanner
-from scanners import get_scanner, SCANNER_REGISTRY
-
+from scanners.opnsense import OPNsenseScanner
+from scanners.unifi import UniFiScanner
 
 # ---------------------------------------------------------------------------
 # ArubaCX Scanner

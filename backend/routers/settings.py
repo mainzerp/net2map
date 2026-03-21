@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 from database import AppSetting, Device, Endpoint, Port, ScanRun, get_db
 from database import Rack as RackModel
 from schemas import AppSettingOut, AppSettingUpdate
-from shared.auth import require_role
 from shared.audit import log_audit
+from shared.auth import require_role
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
@@ -39,7 +39,6 @@ def update_setting(key: str, body: AppSettingUpdate, request: Request, db: Sessi
 
 @router.get("/api/stats")
 def get_stats(db: Session = Depends(get_db)):
-    from sqlalchemy import func
     device_count = db.query(Device).count()
     port_count = db.query(Port).count()
     port_up = db.query(Port).filter(Port.oper_status == 1).count()

@@ -1,10 +1,10 @@
 """Tests for WebSocket scan-progress endpoint and auth helpers."""
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 from fastapi import WebSocketException
 
 from routers.ws import _authenticate_ws
-
 
 # ---------------------------------------------------------------------------
 # T3c: WebSocket Tests (7 tests)
@@ -70,8 +70,9 @@ class TestAuthenticateWs:
 
     def test_jwt_expired_raises(self):
         """An expired JWT should be rejected."""
-        import jwt as pyjwt
         import time
+
+        import jwt as pyjwt
         secret = "test-jwt-secret"
         token = pyjwt.encode(
             {"sub": 1, "exp": int(time.time()) - 3600}, secret, algorithm="HS256"

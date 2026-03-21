@@ -6,11 +6,10 @@ import uuid
 from datetime import datetime, timezone
 
 from database import SessionLocal
-from schemas import ScanResult
-from shared.state import _log_event, set_scan_job, update_scan_job
-
 from scan_engine.event_loop import _get_bg_loop
 from scan_engine.executor import _execute_scan
+from schemas import ScanResult
+from shared.state import _log_event, set_scan_job, update_scan_job
 
 
 def _run_scan_job(job_id: str, cancel_event: threading.Event, dry_run: bool = False, scan_type: str = "full"):

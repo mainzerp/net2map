@@ -3,7 +3,6 @@ import json
 
 from database import AppSetting, Credential, SnmpProfile
 
-
 # -- Config export tests -------------------------------------------------------
 
 def test_config_export_masks_passwords(client, auth_headers, db):

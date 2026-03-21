@@ -7,10 +7,9 @@ import uuid
 from datetime import datetime, timezone
 
 from database import AppSetting, SessionLocal
-from shared.state import _log_event, set_scan_job, can_dispatch_scan
-
 from scan_engine.event_loop import _get_bg_loop
 from scan_engine.executor import _execute_scan
+from shared.state import _log_event, can_dispatch_scan, set_scan_job
 
 # Wake event: set this to interrupt the scheduler sleep early (e.g. when
 # settings change and the scheduler should re-evaluate intervals immediately).

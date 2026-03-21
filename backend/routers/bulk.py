@@ -18,8 +18,8 @@ from schemas import (
     CredentialCreate,
     SnmpProfileCreate,
 )
-from shared.auth import require_role
 from shared.audit import log_audit
+from shared.auth import require_role
 from shared.crypto import encrypt
 from shared.errors import api_error
 

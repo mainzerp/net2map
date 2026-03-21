@@ -1,19 +1,19 @@
 """Scan trigger and job management endpoints."""
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy.orm import Session
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from sqlalchemy.orm import Session
 
 from database import get_db
 from scan_engine import _execute_scan, _start_job
 from schemas import ScanResult
-from shared.auth import require_role
 from shared.audit import log_audit
+from shared.auth import require_role
 from shared.errors import api_error
 from shared.state import _log_event, get_scan_job, request_scan_cancel
-import logging
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)

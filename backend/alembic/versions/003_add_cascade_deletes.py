@@ -7,8 +7,9 @@ Create Date: 2026-02-25
 """
 from typing import Sequence, Union
 
-from alembic import op
 from sqlalchemy import inspect, text
+
+from alembic import op
 
 revision: str = "003"
 down_revision: Union[str, None] = "002"
@@ -49,7 +50,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    conn = op.get_bind()
     for table, col, ref_table, ref_col, new_name in _FK_SPECS:
         op.drop_constraint(new_name, table, type_="foreignkey")
         op.create_foreign_key(None, table, ref_table, [col], [ref_col])

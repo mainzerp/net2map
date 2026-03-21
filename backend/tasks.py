@@ -9,8 +9,11 @@ from database import AppSetting, SessionLocal
 from scan_engine import _execute_scan
 from schemas import ScanResult
 from shared.state import (
-    update_scan_job, is_cancel_requested, _log_event,
-    acquire_scan_lock, release_scan_lock,
+    _log_event,
+    acquire_scan_lock,
+    is_cancel_requested,
+    release_scan_lock,
+    update_scan_job,
 )
 
 
@@ -126,9 +129,10 @@ def scheduler_tick():
 @celery_app.task
 def purge_old_audit_logs():
     """Delete audit log entries older than AUDIT_RETENTION_DAYS."""
+    from datetime import datetime, timedelta, timezone
+
     from config import settings
     from database import AuditLog, SessionLocal
-    from datetime import datetime, timezone, timedelta
 
     if settings.audit_retention_days <= 0:
         return

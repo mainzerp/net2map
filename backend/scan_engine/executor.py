@@ -11,26 +11,36 @@ from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from database import (
-    AppSetting, Credential, Device, Endpoint, EndpointPortAssociation,
-    Port, SessionLocal, SnmpProfile,
-    ScanRun, ScanRunSwitchMetric, TopologyLink, DryRunResult,
+    Credential,
+    Device,
+    DryRunResult,
+    Endpoint,
+    EndpointPortAssociation,
+    Port,
+    SnmpProfile,
+    TopologyLink,
 )
-from schemas import ScanResult, ScanSwitchMetric
-from shared.file_settings import _read_dns_settings, _read_scan_settings
-from shared.state import _log_event
-from shared.crypto import decrypt
-from shared.metrics import SCAN_ACTIVE, SCAN_DURATION, SCAN_TOTAL, DEVICE_COUNT, PORT_COUNT, ENDPOINT_COUNT
-from snmp_scanner import (
-    LldpNeighbor, SwitchData, auto_layout, extract_model,
-    is_virtual, scan_switch, speed_label,
-)
-
 from scan_engine.broadcast import _broadcast_progress, _broadcast_scan_complete
-from scan_engine.ping import _build_ping_cmd
-from scan_engine.dns import _resolve_ip, _resolve_host
 from scan_engine.db_helpers import (
-    _canonical_link_key, _persist_scan_run,
-    _read_discovery_ranges, _expand_ranges_to_ips,
+    _canonical_link_key,
+    _expand_ranges_to_ips,
+    _persist_scan_run,
+    _read_discovery_ranges,
+)
+from scan_engine.dns import _resolve_host, _resolve_ip
+from scan_engine.ping import _build_ping_cmd
+from schemas import ScanResult, ScanSwitchMetric
+from shared.crypto import decrypt
+from shared.file_settings import _read_dns_settings, _read_scan_settings
+from shared.metrics import DEVICE_COUNT, ENDPOINT_COUNT, PORT_COUNT, SCAN_ACTIVE, SCAN_DURATION, SCAN_TOTAL
+from shared.state import _log_event
+from snmp_scanner import (
+    SwitchData,
+    auto_layout,
+    extract_model,
+    is_virtual,
+    scan_switch,
+    speed_label,
 )
 
 log = logging.getLogger(__name__)
@@ -50,13 +60,13 @@ async def _execute_scan(
 
     if scan_mode in {"ports", "links", "macs"}:
         # Only scan credentials that are already in the Device table and not ignored
-        known_ips = {d.ip for d in db.query(Device.ip).filter(Device.ignored == False).all()}
+        known_ips = {d.ip for d in db.query(Device.ip).filter(Device.ignored.is_(False)).all()}
         credentials = db.query(Credential).filter(
-            Credential.enabled == True, Credential.ip.in_(known_ips)
+            Credential.enabled.is_(True), Credential.ip.in_(known_ips)
         ).order_by(Credential.ip, Credential.priority).all()
     else:
         credentials = db.query(Credential).filter(
-            Credential.enabled == True
+            Credential.enabled.is_(True)
         ).order_by(Credential.ip, Credential.priority).all()
 
     # Group credentials by IP for fallback chain support
@@ -611,7 +621,6 @@ async def _execute_scan(
 
                     db.query(Port).filter(Port.device_id == device.id).delete()
                     port_rows = []
-                    new_port_objects = []
                     for iface in sw.interfaces.values():
                         if is_virtual(iface.descr, sw.vendor):
                             continue

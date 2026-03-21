@@ -1,17 +1,17 @@
 """Map background image and map settings endpoints."""
-import filetype
 import os
 import re
 
+import filetype
 from defusedxml import ElementTree as SafeET
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from schemas import MapSettingsOut, MapSettingsUpdate
-from shared.auth import require_role
 from shared.audit import log_audit
+from shared.auth import require_role
 from shared.errors import api_error
 from shared.file_settings import (
     ALLOWED_EXTENSIONS,

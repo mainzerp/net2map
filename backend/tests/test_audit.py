@@ -1,8 +1,7 @@
 """Tests for audit log listing and audit trail side-effects."""
-import pytest
-from datetime import datetime, timezone, timedelta
-from database import AuditLog
+from datetime import datetime, timedelta, timezone
 
+from database import AuditLog
 
 # ---------------------------------------------------------------------------
 # T3b: Audit Logging Tests (7 tests)

@@ -21,20 +21,28 @@ Credentials
     • One SNMPv3 credential per FS TOR switch   (authPriv / SHA-256 / AES-128)
     • One SNMPv3 credential per Aruba CX switch (authPriv / SHA-256 / AES-256)
 """
+import os
 import random
 import sys
-import os
 
 # ── Make sure we can import the app's own modules ────────────────────────────
 sys.path.insert(0, os.path.dirname(__file__))
 
-from database import (
-    Base, Credential, Device, Endpoint, EndpointPortAssociation,
-    Port, TopologyLink, SnmpProfile,
-    SwitchClass, Rack as RackModel, create_tables,
-)
 from sqlalchemy.orm import Session
-from database import engine
+
+from database import (
+    Credential,
+    Device,
+    Port,
+    SnmpProfile,
+    SwitchClass,
+    TopologyLink,
+    create_tables,
+    engine,
+)
+from database import (
+    Rack as RackModel,
+)
 
 # ─── Deterministic random so IPs/MACs are the same on every run ──────────────
 rng = random.Random(42)
@@ -268,7 +276,8 @@ def seed(db: Session):
             label     = f"{rack['label']} TOR-1 -- {FS_MODEL}",
             enabled   = True,
         )
-        db.add(fs1); db.flush()
+        db.add(fs1)
+        db.flush()
         for p in make_fs_ports(fs1.id, ri, 0):
             db.add(p)
 
@@ -288,7 +297,8 @@ def seed(db: Session):
             label     = f"{rack['label']} TOR-2 -- {FS_MODEL}",
             enabled   = True,
         )
-        db.add(fs2); db.flush()
+        db.add(fs2)
+        db.flush()
         for p in make_fs_ports(fs2.id, ri, 1):
             db.add(p)
 
@@ -308,7 +318,8 @@ def seed(db: Session):
             label     = f"{rack['label']} ACC-1 -- {ARUBA_CX_6300['model']}",
             enabled   = True,
         )
-        db.add(aruba1); db.flush()
+        db.add(aruba1)
+        db.flush()
         for p in make_aruba_6300_ports(aruba1.id, ri, 2):
             db.add(p)
 
@@ -328,7 +339,8 @@ def seed(db: Session):
             label     = f"{rack['label']} ACC-2 -- {ARUBA_CX_6300['model']}",
             enabled   = True,
         )
-        db.add(aruba2); db.flush()
+        db.add(aruba2)
+        db.flush()
         for p in make_aruba_6300_ports(aruba2.id, ri, 3):
             db.add(p)
 
@@ -348,7 +360,8 @@ def seed(db: Session):
             label     = f"{rack['label']} ACC-3 -- {ARUBA_CX_6200['model']}",
             enabled   = True,
         )
-        db.add(aruba3); db.flush()
+        db.add(aruba3)
+        db.flush()
         for p in make_aruba_6200_ports(aruba3.id, ri, 4):
             db.add(p)
 

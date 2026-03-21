@@ -1,5 +1,4 @@
 """Tests for the centralized config module (config.py Settings class)."""
-import os
 
 
 def test_settings_reads_env_vars(monkeypatch):

@@ -1,6 +1,7 @@
 """Tests for the topology router."""
 from unittest.mock import patch
-from database import Device, Credential, Port, TopologyLink
+
+from database import Credential, Device, Port
 from database import Rack as RackModel
 from database import SwitchClass as SwitchClassModel
 

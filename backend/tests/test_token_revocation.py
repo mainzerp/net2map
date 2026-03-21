@@ -1,5 +1,5 @@
 """Tests for token revocation: logout, revoke-all, blacklisted token rejection."""
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from database import User
 from shared.auth import create_token, hash_password

@@ -17,9 +17,9 @@ def _get_bg_loop() -> asyncio.AbstractEventLoop:
             return _bg_loop
         loop = asyncio.new_event_loop()
 
-        def _run(l: asyncio.AbstractEventLoop):
-            asyncio.set_event_loop(l)
-            l.run_forever()
+        def _run(event_loop: asyncio.AbstractEventLoop):
+            asyncio.set_event_loop(event_loop)
+            event_loop.run_forever()
 
         t = threading.Thread(target=_run, args=(loop,), daemon=True)
         t.start()

@@ -29,6 +29,7 @@ if config.config_file_name is not None:
 # and the container WORKDIR is /app where database.py lives.
 # ---------------------------------------------------------------------------
 from database import Base  # noqa: E402  — import after path is set up
+
 # Importing database triggers all model class definitions (Rack, Device, etc.)
 # No additional imports needed; all models are registered on Base.metadata.
 

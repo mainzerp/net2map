@@ -6,10 +6,10 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload
 
-from database import Device, Endpoint, EndpointPortAssociation, Port, get_db
+from database import Endpoint, EndpointPortAssociation, Port, get_db
 from schemas import BulkEndpointUpdate, EndpointOut, EndpointPortInfo, EndpointUpdate
-from shared.auth import require_role
 from shared.audit import log_audit
+from shared.auth import require_role
 from shared.errors import api_error
 
 router = APIRouter()

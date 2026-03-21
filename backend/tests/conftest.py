@@ -10,6 +10,7 @@ os.environ["ENCRYPTION_KEY"] = ""
 # Patch JSONB -> JSON so SQLite works with PostgreSQL-specific columns
 import sqlalchemy.dialects.postgresql as _pg
 from sqlalchemy import JSON as _JSON
+
 _pg.JSONB = _JSON
 
 # Mock heavy / platform-specific modules that are not needed for API tests
@@ -24,8 +25,8 @@ from sqlalchemy.pool import StaticPool
 
 import database as _db_mod
 from database import User
-from shared.auth import create_token, hash_password
 from main import app
+from shared.auth import create_token, hash_password
 
 # In-memory SQLite engine with shared cache so all connections see the same DB
 engine = create_engine(

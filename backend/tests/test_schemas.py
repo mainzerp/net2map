@@ -1,17 +1,18 @@
 """Tests for Pydantic schema validation."""
 import pytest
 from pydantic import ValidationError
+
 from schemas import (
-    CredentialCreate,
-    ScanSettingsUpdate,
-    DnsSettingsUpdate,
-    MapSettingsUpdate,
-    ErrorDetail,
     APIError,
+    BulkEndpointUpdate,
+    CredentialCreate,
+    DnsSettingsUpdate,
     EndpointOut,
     EndpointPortInfo,
     EndpointUpdate,
-    BulkEndpointUpdate,
+    ErrorDetail,
+    MapSettingsUpdate,
+    ScanSettingsUpdate,
 )
 
 

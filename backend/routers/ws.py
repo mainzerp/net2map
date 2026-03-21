@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Set
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException, Query
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, WebSocketException
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -89,7 +89,6 @@ def _authenticate_ws(token: str) -> None:
     from shared.redis_client import get_redis
     r = get_redis()
     if r:
-        import json
         ticket_key = f"ws_ticket:{token}"
         ticket_data = r.get(ticket_key)
         if ticket_data:

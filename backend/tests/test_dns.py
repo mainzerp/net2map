@@ -1,7 +1,6 @@
 """Tests for scan_engine/dns.py resolution and caching."""
-import importlib
 import sys
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 # The conftest mocks `scan_engine` as a MagicMock. We need the real modules
 # for dns tests, so remove the mock entries and import fresh.
@@ -10,6 +9,7 @@ for _key in list(sys.modules.keys()):
         del sys.modules[_key]
 
 import scan_engine.dns as _dns_mod
+
 # Restore the top-level mock so other tests are not affected
 sys.modules.setdefault("scan_engine", MagicMock())
 

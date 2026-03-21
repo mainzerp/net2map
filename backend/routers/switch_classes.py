@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 from database import Device, get_db
 from database import SwitchClass as SwitchClassModel
 from schemas import SwitchClassCreate, SwitchClassOut, SwitchClassUpdate
-from shared.auth import require_role
 from shared.audit import log_audit
+from shared.auth import require_role
 from shared.errors import api_error
 
 router = APIRouter()

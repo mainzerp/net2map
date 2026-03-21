@@ -7,24 +7,38 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
-from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
-from database import create_tables, get_db
 from config import settings as app_settings
+from database import create_tables
+from routers import (
+    audit,
+    auth,
+    bulk,
+    config,
+    credentials,
+    endpoints,
+    health,
+    logs,
+    map_bg,
+    racks,
+    scan,
+    scan_runs,
+    scan_settings,
+    settings,
+    snmp_profiles,
+    switch_classes,
+    switch_models,
+    topology,
+    ws,
+)
 from scan_engine import _background_scheduler
 from shared.auth import _require_auth
 from shared.metrics import REQUEST_LATENCY, REQUEST_TOTAL
-
-from routers import (
-    health, settings, credentials, snmp_profiles, racks,
-    switch_classes, switch_models, scan, scan_runs, topology,
-    map_bg, scan_settings, bulk, config, logs, auth, audit, ws,
-    endpoints,
-)
 
 logging.basicConfig(
     level=getattr(logging, app_settings.log_level.upper(), logging.INFO),

@@ -6,27 +6,38 @@ never blocked. scan_switch() is now a coroutine; call it with await.
 import asyncio
 import logging
 import math
-import re
-import socket
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
 # Auth / privacy constants (sync module exports these, async module does not)
 from pysnmp.hlapi import (
-    CommunityData, UsmUserData,
-    usmNoAuthProtocol, usmNoPrivProtocol,
-    usmHMACMD5AuthProtocol, usmHMACSHAAuthProtocol,
-    usmHMAC128SHA224AuthProtocol, usmHMAC192SHA256AuthProtocol,
-    usmHMAC256SHA384AuthProtocol, usmHMAC384SHA512AuthProtocol,
-    usmDESPrivProtocol, usm3DESEDEPrivProtocol,
-    usmAesCfb128Protocol, usmAesCfb192Protocol, usmAesCfb256Protocol,
+    CommunityData,
+    UsmUserData,
+    usm3DESEDEPrivProtocol,
+    usmAesCfb128Protocol,
+    usmAesCfb192Protocol,
+    usmAesCfb256Protocol,
+    usmDESPrivProtocol,
+    usmHMAC128SHA224AuthProtocol,
+    usmHMAC192SHA256AuthProtocol,
+    usmHMAC256SHA384AuthProtocol,
+    usmHMAC384SHA512AuthProtocol,
+    usmHMACMD5AuthProtocol,
+    usmHMACSHAAuthProtocol,
+    usmNoAuthProtocol,
+    usmNoPrivProtocol,
 )
+
 # Async SNMP command generators
 from pysnmp.hlapi.asyncio import (
-    ContextData, ObjectIdentity, ObjectType,
-    SnmpEngine, UdpTransportTarget,
-    bulkCmd, getCmd,
+    ContextData,
+    ObjectIdentity,
+    ObjectType,
+    SnmpEngine,
+    UdpTransportTarget,
+    bulkCmd,
+    getCmd,
 )
 
 log = logging.getLogger(__name__)
@@ -431,12 +442,18 @@ def is_virtual(if_descr: str, vendor: str) -> bool:
 # NOTE: This logic is mirrored in frontend/src/api.js speedLabel().
 # Any changes here must be reflected there too.
 def speed_label(mbps: int) -> str:
-    if mbps >= 100_000: return "100G"
-    if mbps >= 40_000:  return "40G"
-    if mbps >= 25_000:  return "25G"
-    if mbps >= 10_000:  return "10G"
-    if mbps >= 1_000:   return "1G"
-    if mbps >= 100:     return "100M"
+    if mbps >= 100_000:
+        return "100G"
+    if mbps >= 40_000:
+        return "40G"
+    if mbps >= 25_000:
+        return "25G"
+    if mbps >= 10_000:
+        return "10G"
+    if mbps >= 1_000:
+        return "1G"
+    if mbps >= 100:
+        return "100M"
     return "10M"
 
 
@@ -626,12 +643,14 @@ async def _scan_switch_inner(
 
     for oid_s, val in descr_rows:
         idx = _idx(oid_s)
-        if idx is None: continue
+        if idx is None:
+            continue
         sw.interfaces.setdefault(idx, IfInfo(index=idx)).descr = val
 
     for oid_s, val in status_rows:
         idx = _idx(oid_s)
-        if idx is None: continue
+        if idx is None:
+            continue
         try:
             sw.interfaces.setdefault(idx, IfInfo(index=idx)).oper_status = int(val)
         except ValueError:
@@ -639,7 +658,8 @@ async def _scan_switch_inner(
 
     for oid_s, val in hspeed_rows:
         idx = _idx(oid_s)
-        if idx is None: continue
+        if idx is None:
+            continue
         try:
             sw.interfaces.setdefault(idx, IfInfo(index=idx)).speed_mbps = int(val)
         except ValueError:
@@ -647,7 +667,8 @@ async def _scan_switch_inner(
 
     for oid_s, val in alias_rows:
         idx = _idx(oid_s)
-        if idx is None: continue
+        if idx is None:
+            continue
         sw.interfaces.setdefault(idx, IfInfo(index=idx)).alias = val
 
     wants_links = scan_mode in {"full", "ports", "links"}
@@ -673,7 +694,8 @@ async def _scan_switch_inner(
 
         for oid_s, val in sys_rows:
             k = _lldp_key(oid_s)
-            if k is None: continue
+            if k is None:
+                continue
             local_port, _ = k
             nbr_map.setdefault(k, LldpNeighbor(local_port_idx=local_port)).remote_sys = val
 

@@ -7,12 +7,12 @@ from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from database import Credential, Device, get_db
+from routers.topology import _bump_topo_version
 from schemas import CredentialCreate, CredentialOut, CredentialUpdate
-from shared.auth import require_role
 from shared.audit import log_audit
+from shared.auth import require_role
 from shared.crypto import encrypt
 from shared.errors import api_error
-from routers.topology import _bump_topo_version
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
