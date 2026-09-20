@@ -170,7 +170,7 @@ export interface ZoomState {
 // -- Port link map entry (returned by buildPortLinkMap in api.ts) -------------
 export interface PortLinkEntry {
   link: TopologyLink;
-  role: "local" | "remote";
+  role: "from" | "to";
 }
 
 // -- Endpoint (separate endpoint table) ----------------------------------------

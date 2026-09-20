@@ -1,11 +1,33 @@
 import { useState, useEffect, useRef } from "react";
-import { getStoredToken, api } from "../api";
+import { API, api } from "../api";
+import { useToast } from "../components/ToastProvider";
 import type { ScanProgress } from "../types";
+
+const MAX_RECONNECT_ATTEMPTS = 5;
+const BASE_RETRY_DELAY_MS = 3000;
+const MAX_RETRY_DELAY_MS = 30000;
+
+// Derive the WebSocket base URL from VITE_API_URL when set (remote backend),
+// otherwise fall back to the page origin (Vite proxy / nginx).
+function wsBaseUrl(): string {
+  if (API) {
+    try {
+      const u = new URL(API);
+      return `${u.protocol === "https:" ? "wss:" : "ws:"}//${u.host}`;
+    } catch {
+      // malformed VITE_API_URL -- fall through to page origin
+    }
+  }
+  return `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
+}
 
 export function useScanProgress(jobId: string | null): ScanProgress | null {
   const [progress, setProgress] = useState<ScanProgress | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { addToast } = useToast();
+  const addToastRef = useRef(addToast);
+  addToastRef.current = addToast;
 
   useEffect(() => {
     if (!jobId) {
@@ -14,25 +36,36 @@ export function useScanProgress(jobId: string | null): ScanProgress | null {
     }
 
     let unmounted = false;
+    let attempts = 0;
+    let failureNotified = false;
+
+    function notifyFailure(message: string) {
+      if (failureNotified) return;
+      failureNotified = true;
+      addToastRef.current(message, "error");
+    }
 
     async function connect() {
       if (unmounted) return;
 
-      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
       let ticket = "";
       try {
         const resp = await api.post("/api/auth/ws-ticket", {});
         ticket = resp.ticket || "";
-      } catch (_) {
-        // Ticket endpoint unavailable (no Redis or auth disabled) -- fall back to raw token
-        ticket = getStoredToken();
+      } catch (ex) {
+        // No silent token fallback: a raw JWT in the URL would end up in proxy logs.
+        notifyFailure(`Live scan progress unavailable: ${ex instanceof Error ? ex.message : String(ex)}`);
+        return;
       }
-      const url = `${proto}//${window.location.host}/ws/scan-progress${ticket ? "?token=" + encodeURIComponent(ticket) : ""}`;
+      // The ticket request may resolve after unmount -- do not leak a WebSocket.
+      if (unmounted) return;
 
+      const url = `${wsBaseUrl()}/ws/scan-progress${ticket ? "?token=" + encodeURIComponent(ticket) : ""}`;
       const ws = new WebSocket(url);
       wsRef.current = ws;
 
       ws.onopen = () => {
+        attempts = 0;
         if (reconnectRef.current) {
           clearTimeout(reconnectRef.current);
           reconnectRef.current = null;
@@ -51,7 +84,13 @@ export function useScanProgress(jobId: string | null): ScanProgress | null {
 
       ws.onclose = () => {
         if (unmounted) return;
-        reconnectRef.current = setTimeout(connect, 3000);
+        attempts += 1;
+        if (attempts > MAX_RECONNECT_ATTEMPTS) {
+          notifyFailure("Live scan progress connection lost - giving up. Reload to retry.");
+          return;
+        }
+        const delay = Math.min(MAX_RETRY_DELAY_MS, BASE_RETRY_DELAY_MS * 2 ** (attempts - 1));
+        reconnectRef.current = setTimeout(connect, delay);
       };
 
       ws.onerror = () => {

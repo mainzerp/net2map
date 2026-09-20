@@ -10,6 +10,23 @@ interface ETagCacheEntry {
   data: unknown;
 }
 
+// ETag cache for GET requests that support conditional fetching
+const _etagCache: Record<string, ETagCacheEntry> = {};
+
+function _clearEtagCache(): void {
+  Object.keys(_etagCache).forEach(k => { delete _etagCache[k]; });
+}
+
+// Drop cache entries affected by a mutation: the exact path, any cached
+// parent collection of it, and any cached child paths below it.
+function _invalidateRelated(path: string): void {
+  Object.keys(_etagCache).forEach(key => {
+    if (key === path || path.startsWith(key + "/") || key.startsWith(path + "/")) {
+      delete _etagCache[key];
+    }
+  });
+}
+
 // Auth token from localStorage (JWT or legacy token)
 export function _getAuthHeader(): Record<string, string> {
   const token = localStorage.getItem("auth_token") || import.meta.env.VITE_API_TOKEN || "";
@@ -35,6 +52,7 @@ export async function logout(): Promise<void> {
   }
   localStorage.removeItem("auth_token");
   localStorage.removeItem("auth_user");
+  _clearEtagCache();
 }
 
 export function getStoredUser(): { username: string; role: string } | null {
@@ -49,7 +67,11 @@ export function getTokenExpiry(): Date | null {
   const token = getStoredToken();
   if (!token) return null;
   try {
-    const payload = JSON.parse(atob(token.split(".")[1]));
+    // JWT payloads are base64url-encoded: convert to standard base64 and pad
+    const b64url = token.split(".")[1] || "";
+    const b64 = b64url.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    const payload = JSON.parse(atob(padded));
     return payload.exp ? new Date(payload.exp * 1000) : null;
   } catch { return null; }
 }
@@ -96,9 +118,6 @@ let _navigateFn: NavigateFn | null = null;
 export function setApiNavigate(fn: NavigateFn): void {
   _navigateFn = fn;
 }
-
-// ETag cache for GET requests that support conditional fetching
-const _etagCache: Record<string, ETagCacheEntry> = {};
 
 async function _checkOk(r: Response): Promise<Response> {
   if (!r.ok) {
@@ -155,10 +174,10 @@ export const api = {
     }
     return data;
   },
-  post:  async (path: string, body?: unknown): Promise<any> => { await refreshTokenIfNeeded(); return fetch(`${API}${path}`, { method:"POST",   headers:{"Content-Type":"application/json", ..._getAuthHeader()}, body: JSON.stringify(body) }).then(_checkOk).then(r => r.json()); },
-  put:   async (path: string, body?: unknown): Promise<any> => { await refreshTokenIfNeeded(); return fetch(`${API}${path}`, { method:"PUT",    headers:{"Content-Type":"application/json", ..._getAuthHeader()}, body: JSON.stringify(body) }).then(_checkOk).then(r => r.json()); },
-  patch: async (path: string, body?: unknown): Promise<any> => { await refreshTokenIfNeeded(); return fetch(`${API}${path}`, { method:"PATCH",  headers:{"Content-Type":"application/json", ..._getAuthHeader()}, body: JSON.stringify(body) }).then(_checkOk).then(r => r.json()); },
-  del:   async (path: string): Promise<void> => { await refreshTokenIfNeeded(); await fetch(`${API}${path}`, { method:"DELETE", headers:{ ..._getAuthHeader() } }).then(_checkOk); },
+  post:  async (path: string, body?: unknown): Promise<any> => { await refreshTokenIfNeeded(); const data = await fetch(`${API}${path}`, { method:"POST",   headers:{"Content-Type":"application/json", ..._getAuthHeader()}, body: JSON.stringify(body) }).then(_checkOk).then(r => r.json()); _invalidateRelated(path); return data; },
+  put:   async (path: string, body?: unknown): Promise<any> => { await refreshTokenIfNeeded(); const data = await fetch(`${API}${path}`, { method:"PUT",    headers:{"Content-Type":"application/json", ..._getAuthHeader()}, body: JSON.stringify(body) }).then(_checkOk).then(r => r.json()); _invalidateRelated(path); return data; },
+  patch: async (path: string, body?: unknown): Promise<any> => { await refreshTokenIfNeeded(); const data = await fetch(`${API}${path}`, { method:"PATCH",  headers:{"Content-Type":"application/json", ..._getAuthHeader()}, body: JSON.stringify(body) }).then(_checkOk).then(r => r.json()); _invalidateRelated(path); return data; },
+  del:   async (path: string): Promise<void> => { await refreshTokenIfNeeded(); await fetch(`${API}${path}`, { method:"DELETE", headers:{ ..._getAuthHeader() } }).then(_checkOk); _invalidateRelated(path); },
   /** Invalidate one or more ETag cache entries so the next GET fetches fresh data. */
   invalidate: (...paths: string[]): void => { paths.forEach(p => { delete _etagCache[p]; }); },
 };
@@ -197,8 +216,8 @@ export function normPort(s: string): string {
   return (s || "").trim().toLowerCase();
 }
 
-export function buildPortLinkMap<T extends {local_ip: string; local_port: string; remote_ip: string; remote_port: string}>(links: T[]): Record<string, {link: T; role: string}> {
-  const m: Record<string, {link: T; role: string}> = {};
+export function buildPortLinkMap<T extends {local_ip: string; local_port: string; remote_ip: string; remote_port: string}>(links: T[]): Record<string, {link: T; role: "from" | "to"}> {
+  const m: Record<string, {link: T; role: "from" | "to"}> = {};
   links.forEach(l => {
     m[`${l.local_ip}:${normPort(l.local_port)}`]   = { link: l, role: "from" };
     m[`${l.remote_ip}:${normPort(l.remote_port)}`] = { link: l, role: "to"   };

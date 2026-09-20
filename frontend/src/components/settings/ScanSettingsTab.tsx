@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { api, extractErrorMessage } from "../../api";
+import { useToast } from "../ToastProvider";
 
 // ── Local interfaces ────────────────────────────────────────────────────────
 interface ScanResult {
@@ -87,6 +88,8 @@ function EngineTabContent() {
   const [dryRunResult, setDryRunResult] = useState<DryRunResult | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const dryRunPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { addToast } = useToast();
 
   useEffect(() => {
     Promise.allSettled([api.get("/api/scan-settings"), api.get("/api/settings"), api.get("/api/discovery-ranges")])
@@ -126,6 +129,7 @@ function EngineTabContent() {
     loadHistory();
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
+      if (dryRunPollRef.current) clearInterval(dryRunPollRef.current);
     };
   }, []);
 
@@ -147,6 +151,8 @@ function EngineTabContent() {
       await api.put("/api/settings/discovery_interval_sec", { value: String(nextDiscoveryInterval) });
       await api.put("/api/settings/link_update_interval_sec", { value: String(nextLinksInterval) });
       await api.put("/api/settings/mac_update_interval_sec", { value: String(nextMacsInterval) });
+      // Intentional migration sync: the backend still reads the legacy
+      // port_update_interval_sec key as a fallback, so keep it in step.
       await api.put("/api/settings/port_update_interval_sec", { value: String(nextMacsInterval) });
 
       if (result?.max_workers != null) setScanWorkers(Number(result.max_workers));
@@ -171,10 +177,6 @@ function EngineTabContent() {
         .map(s => s.trim())
         .filter(Boolean);
       const resp = await api.put("/api/discovery-ranges", { ranges: lines });
-      if (resp?.detail) {
-        setRangesError(typeof resp.detail === "string" ? resp.detail : JSON.stringify(resp.detail));
-        return;
-      }
       const saved: string[] = Array.isArray(resp?.ranges) ? resp.ranges : lines;
       setDiscoveryRanges(saved);
       setRangesInput(saved.join("\n"));
@@ -194,13 +196,33 @@ function EngineTabContent() {
   const runDryRun = async () => {
     setDryRunLoading(true);
     setDryRunResult(null);
+    if (dryRunPollRef.current) { clearInterval(dryRunPollRef.current); dryRunPollRef.current = null; }
     try {
       const job: { job_id?: string } = await api.post("/api/scan/dry-run/jobs", {});
       if (!job?.job_id) throw new Error("Dry run job could not be created");
-      // Poll until done
-      const poll = setInterval(async () => {
+      // Poll until done; bounded so a stuck job cannot leak polling forever.
+      const MAX_ATTEMPTS = 150; // 150 x 2s = 5 minutes
+      const MAX_ERRORS = 5;
+      let attempts = 0;
+      let consecutiveErrors = 0;
+      const stopDryRunPolling = () => {
+        if (dryRunPollRef.current) { clearInterval(dryRunPollRef.current); dryRunPollRef.current = null; }
+      };
+      const failDryRun = (message: string) => {
+        stopDryRunPolling();
+        setDryRunResult({ status: "error", errors: [message], preview: [] });
+        setDryRunLoading(false);
+        addToast(`Dry run failed: ${message}`, "error");
+      };
+      dryRunPollRef.current = setInterval(async () => {
+        attempts += 1;
+        if (attempts > MAX_ATTEMPTS) {
+          failDryRun("Timed out waiting for the dry run result (5 min)");
+          return;
+        }
         try {
           const st = await api.get(`/api/scan/jobs/${job.job_id}`);
+          consecutiveErrors = 0;
           if (st?.result) {
             const preview: DryRunPreviewItem[] = st.result?.preview ?? [];
             setDryRunResult({
@@ -213,10 +235,15 @@ function EngineTabContent() {
             });
           }
           if (st?.status && st.status !== "running") {
-            clearInterval(poll);
+            stopDryRunPolling();
             setDryRunLoading(false);
           }
-        } catch (_) {}
+        } catch (ex) {
+          consecutiveErrors += 1;
+          if (consecutiveErrors >= MAX_ERRORS) {
+            failDryRun(extractErrorMessage(ex));
+          }
+        }
       }, 2000);
     } catch (ex) {
       setDryRunResult({ status: "error", errors: [extractErrorMessage(ex)], preview: [] });

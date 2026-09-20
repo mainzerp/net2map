@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { api, extractErrorMessage } from "../api";
+import { useToast } from "./ToastProvider";
 import type { DeviceTableProps, RackInfo, SwitchClass, SwitchModel } from "../types";
 
 interface DeviceRecord {
@@ -50,6 +51,7 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
   const [err, setErr] = useState("");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortState>({ column: null, direction: null });
+  const { addToast } = useToast();
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -79,6 +81,8 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
       await api.patch(`/api/topology/devices/${dev.id}/meta`, { ignored: !dev.ignored });
       invalidateAll();
       refresh();
+    } catch (ex) {
+      addToast(`Failed to update device: ${extractErrorMessage(ex)}`, "error");
     } finally {
       setTogglingId(null);
     }
@@ -101,6 +105,8 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
       setSelected(new Set());
       invalidateAll();
       refresh();
+    } catch (ex) {
+      addToast(`Failed to update devices: ${extractErrorMessage(ex)}`, "error");
     } finally {
       setBulkLoading(false);
     }

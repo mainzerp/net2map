@@ -50,12 +50,15 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged, newEntryTrigger,
   const resetForm = () => { setForm({ ...EMPTY_PROFILE_FORM }); setEditState({ id: null, open: false }); setErr(""); };
   const startNew = () => { setForm({ ...EMPTY_PROFILE_FORM }); setEditState({ id: null, open: true }); setErr(""); };
   const startEdit = (p: SnmpProfile) => {
+    // The API masks secrets as "***"; map them to "" so a submit never writes
+    // the mask back over the real stored password/community.
+    const unmask = (v: string) => (v === "***" ? "" : v);
     setEditState({ id: p.id, open: true });
     setForm({
-      label:p.label, snmp_version:p.snmp_version, community:p.community,
+      label:p.label, snmp_version:p.snmp_version, community:unmask(p.community),
       v3_security_level:p.v3_security_level, v3_username:p.v3_username,
-      v3_auth_protocol:p.v3_auth_protocol, v3_auth_password:p.v3_auth_password,
-      v3_priv_protocol:p.v3_priv_protocol, v3_priv_password:p.v3_priv_password,
+      v3_auth_protocol:p.v3_auth_protocol, v3_auth_password:unmask(p.v3_auth_password),
+      v3_priv_protocol:p.v3_priv_protocol, v3_priv_password:unmask(p.v3_priv_password),
     });
     setErr("");
   };
@@ -63,10 +66,17 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged, newEntryTrigger,
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault(); setErr("");
     try {
-      if (editState.id) { await api.put(`/api/snmp-profiles/${editState.id}`, form); }
+      if (editState.id) {
+        // On edit, omit secret fields left empty so the backend keeps the
+        // stored value instead of overwriting it.
+        const payload: Record<string, unknown> = { ...form };
+        (["community", "v3_auth_password", "v3_priv_password"] as const).forEach(k => {
+          if (payload[k] === "") delete payload[k];
+        });
+        await api.put(`/api/snmp-profiles/${editState.id}`, payload);
+      }
       else {
-        const r = await api.post("/api/snmp-profiles", form);
-        if (r.detail) { setErr(typeof r.detail === "string" ? r.detail : JSON.stringify(r.detail)); return; }
+        await api.post("/api/snmp-profiles", form);
       }
       resetForm(); onChanged();
     } catch (ex) { setErr(extractErrorMessage(ex)); }
@@ -126,8 +136,8 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged, newEntryTrigger,
             </div>
             {!isV3 && (
               <div style={{marginBottom:8}}>
-                <label style={lbl}>Community String *
-                  <input required value={F.community} onChange={(e: React.ChangeEvent<HTMLInputElement>) => set("community",e.target.value)} placeholder="public" style={{...inp,marginTop:3}}/>
+                <label style={lbl}>Community String *{editState.id ? " (leave empty to keep)" : ""}
+                  <input required={!editState.id} value={F.community} onChange={(e: React.ChangeEvent<HTMLInputElement>) => set("community",e.target.value)} placeholder={editState.id ? "unchanged" : "public"} style={{...inp,marginTop:3}}/>
                   {F.community === "public" && (
                     <span style={{ color: "#f39c12", fontSize: 11, display: "block", marginTop: 2 }}>
                       Warning: &quot;public&quot; is the factory-default community string and may allow unauthorised SNMP access.

@@ -66,14 +66,18 @@ const useNetmapStore = create<NetmapState>((set) => ({
   bgColor: "#020817",
 
   loadMapBackground: () => {
+    // Single existence check (aborted before the body downloads), then one
+    // real load via Image which also yields the natural dimensions.
     fetch(`${API}/api/map-background`, { headers: _getAuthHeader() })
       .then(r => {
         if (!r.ok) throw new Error();
+        r.body?.cancel().catch(() => {});
         const url = `${API}/api/map-background?v=${Date.now()}`;
-        set({ bgUrl: url });
         const img = new Image();
-        img.onload = () => set({ bgNat: { w: img.naturalWidth, h: img.naturalHeight } });
-        img.onerror = () => set({ bgNat: null });
+        img.onload = () => set({ bgUrl: url, bgNat: { w: img.naturalWidth, h: img.naturalHeight } });
+        // On decode/load failure clear bgUrl too, otherwise the grid falls away
+        // while no image renders in its place.
+        img.onerror = () => set({ bgUrl: null, bgNat: null });
         img.src = url;
       })
       .catch(() => { set({ bgUrl: null, bgNat: null }); });

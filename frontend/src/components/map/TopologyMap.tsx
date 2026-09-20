@@ -238,7 +238,7 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
         if (!portSeen.has(pk)) { portSeen.add(pk); unique.push(l); }
       });
       // Pick the highest speed for the line color
-      const speedOrder: Record<string, number> = { "100G":5, "25G":4, "10G":3, "1G":2, "100M":1 };
+      const speedOrder: Record<string, number> = { "100G":6, "40G":5, "25G":4, "10G":3, "1G":2, "100M":1 };
       const best = unique.reduce((a, b) => (speedOrder[b.speed_label || ""] || 0) > (speedOrder[a.speed_label || ""] || 0) ? b : a, unique[0]);
       return { ...g, count: unique.length, speed: best.speed_label } as EndpointLink;
     });
@@ -253,7 +253,7 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
     return [endpointA, endpointB].sort().join("|");
   }, [selectedLink, endpointByIp]);
 
-  const svgPoint = (e: React.MouseEvent<SVGSVGElement | SVGElement>): DOMPoint => {
+  const svgPoint = (e: { clientX: number; clientY: number }): DOMPoint => {
     const svg = svgRef.current!;
     const pt  = svg.createSVGPoint();
     pt.x = e.clientX; pt.y = e.clientY;
@@ -280,7 +280,7 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
     setBgPan({ startX: p.x, startY: p.y, startTx: zoom.tx, startTy: zoom.ty });
   };
 
-  const onMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+  const onMouseMove = (e: { clientX: number; clientY: number }) => {
     if (bgPan) {
       const p = svgPoint(e);
       setZoom(z => ({ ...z, tx: bgPan.startTx + (p.x - bgPan.startX), ty: bgPan.startTy + (p.y - bgPan.startY) }));
@@ -336,6 +336,24 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
     setDrag(null);
   };
 
+  // Track drags on window level so leaving the SVG mid-drag neither aborts
+  // the drag (losing the new position) nor gets stuck in drag state.
+  const onMouseMoveRef = useRef(onMouseMove);
+  onMouseMoveRef.current = onMouseMove;
+  const onMouseUpRef = useRef(onMouseUp);
+  onMouseUpRef.current = onMouseUp;
+
+  useEffect(() => {
+    const move = (e: MouseEvent) => onMouseMoveRef.current(e);
+    const up = () => onMouseUpRef.current();
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    return () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+  }, []);
+
   const rackById = useMemo(
     () => Object.fromEntries(racks.map(r => [String(r.id), r])),
     [racks],
@@ -380,9 +398,6 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
       height="100%"
       viewBox={`0 0 ${W} ${H}`}
       style={{ display:"block", cursor: drag ? "grabbing" : bgPan ? "grabbing" : "default" }}
-      onMouseMove={onMouseMove}
-      onMouseUp={onMouseUp}
-      onMouseLeave={() => { setDrag(null); setBgPan(null); }}
     >
       <defs>
         <filter id="glow"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
@@ -431,9 +446,9 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
         // Use rack-pair color from MapPage if available, otherwise fall back to speed color
         const pairKey = [String(l.from), String(l.to)].sort().join("|");
         const pairColor = rackPairColorMap?.[pairKey];
-        const speedFallback = l.speed === "100G" ? "#22d3ee" : l.speed === "10G" || l.speed === "25G" ? "#4ade80" : "#334155";
+        const speedFallback = l.speed === "100G" || l.speed === "40G" ? "#22d3ee" : l.speed === "10G" || l.speed === "25G" ? "#4ade80" : "#334155";
         const c = pairColor || speedFallback;
-        const w = l.speed === "100G" ? 2.5 : 1.5;
+        const w = l.speed === "100G" || l.speed === "40G" ? 2.5 : 1.5;
         const label = l.count > 1 ? `${l.count}x ${l.speed}` : l.speed;
         const isActive = activePairKey === pairKey;
         return (

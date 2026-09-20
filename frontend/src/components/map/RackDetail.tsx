@@ -281,7 +281,13 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
   const selColor  = resolvedSelectedLink ? (linkColorMap[`${resolvedSelectedLink.local_ip}:${normPort(resolvedSelectedLink.local_port)}`] || "#22d3ee") : null;
   const toggleLink = useCallback((l: TopologyLink | null) => {
     const p = resolvedSelectedLink;
-    setSelectedLink(p?.local_ip===l?.local_ip && p?.local_port===l?.local_port ? null : l);
+    // Match the isSel logic below: a link counts as selected in either
+    // orientation, so deselect must check both directions too.
+    const isSel = !!p && !!l && (
+      (p.local_ip === l.local_ip && p.local_port === l.local_port) ||
+      (p.remote_ip === l.local_ip && p.remote_port === l.local_port)
+    );
+    setSelectedLink(isSel ? null : l);
   }, [setSelectedLink, resolvedSelectedLink]);
 
   const [linkLine, setLinkLine] = useState<LinkLineState | null>(null);

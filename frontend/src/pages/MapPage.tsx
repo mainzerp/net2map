@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
-import { api, CABLE_COLORS } from "../api";
+import { api, CABLE_COLORS, extractErrorMessage } from "../api";
 import useNetmapStore from "../store";
+import { useToast } from "../components/ToastProvider";
 import FilterBar from "../components/map/FilterBar";
 import TopologyMap from "../components/map/TopologyMap";
 import RackDetail from "../components/map/RackDetail";
@@ -25,6 +26,7 @@ export default function MapPage() {
   }, [selectedRack, topology.nodes]);
 
   const { rackOrders, reorderDevice, reorderClassSection } = useRackOrders();
+  const { addToast } = useToast();
   const [filters, setFilters] = useState<FilterState>({ racks: null, classes: null });
   const [selectedLink, setSelectedLink] = useState<TopologyLink | null>(null);
   const [selectedOutsideNode, setSelectedOutsideNode] = useState<TopologyNode | null>(null);
@@ -114,7 +116,10 @@ export default function MapPage() {
   }, [topology.nodes, topology.links, topology.classes]);
 
   const savePosition = (id: number, x: number, y: number) => {
-    api.patch(`/api/topology/devices/${id}/position`, { map_x: x, map_y: y }).catch(console.error);
+    // Requires admin/operator role -- surface failures instead of failing silently
+    api.patch(`/api/topology/devices/${id}/position`, { map_x: x, map_y: y }).catch((ex: unknown) => {
+      addToast(`Position could not be saved: ${extractErrorMessage(ex)}`, "error");
+    });
   };
 
   const renameRack = async (rack: SelectedRack, newName: string) => {

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
+import { useToast } from "../components/ToastProvider";
 
 interface LogEntry {
   ts?: string;
@@ -16,15 +17,33 @@ export default function LogsPage() {
   const [levelFilter, setLevelFilter] = useState("");
   const [eventFilter, setEventFilter] = useState("");
   const [textFilter, setTextFilter] = useState("");
+  const [debouncedText, setDebouncedText] = useState("");
   const [limit, setLimit] = useState(300);
+  const { addToast } = useToast();
+  const lastToastedErrorRef = useRef<string | null>(null);
+
+  // Debounce the free-text filter so each keystroke does not fire a request
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedText(textFilter), 300);
+    return () => clearTimeout(t);
+  }, [textFilter]);
 
   const loadLogs = useCallback(() => {
-    const query = `/api/logs?limit=${Math.max(1, Math.min(2000, Number(limit) || 300))}${levelFilter ? `&level=${levelFilter}` : ""}${eventFilter ? `&event_prefix=${encodeURIComponent(eventFilter)}` : ""}${textFilter ? `&q=${encodeURIComponent(textFilter)}` : ""}`;
+    const query = `/api/logs?limit=${Math.max(1, Math.min(2000, Number(limit) || 300))}${levelFilter ? `&level=${levelFilter}` : ""}${eventFilter ? `&event_prefix=${encodeURIComponent(eventFilter)}` : ""}${debouncedText ? `&q=${encodeURIComponent(debouncedText)}` : ""}`;
     api.get(query)
-      .then((d: unknown) => { setLogs(Array.isArray(d) ? d : []); setFetchError(null); })
-      .catch((e: Error) => setFetchError(e.message || "Failed to load logs"))
+      .then((d: unknown) => { setLogs(Array.isArray(d) ? d : []); setFetchError(null); lastToastedErrorRef.current = null; })
+      .catch((e: Error) => {
+        const msg = e.message || "Failed to load logs";
+        setFetchError(msg);
+        // Surface role/permission failures loudly, but do not spam a toast on
+        // every auto-refresh tick while the error persists.
+        if (lastToastedErrorRef.current !== msg) {
+          lastToastedErrorRef.current = msg;
+          addToast(msg, "error");
+        }
+      })
       .finally(() => setLoading(false));
-  }, [levelFilter, eventFilter, textFilter, limit]);
+  }, [levelFilter, eventFilter, debouncedText, limit, addToast]);
 
   useEffect(() => {
     loadLogs();

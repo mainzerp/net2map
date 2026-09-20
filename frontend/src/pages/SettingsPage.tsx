@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { api, API, _getAuthHeader } from "../api";
+import { debounce } from "../utils/debounce";
 import type { SnmpProfile } from "../types";
 import SnmpProfilesTabContent from "../components/settings/SnmpProfilesTab";
 import CredentialsTabContent  from "../components/settings/CredentialsTab";
@@ -87,28 +88,32 @@ export default function SettingsPage() {
     setMapBgUrl(null);
   };
 
+  // Debounced saver: sliders and the color picker fire per tick, so coalesce
+  // them into one PUT after the user pauses.
+  const saveMapSettings = useRef(
+    debounce((patch: Record<string, unknown>) => {
+      api.put("/api/map-settings", patch).catch((ex: unknown) => {
+        setMapSettingsError(ex instanceof Error ? ex.message : "Failed to save map settings");
+      });
+    }, 300)
+  ).current;
+
   const changeBgOpacity = (val: number) => {
     setMapBgOpacity(val);
     setMapSettingsError("");
-    api.put("/api/map-settings", { opacity: val }).catch((ex: unknown) => {
-      setMapSettingsError(ex instanceof Error ? ex.message : "Failed to save opacity");
-    });
+    saveMapSettings({ opacity: val });
   };
 
   const changeBgScale = (val: number) => {
     setMapBgScale(val);
     setMapSettingsError("");
-    api.put("/api/map-settings", { scale: val }).catch((ex: unknown) => {
-      setMapSettingsError(ex instanceof Error ? ex.message : "Failed to save scale");
-    });
+    saveMapSettings({ scale: val });
   };
 
   const changeBgColor = (val: string) => {
     setMapBgColor(val);
     setMapSettingsError("");
-    api.put("/api/map-settings", { bg_color: val }).catch((ex: unknown) => {
-      setMapSettingsError(ex instanceof Error ? ex.message : "Failed to save color");
-    });
+    saveMapSettings({ bg_color: val });
   };
 
   const NAV_GROUPS: NavGroup[] = [

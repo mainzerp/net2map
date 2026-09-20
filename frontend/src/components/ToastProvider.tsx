@@ -44,11 +44,12 @@ const TOAST_COLORS: Record<ToastType, { bg: string; border: string; color: strin
   info:    { bg: "#082f49", border: "#0e7490", color: "#22d3ee" },
 };
 
+// ASCII markers only (project rule: no emoji / pictographic glyphs)
 const ICONS: Record<ToastType, string> = {
-  success: "\u2713",
-  error:   "\u2717",
-  warning: "\u26A0",
-  info:    "\u2139",
+  success: "OK",
+  error:   "X",
+  warning: "!",
+  info:    "i",
 };
 
 const AUTO_DISMISS_MS = 5000;

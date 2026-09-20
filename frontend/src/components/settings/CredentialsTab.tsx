@@ -91,14 +91,17 @@ function CredentialsTabContent({ profiles, newEntryTrigger }: CredentialsTabCont
   };
 
   const startEdit = (c: Credential) => {
+    // The API masks secrets as "***"; map them to "" so a submit never writes
+    // the mask back over the real stored password/community.
+    const unmask = (v: string) => (v === "***" ? "" : v);
     setForm({
       label:c.label, ip:c.ip, priority:c.priority ?? 0, snmp_port:c.snmp_port, enabled:c.enabled,
       profile_id: c.profile_id ?? null,
       device_id: c.device_id ?? null,
-      snmp_version:c.snmp_version, community:c.community,
+      snmp_version:c.snmp_version, community:unmask(c.community),
       v3_security_level:c.v3_security_level, v3_username:c.v3_username,
-      v3_auth_protocol:c.v3_auth_protocol,   v3_auth_password:c.v3_auth_password,
-      v3_priv_protocol:c.v3_priv_protocol,   v3_priv_password:c.v3_priv_password,
+      v3_auth_protocol:c.v3_auth_protocol,   v3_auth_password:unmask(c.v3_auth_password),
+      v3_priv_protocol:c.v3_priv_protocol,   v3_priv_password:unmask(c.v3_priv_password),
     });
     setEditState({ id: c.id, open: true });
     setErr("");
@@ -118,10 +121,17 @@ function CredentialsTabContent({ profiles, newEntryTrigger }: CredentialsTabCont
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setErr("");
     try {
-      if (editState.id) { await api.put(`/api/credentials/${editState.id}`, form); }
+      if (editState.id) {
+        // On edit, omit secret fields left empty so the backend keeps the
+        // stored value instead of overwriting it.
+        const payload: Record<string, unknown> = { ...form };
+        (["community", "v3_auth_password", "v3_priv_password"] as const).forEach(k => {
+          if (payload[k] === "") delete payload[k];
+        });
+        await api.put(`/api/credentials/${editState.id}`, payload);
+      }
       else {
-        const r = await api.post("/api/credentials", form);
-        if (r.detail) { setErr(typeof r.detail === "string" ? r.detail : JSON.stringify(r.detail)); return; }
+        await api.post("/api/credentials", form);
       }
       resetForm(); refresh();
     } catch (ex) { setErr(extractErrorMessage(ex)); }
@@ -216,8 +226,8 @@ function CredentialsTabContent({ profiles, newEntryTrigger }: CredentialsTabCont
             </div>
             {!isV3 && (
               <div style={{marginBottom:8}}>
-                <label style={lbl()}>Community String *
-                  <input required value={F.community} onChange={e=>set("community",e.target.value)} placeholder="public" style={{...inp,marginTop:3}}/>
+                <label style={lbl()}>Community String *{editState.id ? " (leave empty to keep)" : ""}
+                  <input required={!editState.id} value={F.community} onChange={e=>set("community",e.target.value)} placeholder={editState.id ? "unchanged" : "public"} style={{...inp,marginTop:3}}/>
                 </label>
               </div>
             )}
@@ -244,8 +254,8 @@ function CredentialsTabContent({ profiles, newEntryTrigger }: CredentialsTabCont
                         {AUTH_PROTOCOLS.map(p=><option key={p}>{p}</option>)}
                       </select>
                     </label>
-                    <label style={lbl()}>Auth password *
-                      <input required={needAuth} type="password" value={F.v3_auth_password} onChange={e=>set("v3_auth_password",e.target.value)} placeholder=">= 8 characters" style={{...inp,marginTop:3}}/>
+                    <label style={lbl()}>Auth password *{editState.id ? " (leave empty to keep)" : ""}
+                      <input required={needAuth && !editState.id} type="password" value={F.v3_auth_password} onChange={e=>set("v3_auth_password",e.target.value)} placeholder={editState.id ? "unchanged" : ">= 8 characters"} style={{...inp,marginTop:3}}/>
                     </label>
                   </div>
                 )}
@@ -256,8 +266,8 @@ function CredentialsTabContent({ profiles, newEntryTrigger }: CredentialsTabCont
                         {PRIV_PROTOCOLS.map(p=><option key={p}>{p}</option>)}
                       </select>
                     </label>
-                    <label style={lbl()}>Priv password *
-                      <input required={needPriv} type="password" value={F.v3_priv_password} onChange={e=>set("v3_priv_password",e.target.value)} placeholder=">= 8 characters" style={{...inp,marginTop:3}}/>
+                    <label style={lbl()}>Priv password *{editState.id ? " (leave empty to keep)" : ""}
+                      <input required={needPriv && !editState.id} type="password" value={F.v3_priv_password} onChange={e=>set("v3_priv_password",e.target.value)} placeholder={editState.id ? "unchanged" : ">= 8 characters"} style={{...inp,marginTop:3}}/>
                     </label>
                   </div>
                 )}

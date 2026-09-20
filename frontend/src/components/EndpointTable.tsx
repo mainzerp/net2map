@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, normPort } from "../api";
+import { api, normPort, extractErrorMessage } from "../api";
+import { useToast } from "./ToastProvider";
 import useNetmapStore from "../store";
 import type { Endpoint } from "../types";
 
@@ -20,6 +21,7 @@ export default function EndpointTable() {
   const [bulkLoading, setBulkLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortState>({ column: null, direction: null });
+  const { addToast } = useToast();
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -44,6 +46,8 @@ export default function EndpointTable() {
       await api.patch(`/api/endpoints/${ep.id}`, { ignored: !ep.ignored });
       invalidateAll();
       refresh();
+    } catch (ex) {
+      addToast(`Failed to update endpoint: ${extractErrorMessage(ex)}`, "error");
     } finally {
       setTogglingId(null);
     }
@@ -66,6 +70,8 @@ export default function EndpointTable() {
       setSelected(new Set());
       invalidateAll();
       refresh();
+    } catch (ex) {
+      addToast(`Failed to update endpoints: ${extractErrorMessage(ex)}`, "error");
     } finally {
       setBulkLoading(false);
     }
