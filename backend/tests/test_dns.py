@@ -33,6 +33,24 @@ def test_resolve_ip_partial_match():
     assert result == "10.0.0.5"
 
 
+def test_resolve_ip_exact_match_preferred_over_substring():
+    """A short sysName must not match a longer one ("sw1" vs "sw11")."""
+    switch_data = {
+        "10.0.0.11": MagicMock(sys_name="sw11"),
+        "10.0.0.1": MagicMock(sys_name="sw1"),
+    }
+    # Dict order puts sw11 first: a naive substring scan would hit sw11.
+    assert _dns_mod._resolve_ip("sw1", switch_data) == "10.0.0.1"
+
+
+def test_resolve_ip_short_name_matches_fqdn_first_label():
+    """A short hostname matches the first label of an FQDN sysName."""
+    switch_data = {
+        "10.0.0.7": MagicMock(sys_name="core-switch.example.com"),
+    }
+    assert _dns_mod._resolve_ip("core-switch", switch_data) == "10.0.0.7"
+
+
 def test_resolve_ip_falls_back_to_dns():
     """_resolve_ip falls back to socket.gethostbyname when not in switch_data."""
     with patch.object(_dns_mod.socket, "gethostbyname", return_value="1.2.3.4"):

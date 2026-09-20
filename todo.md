@@ -1,5 +1,8 @@
 # Switch-Map -- Open Items & Roadmap
 
+> Note (2026-09-15): this checklist is frozen. The live roadmap now lives in
+> `brain/roadmap.md`; unchecked items below were carried over there.
+
 ## Completed
 
 ### UI / Frontend

@@ -1,6 +1,7 @@
 """Map background image and map settings endpoints."""
 import os
 import re
+import xml.etree.ElementTree as ET
 
 import filetype
 from defusedxml import ElementTree as SafeET
@@ -28,18 +29,61 @@ from shared.file_settings import (
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
 
+_SVG_NS = "http://www.w3.org/2000/svg"
+_XLINK_NS = "http://www.w3.org/1999/xlink"
+
+# Allowlist of SVG elements kept in uploaded backgrounds. Anything else
+# (script, foreignObject, set/animate, style, a, ...) is dropped entirely.
+_SVG_ALLOWED_ELEMENTS = {
+    "svg", "g", "defs", "title", "desc", "symbol", "use", "marker",
+    "path", "rect", "circle", "ellipse", "line", "polyline", "polygon",
+    "text", "tspan", "image", "pattern", "clippath",
+    "lineargradient", "radialgradient", "stop",
+}
+
+_UNSAFE_URI_RE = re.compile(r"[\x00-\x20]*(?:javascript|vbscript)\s*:", re.IGNORECASE)
+_EXTERNAL_URL_RE = re.compile(r"url\(\s*[\"']?\s*(?!#)", re.IGNORECASE)
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1].lower() if isinstance(tag, str) else ""
+
+
+def _sanitize_svg_element(elem) -> None:
+    """Recursively strip disallowed elements and dangerous attributes in place."""
+    for child in list(elem):
+        if _local_name(child.tag) not in _SVG_ALLOWED_ELEMENTS:
+            elem.remove(child)
+            continue
+        _sanitize_svg_element(child)
+
+    for attr in list(elem.attrib):
+        local = _local_name(attr)
+        value = elem.attrib[attr]
+        if local.startswith("on"):
+            del elem.attrib[attr]
+        elif _UNSAFE_URI_RE.match(value):
+            del elem.attrib[attr]
+        elif local == "href":
+            # Only internal fragment references and inline data images survive
+            if not (value.startswith("#") or value.startswith("data:image/")):
+                del elem.attrib[attr]
+        elif _EXTERNAL_URL_RE.search(value):
+            del elem.attrib[attr]
+
 
 def _sanitize_svg(raw: bytes) -> bytes:
-    """Strip script tags, event handlers, and external entities from SVG."""
+    """Parse SVG and re-serialize it with only allowlisted content."""
     try:
-        SafeET.fromstring(raw)
+        root = SafeET.fromstring(raw)
     except Exception:
         raise HTTPException(400, detail={"error": {"code": "INVALID_SVG", "message": "Invalid or malicious SVG file"}})
-    text = raw.decode("utf-8", errors="replace")
-    text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r'\s+on\w+\s*=\s*"[^"]*"', "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\s+on\w+\s*=\s*'[^']*'", "", text, flags=re.IGNORECASE)
-    return text.encode("utf-8")
+    if _local_name(root.tag) != "svg":
+        raise HTTPException(400, detail={"error": {"code": "INVALID_SVG", "message": "File is not an SVG document"}})
+    _sanitize_svg_element(root)
+    ET.register_namespace("", _SVG_NS)
+    ET.register_namespace("xlink", _XLINK_NS)
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
 @router.post("/api/map-background",
@@ -81,7 +125,15 @@ def get_map_background():
     path = _find_bg_file()
     if not path:
         api_error(404, "NO_BACKGROUND_IMAGE", "No background image set")
-    return FileResponse(path)
+    return FileResponse(
+        path,
+        headers={
+            # SVG is served from the app origin; keep it inert even if a
+            # malicious file ever lands on disk. "inline" keeps <img> usable.
+            "Content-Security-Policy": "script-src 'none'",
+            "Content-Disposition": "inline",
+        },
+    )
 
 
 @router.delete("/api/map-background",

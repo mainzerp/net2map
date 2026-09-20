@@ -5,8 +5,9 @@ import time
 from datetime import datetime, timezone
 
 from celery_app import celery_app
-from database import AppSetting, SessionLocal
+from database import SessionLocal
 from scan_engine import _execute_scan
+from scan_engine.executor import get_dry_run_preview
 from schemas import ScanResult
 from shared.state import (
     _log_event,
@@ -35,7 +36,8 @@ class _RedisCancelEvent:
 def run_scan_task(self, job_id: str, dry_run: bool = False, scan_type: str = "full"):
     """Execute a network scan as a Celery task."""
     # Acquire distributed scan lock (wait up to 5 min)
-    if not acquire_scan_lock(scan_type, timeout=300):
+    lock_token = acquire_scan_lock(scan_type, timeout=300)
+    if not lock_token:
         _log_event(logging.WARNING, "celery.task.lock_skipped",
                    job_id=job_id, scan_type=scan_type)
         update_scan_job(job_id, {
@@ -54,7 +56,8 @@ def run_scan_task(self, job_id: str, dry_run: bool = False, scan_type: str = "fu
     try:
         asyncio.set_event_loop(loop)
         result = loop.run_until_complete(
-            _execute_scan(db, cancel_event, correlation_id=job_id, dry_run=dry_run, scan_type=scan_type)
+            _execute_scan(db, cancel_event, correlation_id=job_id, dry_run=dry_run,
+                          scan_type=scan_type, lock_token=lock_token)
         )
     except Exception as exc:
         _log_event(logging.ERROR, "celery.task.error", job_id=job_id, error=str(exc))
@@ -63,12 +66,15 @@ def run_scan_task(self, job_id: str, dry_run: bool = False, scan_type: str = "fu
             errors=[str(exc)], max_workers=1,
             total_duration_ms=0, switch_metrics=[], status="failed",
         )
+        # Mark the job as retrying so a crashed/hanging worker never leaves a
+        # permanent "running" status behind.
+        update_scan_job(job_id, {"status": "retrying"})
         try:
             self.retry(exc=exc)
         except self.MaxRetriesExceededError:
             pass
     finally:
-        release_scan_lock(scan_type)
+        release_scan_lock(lock_token, scan_type)
         db.close()
         loop.close()
 
@@ -77,7 +83,7 @@ def run_scan_task(self, job_id: str, dry_run: bool = False, scan_type: str = "fu
 
     result_dict = result.model_dump()
     if dry_run:
-        result_dict["preview"] = result.__dict__.get("_dry_run_preview", [])
+        result_dict["preview"] = get_dry_run_preview(result)
 
     update_scan_job(job_id, {
         "finished_at": datetime.now(timezone.utc).isoformat(),
@@ -92,35 +98,27 @@ _last_dispatch = {"discovery": 0, "links": 0, "macs": 0}
 @celery_app.task
 def scheduler_tick():
     """Periodic scheduler tick -- replaces _background_scheduler loop body."""
-    from scan_engine.scheduler import _dispatch_scheduled_scan
+    from scan_engine.scheduler import _dispatch_scheduled_scan, _read_scheduler_intervals
 
     db = SessionLocal()
     try:
-        discovery_setting = db.query(AppSetting).filter(AppSetting.key == "discovery_interval_sec").first()
-        links_setting = db.query(AppSetting).filter(AppSetting.key == "link_update_interval_sec").first()
-        macs_setting = db.query(AppSetting).filter(AppSetting.key == "mac_update_interval_sec").first()
-        ports_legacy_setting = db.query(AppSetting).filter(AppSetting.key == "port_update_interval_sec").first()
-
-        discovery_interval = int(discovery_setting.value) if discovery_setting else 1800
-        legacy_ports_interval = int(ports_legacy_setting.value) if ports_legacy_setting else 30
-        links_interval = int(links_setting.value) if links_setting else legacy_ports_interval
-        macs_interval = int(macs_setting.value) if macs_setting else legacy_ports_interval
+        intervals = _read_scheduler_intervals(db)
     finally:
         db.close()
 
     now = time.time()
 
-    if macs_interval > 0 and (now - _last_dispatch["macs"]) >= macs_interval:
+    if intervals["macs"] > 0 and (now - _last_dispatch["macs"]) >= intervals["macs"]:
         _log_event(logging.INFO, "scheduler.macs.start")
         _dispatch_scheduled_scan("macs")
         _last_dispatch["macs"] = time.time()
 
-    if links_interval > 0 and (now - _last_dispatch["links"]) >= links_interval:
+    if intervals["links"] > 0 and (now - _last_dispatch["links"]) >= intervals["links"]:
         _log_event(logging.INFO, "scheduler.links.start")
         _dispatch_scheduled_scan("links")
         _last_dispatch["links"] = time.time()
 
-    if discovery_interval > 0 and (now - _last_dispatch["discovery"]) >= discovery_interval:
+    if intervals["discovery"] > 0 and (now - _last_dispatch["discovery"]) >= intervals["discovery"]:
         _log_event(logging.INFO, "scheduler.discovery.start")
         _dispatch_scheduled_scan("discovery")
         _last_dispatch["discovery"] = time.time()

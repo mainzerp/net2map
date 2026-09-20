@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from database import Device, get_db
 from database import SwitchClass as SwitchClassModel
+from routers.topology import _bump_topo_version
 from schemas import SwitchClassCreate, SwitchClassOut, SwitchClassUpdate
 from shared.audit import log_audit
 from shared.auth import require_role
@@ -26,6 +27,7 @@ def create_switch_class(body: SwitchClassCreate, request: Request, db: Session =
     db.add(sc)
     db.commit()
     db.refresh(sc)
+    _bump_topo_version()
     log_audit(request, "create", "switch_class", str(sc.id), {"label": sc.label})
     return sc
 
@@ -53,10 +55,13 @@ def update_switch_class(class_id: int, body: SwitchClassUpdate, request: Request
                 "Cannot disable outside-rack placement while unracked devices are assigned to this class",
             )
     for k, v in payload.items():
-        setattr(sc, k, v)
+        # No switch class field is nullable; explicit null values are ignored
+        if v is not None:
+            setattr(sc, k, v)
     db.commit()
     db.refresh(sc)
-    log_audit(request, "update", "switch_class", str(class_id), {"fields": list(body.model_dump(exclude_none=True).keys())})
+    _bump_topo_version()
+    log_audit(request, "update", "switch_class", str(class_id), {"fields": list(payload.keys())})
     return sc
 
 
@@ -71,3 +76,4 @@ def delete_switch_class(class_id: int, request: Request, db: Session = Depends(g
     log_audit(request, "delete", "switch_class", str(class_id), {"label": sc.label})
     db.delete(sc)
     db.commit()
+    _bump_topo_version()

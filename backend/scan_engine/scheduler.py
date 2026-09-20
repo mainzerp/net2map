@@ -25,6 +25,24 @@ def shutdown_scheduler():
     _scheduler_wake.set()  # wake it immediately so it exits
 
 
+def _read_scheduler_intervals(db) -> dict:
+    """Read scheduler interval settings. Shared by the thread-based scheduler
+    loop and the Celery ``scheduler_tick`` task.
+
+    Returns ``{"discovery": int, "links": int, "macs": int}`` in seconds.
+    """
+    discovery_setting = db.query(AppSetting).filter(AppSetting.key == "discovery_interval_sec").first()
+    links_setting = db.query(AppSetting).filter(AppSetting.key == "link_update_interval_sec").first()
+    macs_setting = db.query(AppSetting).filter(AppSetting.key == "mac_update_interval_sec").first()
+    ports_legacy_setting = db.query(AppSetting).filter(AppSetting.key == "port_update_interval_sec").first()
+
+    discovery_interval = int(discovery_setting.value) if discovery_setting else 1800
+    legacy_ports_interval = int(ports_legacy_setting.value) if ports_legacy_setting else 30
+    links_interval = int(links_setting.value) if links_setting else legacy_ports_interval
+    macs_interval = int(macs_setting.value) if macs_setting else legacy_ports_interval
+    return {"discovery": discovery_interval, "links": links_interval, "macs": macs_interval}
+
+
 def _dispatch_scheduled_scan(scan_type: str):
     """Run a scheduled scan, using Celery if available, otherwise directly.
 
@@ -55,24 +73,32 @@ def _dispatch_scheduled_scan(scan_type: str):
         except Exception as exc:
             _log_event(logging.WARNING, "scheduler.celery_fallback", error=str(exc), scan_type=scan_type)
 
-    # Direct execution fallback (also needs lock)
+    # Direct execution fallback (also needs lock). The scan itself runs on the
+    # shared background event loop; completion is tracked via a done-callback
+    # so the scheduler thread never blocks on future.result() and can keep
+    # dispatching lower-priority scan types in order.
     from shared.state import acquire_scan_lock, release_scan_lock
-    if not acquire_scan_lock(scan_type, timeout=60):
+    lock_token = acquire_scan_lock(scan_type, timeout=60)
+    if not lock_token:
         _log_event(logging.INFO, "scheduler.%s.lock_timeout" % scan_type)
         return
 
     db = SessionLocal()
     loop = _get_bg_loop()
-    try:
-        future = asyncio.run_coroutine_threadsafe(
-            _execute_scan(db, scan_type=scan_type), loop,
-        )
-        future.result()
-    except Exception as e:
-        _log_event(logging.ERROR, "scheduler.%s.error" % scan_type, error=str(e))
-    finally:
-        release_scan_lock(scan_type)
-        db.close()
+    future = asyncio.run_coroutine_threadsafe(
+        _execute_scan(db, scan_type=scan_type, lock_token=lock_token), loop,
+    )
+
+    def _on_done(fut):
+        try:
+            fut.result()
+        except Exception as e:
+            _log_event(logging.ERROR, "scheduler.%s.error" % scan_type, error=str(e))
+        finally:
+            release_scan_lock(lock_token, scan_type)
+            db.close()
+
+    future.add_done_callback(_on_done)
 
 
 def _background_scheduler():
@@ -91,15 +117,7 @@ def _background_scheduler():
             # Use a short-lived session only for reading settings
             settings_db = SessionLocal()
             try:
-                discovery_setting = settings_db.query(AppSetting).filter(AppSetting.key == "discovery_interval_sec").first()
-                links_setting = settings_db.query(AppSetting).filter(AppSetting.key == "link_update_interval_sec").first()
-                macs_setting = settings_db.query(AppSetting).filter(AppSetting.key == "mac_update_interval_sec").first()
-                ports_legacy_setting = settings_db.query(AppSetting).filter(AppSetting.key == "port_update_interval_sec").first()
-
-                discovery_interval = int(discovery_setting.value) if discovery_setting else 1800
-                legacy_ports_interval = int(ports_legacy_setting.value) if ports_legacy_setting else 30
-                links_interval = int(links_setting.value) if links_setting else legacy_ports_interval
-                macs_interval = int(macs_setting.value) if macs_setting else legacy_ports_interval
+                intervals = _read_scheduler_intervals(settings_db)
             finally:
                 settings_db.close()
 
@@ -108,17 +126,17 @@ def _background_scheduler():
             # Dispatch in priority order: macs > links > discovery
             # Higher-priority scans are dispatched first so they register
             # in the waiting set before lower-priority checks run.
-            if macs_interval > 0 and (now - last_macs) >= macs_interval:
+            if intervals["macs"] > 0 and (now - last_macs) >= intervals["macs"]:
                 _log_event(logging.INFO, "scheduler.macs.start")
                 _dispatch_scheduled_scan("macs")
                 last_macs = time.time()
 
-            if links_interval > 0 and (now - last_links) >= links_interval:
+            if intervals["links"] > 0 and (now - last_links) >= intervals["links"]:
                 _log_event(logging.INFO, "scheduler.links.start")
                 _dispatch_scheduled_scan("links")
                 last_links = time.time()
 
-            if discovery_interval > 0 and (now - last_discovery) >= discovery_interval:
+            if intervals["discovery"] > 0 and (now - last_discovery) >= intervals["discovery"]:
                 _log_event(logging.INFO, "scheduler.discovery.start")
                 _dispatch_scheduled_scan("discovery")
                 last_discovery = time.time()

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from database import Credential, Device, get_db
 from routers.topology import _bump_topo_version
-from schemas import CredentialCreate, CredentialOut, CredentialUpdate
+from schemas import MASK_SENTINELS, CredentialCreate, CredentialOut, CredentialUpdate
 from shared.audit import log_audit
 from shared.auth import require_role
 from shared.crypto import encrypt
@@ -16,6 +16,22 @@ from shared.errors import api_error
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
+
+_SECRET_FIELDS = ("community", "v3_auth_password", "v3_priv_password")
+
+
+def _strip_mask_sentinels(data: dict) -> None:
+    """Remove fields whose value is a mask sentinel (treated as 'unchanged')."""
+    for field in _SECRET_FIELDS:
+        if data.get(field) in MASK_SENTINELS:
+            del data[field]
+
+
+def _normalize_mask_sentinels(data: dict) -> None:
+    """Normalize mask sentinels to empty strings before insert."""
+    for field in _SECRET_FIELDS:
+        if data.get(field) in MASK_SENTINELS:
+            data[field] = ""
 
 
 @router.get("/api/credentials", response_model=List[CredentialOut])
@@ -35,6 +51,7 @@ def create_credential(body: CredentialCreate, request: Request, db: Session = De
                   f"IP {body.ip} with priority {body.priority} already exists",
                   field="ip")
     data = body.model_dump()
+    _normalize_mask_sentinels(data)
     if data.get("v3_auth_password"):
         data["v3_auth_password"] = encrypt(data["v3_auth_password"])
     if data.get("v3_priv_password"):
@@ -63,6 +80,7 @@ def update_credential(cred_id: int, body: CredentialUpdate, request: Request, db
     if not cred:
         api_error(404, "CREDENTIAL_NOT_FOUND", "Credential not found")
     updates = body.model_dump(exclude_unset=True)
+    _strip_mask_sentinels(updates)
     if "v3_auth_password" in updates and updates["v3_auth_password"]:
         updates["v3_auth_password"] = encrypt(updates["v3_auth_password"])
     if "v3_priv_password" in updates and updates["v3_priv_password"]:

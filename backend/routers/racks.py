@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from database import Device, get_db
 from database import Rack as RackModel
+from routers.topology import _bump_topo_version
 from schemas import RackCreate, RackOut, RackUpdate
 from shared.audit import log_audit
 from shared.auth import require_role
@@ -26,6 +27,7 @@ def create_rack(body: RackCreate, request: Request, db: Session = Depends(get_db
     db.add(rack)
     db.commit()
     db.refresh(rack)
+    _bump_topo_version()
     log_audit(request, "create", "rack", str(rack.id), {"label": rack.label})
     return rack
 
@@ -36,11 +38,15 @@ def update_rack(rack_id: int, body: RackUpdate, request: Request, db: Session = 
     rack = db.query(RackModel).filter(RackModel.id == rack_id).first()
     if not rack:
         api_error(404, "RACK_NOT_FOUND", "Rack not found")
-    for k, v in body.model_dump(exclude_none=True).items():
-        setattr(rack, k, v)
+    payload = body.model_dump(exclude_unset=True)
+    # No rack field is nullable; explicit null values are ignored
+    for k, v in payload.items():
+        if v is not None:
+            setattr(rack, k, v)
     db.commit()
     db.refresh(rack)
-    log_audit(request, "update", "rack", str(rack_id), {"fields": list(body.model_dump(exclude_none=True).keys())})
+    _bump_topo_version()
+    log_audit(request, "update", "rack", str(rack_id), {"fields": list(payload.keys())})
     return rack
 
 
@@ -55,3 +61,4 @@ def delete_rack(rack_id: int, request: Request, db: Session = Depends(get_db)):
     log_audit(request, "delete", "rack", str(rack_id), {"label": rack.label})
     db.delete(rack)
     db.commit()
+    _bump_topo_version()

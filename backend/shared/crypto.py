@@ -3,11 +3,11 @@ import logging
 
 from config import settings
 
+_log = logging.getLogger(__name__)
+
 _KEY = settings.encryption_key
 if not _KEY:
-    logging.getLogger(__name__).warning(
-        "ENCRYPTION_KEY not set -- passwords stored unencrypted"
-    )
+    _log.warning("ENCRYPTION_KEY not set -- passwords stored unencrypted")
 
 _fernet = None
 if _KEY:
@@ -30,4 +30,6 @@ def decrypt(value: str) -> str:
     try:
         return _fernet.decrypt(value.encode()).decode()
     except Exception:
+        # Do not log the value itself; it may be a legacy plaintext credential.
+        _log.warning("Failed to decrypt value -- returning raw value (legacy plaintext?)")
         return value  # legacy unencrypted value

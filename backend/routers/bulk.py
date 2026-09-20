@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 
 from database import Credential, SnmpProfile, get_db
 from schemas import (
+    MASK_EXPORT,
+    MASK_SENTINELS,
     BulkExportOut,
     BulkImportError,
     BulkImportRequest,
@@ -34,7 +36,7 @@ PROFILE_BULK_FIELDS = [
 ]
 
 CREDENTIAL_BULK_FIELDS = [
-    "label", "ip", "snmp_port", "enabled",
+    "label", "ip", "priority", "snmp_port", "enabled",
     "snmp_version", "community",
     "v3_security_level", "v3_username",
     "v3_auth_protocol", "v3_auth_password",
@@ -79,6 +81,12 @@ def _parse_bulk_rows(kind: str, body: BulkImportRequest) -> List[dict]:
             for key in ["profile_id", "device_id", "snmp_port"]:
                 if key in row:
                     row[key] = _normalize_optional_int(row.get(key))
+            if "priority" in row:
+                row["priority"] = _normalize_optional_int(row.get("priority"))
+                if row["priority"] is None:
+                    # Missing/empty priority (old exports) falls back to the
+                    # schema default 0.
+                    del row["priority"]
             if "enabled" in row:
                 row["enabled"] = _normalize_bool(row.get("enabled"))
         normalized.append(row)
@@ -114,7 +122,8 @@ def _serialize_bulk_rows(kind: str, rows: List[dict], fmt: str) -> str:
     return buf.getvalue()
 
 
-@router.get("/api/bulk-export/{kind}", response_model=BulkExportOut)
+@router.get("/api/bulk-export/{kind}", response_model=BulkExportOut,
+            dependencies=[require_role("admin", "operator")])
 @limiter.limit("10/minute")
 def bulk_export(kind: str, request: Request, fmt: str = "json", db: Session = Depends(get_db)):
     if kind not in {"credentials", "profiles"}:
@@ -129,16 +138,17 @@ def bulk_export(kind: str, request: Request, fmt: str = "json", db: Session = De
             rows.append({
                 "label": c.label,
                 "ip": c.ip,
+                "priority": c.priority,
                 "snmp_port": c.snmp_port,
                 "enabled": bool(c.enabled),
                 "snmp_version": c.snmp_version,
-                "community": "********" if c.community else "",
+                "community": MASK_EXPORT if c.community else "",
                 "v3_security_level": c.v3_security_level,
                 "v3_username": c.v3_username,
                 "v3_auth_protocol": c.v3_auth_protocol,
-                "v3_auth_password": "********" if c.v3_auth_password else "",
+                "v3_auth_password": MASK_EXPORT if c.v3_auth_password else "",
                 "v3_priv_protocol": c.v3_priv_protocol,
-                "v3_priv_password": "********" if c.v3_priv_password else "",
+                "v3_priv_password": MASK_EXPORT if c.v3_priv_password else "",
                 "profile_id": c.profile_id,
                 "device_id": c.device_id,
             })
@@ -148,13 +158,13 @@ def bulk_export(kind: str, request: Request, fmt: str = "json", db: Session = De
             rows.append({
                 "label": p.label,
                 "snmp_version": p.snmp_version,
-                "community": "********" if p.community else "",
+                "community": MASK_EXPORT if p.community else "",
                 "v3_security_level": p.v3_security_level,
                 "v3_username": p.v3_username,
                 "v3_auth_protocol": p.v3_auth_protocol,
-                "v3_auth_password": "********" if p.v3_auth_password else "",
+                "v3_auth_password": MASK_EXPORT if p.v3_auth_password else "",
                 "v3_priv_protocol": p.v3_priv_protocol,
-                "v3_priv_password": "********" if p.v3_priv_password else "",
+                "v3_priv_password": MASK_EXPORT if p.v3_priv_password else "",
             })
 
     return BulkExportOut(type=kind, format=fmt, data=_serialize_bulk_rows(kind, rows, fmt))
@@ -177,37 +187,49 @@ def bulk_import(kind: str, body: BulkImportRequest, request: Request, db: Sessio
     inserted = 0
     updated = 0
 
-    _PASSWORD_MASK = "********"
+    _MASKED_SECRET_FIELDS = ("v3_auth_password", "v3_priv_password", "community")
 
     if not body.dry_run:
         if kind == "credentials":
             for payload in valid_rows:
+                masked_fields = {f for f in _MASKED_SECRET_FIELDS if payload.get(f) in MASK_SENTINELS}
                 for pwd_field in ("v3_auth_password", "v3_priv_password"):
-                    if payload.get(pwd_field) and payload[pwd_field] != _PASSWORD_MASK:
+                    if payload.get(pwd_field) and pwd_field not in masked_fields:
                         payload[pwd_field] = encrypt(payload[pwd_field])
-                existing = db.query(Credential).filter(Credential.ip == payload["ip"]).first()
+                # Match on the unique key (ip, priority) like the config
+                # import; rows without a priority field default to 0, which
+                # preserves the old ip-only matching behaviour.
+                existing = db.query(Credential).filter(
+                    Credential.ip == payload["ip"],
+                    Credential.priority == payload.get("priority", 0),
+                ).first()
                 if existing:
                     for key, value in payload.items():
-                        if key in ("v3_auth_password", "v3_priv_password", "community") and value == _PASSWORD_MASK:
+                        if key in masked_fields:
                             continue
                         setattr(existing, key, value)
                     updated += 1
                 else:
+                    for field in masked_fields:
+                        payload[field] = ""
                     db.add(Credential(**payload))
                     inserted += 1
         else:
             for payload in valid_rows:
+                masked_fields = {f for f in _MASKED_SECRET_FIELDS if payload.get(f) in MASK_SENTINELS}
                 for pwd_field in ("v3_auth_password", "v3_priv_password"):
-                    if payload.get(pwd_field) and payload[pwd_field] != _PASSWORD_MASK:
+                    if payload.get(pwd_field) and pwd_field not in masked_fields:
                         payload[pwd_field] = encrypt(payload[pwd_field])
                 existing = db.query(SnmpProfile).filter(SnmpProfile.label == payload["label"]).first()
                 if existing:
                     for key, value in payload.items():
-                        if key in ("v3_auth_password", "v3_priv_password", "community") and value == _PASSWORD_MASK:
+                        if key in masked_fields:
                             continue
                         setattr(existing, key, value)
                     updated += 1
                 else:
+                    for field in masked_fields:
+                        payload[field] = ""
                     db.add(SnmpProfile(**payload))
                     inserted += 1
         db.commit()

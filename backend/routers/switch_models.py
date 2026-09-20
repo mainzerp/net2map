@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from database import Device, get_db
 from database import SwitchModel as SwitchModelModel
+from routers.topology import _bump_topo_version
 from schemas import SwitchModelCreate, SwitchModelOut, SwitchModelUpdate
 from shared.audit import log_audit
 from shared.auth import require_role
@@ -26,6 +27,7 @@ def create_switch_model(body: SwitchModelCreate, request: Request, db: Session =
     db.add(sm)
     db.commit()
     db.refresh(sm)
+    _bump_topo_version()
     log_audit(request, "create", "switch_model", str(sm.id), {"name": sm.name})
     return sm
 
@@ -36,11 +38,16 @@ def update_switch_model(model_id: int, body: SwitchModelUpdate, request: Request
     sm = db.query(SwitchModelModel).filter(SwitchModelModel.id == model_id).first()
     if not sm:
         api_error(404, "SWITCH_MODEL_NOT_FOUND", "Switch model not found")
-    for k, v in body.model_dump(exclude_none=True).items():
-        setattr(sm, k, v)
+    payload = body.model_dump(exclude_unset=True)
+    for k, v in payload.items():
+        # total_ports is nullable and can be cleared with explicit null;
+        # all other fields reject null
+        if v is not None or k == "total_ports":
+            setattr(sm, k, v)
     db.commit()
     db.refresh(sm)
-    log_audit(request, "update", "switch_model", str(model_id), {"fields": list(body.model_dump(exclude_none=True).keys())})
+    _bump_topo_version()
+    log_audit(request, "update", "switch_model", str(model_id), {"fields": list(payload.keys())})
     return sm
 
 
@@ -55,3 +62,4 @@ def delete_switch_model(model_id: int, request: Request, db: Session = Depends(g
     log_audit(request, "delete", "switch_model", str(model_id), {"name": sm.name})
     db.delete(sm)
     db.commit()
+    _bump_topo_version()

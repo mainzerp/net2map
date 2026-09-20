@@ -33,7 +33,7 @@ from schemas import ScanResult, ScanSwitchMetric
 from shared.crypto import decrypt
 from shared.file_settings import _read_dns_settings, _read_scan_settings
 from shared.metrics import DEVICE_COUNT, ENDPOINT_COUNT, PORT_COUNT, SCAN_ACTIVE, SCAN_DURATION, SCAN_TOTAL
-from shared.state import _log_event
+from shared.state import _log_event, renew_scan_lock
 from snmp_scanner import (
     SwitchData,
     auto_layout,
@@ -45,6 +45,26 @@ from snmp_scanner import (
 
 log = logging.getLogger(__name__)
 
+# Interval between distributed-lock renewals during a scan. The lock TTL
+# (shared.state._SCAN_LOCK_TTL) is a crash-recovery safety net and can be
+# shorter than the scan duration, so long scans must renew periodically.
+_LOCK_RENEW_INTERVAL_SEC = 120
+
+# Dry-run preview is intentionally not part of the serialized ScanResult
+# schema; it travels alongside the result object via these helpers and is
+# materialized into the job result dict by the job runners (jobs.py/tasks.py).
+_DRY_RUN_PREVIEW_ATTR = "_dry_run_preview"
+
+
+def attach_dry_run_preview(result: ScanResult, preview: list) -> None:
+    """Attach a dry-run preview list to a ScanResult (not serialized)."""
+    result.__dict__[_DRY_RUN_PREVIEW_ATTR] = preview
+
+
+def get_dry_run_preview(result: ScanResult) -> list:
+    """Return the dry-run preview attached to a ScanResult, or []."""
+    return result.__dict__.get(_DRY_RUN_PREVIEW_ATTR, [])
+
 
 async def _execute_scan(
     db: Session,
@@ -52,12 +72,36 @@ async def _execute_scan(
     correlation_id: Optional[str] = None,
     scan_type: str = "full",
     dry_run: bool = False,
+    lock_token: Optional[str] = None,
 ) -> ScanResult:
     corr = correlation_id or str(uuid.uuid4())
-
     scan_mode = scan_type if scan_type in {"discovery", "ports", "links", "macs", "full"} else "full"
-    SCAN_ACTIVE.inc()
 
+    scan_started = time.perf_counter()
+    final_status = "failed"
+    SCAN_ACTIVE.inc()
+    try:
+        result = await _execute_scan_body(db, cancel_event, corr, scan_mode, dry_run, lock_token, scan_started)
+        final_status = result.status
+        return result
+    finally:
+        # Metrics live in finally so exceptions (e.g. from asyncio.gather)
+        # can never leak the SCAN_ACTIVE gauge or skip SCAN_TOTAL/SCAN_DURATION.
+        duration_ms = int((time.perf_counter() - scan_started) * 1000)
+        SCAN_ACTIVE.dec()
+        SCAN_DURATION.labels(scan_type=scan_mode).observe(duration_ms / 1000)
+        SCAN_TOTAL.labels(scan_type=scan_mode, status=final_status).inc()
+
+
+async def _execute_scan_body(
+    db: Session,
+    cancel_event,
+    corr: str,
+    scan_mode: str,
+    dry_run: bool,
+    lock_token: Optional[str],
+    scan_started: float,
+) -> ScanResult:
     if scan_mode in {"ports", "links", "macs"}:
         # Only scan credentials that are already in the Device table and not ignored
         known_ips = {d.ip for d in db.query(Device.ip).filter(Device.ignored.is_(False)).all()}
@@ -172,8 +216,6 @@ async def _execute_scan(
             status="finished",
         )
         _log_event(logging.INFO, "scan.end", correlation_id=corr, status=result.status, scanned=0, found=0, links=0, total_duration_ms=0)
-        SCAN_ACTIVE.dec()
-        SCAN_TOTAL.labels(scan_type=scan_mode, status="finished").inc()
         return result
 
     errors: List[str] = []
@@ -334,7 +376,6 @@ async def _execute_scan(
     # Track IPs that responded but no profile matched
     range_no_profile_ips: List[str] = []
 
-    scan_started = time.perf_counter()
     workers = max(1, min(int(configured_max_workers), max(len(scan_targets), 1)))
     sem = asyncio.Semaphore(workers)
 
@@ -344,6 +385,7 @@ async def _execute_scan(
     )
     total_targets = len(scan_targets)
     scanned_count = 0
+    last_lock_renew = time.time()
     for ip, label, data, error_msg, duration_ms, ping_ok, ping_rtt, is_probe, matched_profile_id in results:
         scanned_count += 1
         ping_by_ip[ip] = (ping_ok, ping_rtt)
@@ -399,17 +441,97 @@ async def _execute_scan(
         # Broadcast progress to WebSocket clients
         _broadcast_progress(scanned_count, total_targets, ip, bool(data), corr)
 
+        # Renew the distributed scan lock periodically (TTL is shorter than
+        # long-running scans; renewal is ownership-checked and cheap).
+        if lock_token and (time.time() - last_lock_renew) > _LOCK_RENEW_INTERVAL_SEC:
+            renew_scan_lock(lock_token)
+            last_lock_renew = time.time()
+
     total_duration_ms = int((time.perf_counter() - scan_started) * 1000)
     switch_metrics.sort(key=lambda m: m.duration_ms, reverse=True)
     status = "cancelled" if (cancel_event and cancel_event.is_set()) else "finished"
 
-    # In dry_run mode: return preview without writing anything to DB
+    if lock_token:
+        renew_scan_lock(lock_token)
+
+    # The synchronous SQLAlchemy rebuild phase runs in a worker thread so the
+    # shared background event loop stays responsive for WebSocket broadcasts
+    # and other coroutines while ports/links/endpoints are rewritten.
+    result, dry_run_preview = await asyncio.to_thread(
+        _finalize_scan_db,
+        db,
+        dry_run=dry_run,
+        scan_mode=scan_mode,
+        corr=corr,
+        cancel_event=cancel_event,
+        switch_data=switch_data,
+        ping_by_ip=ping_by_ip,
+        range_found_ips=range_found_ips,
+        range_matched_profile=range_matched_profile,
+        range_no_profile_ips=range_no_profile_ips,
+        errors=errors,
+        status=status,
+        total_duration_ms=total_duration_ms,
+        scanned=len(scan_targets),
+        workers=workers,
+        switch_metrics=switch_metrics,
+        lock_token=lock_token,
+    )
+
+    if dry_run:
+        attach_dry_run_preview(result, dry_run_preview)
+        return result
+
+    _broadcast_scan_complete(corr, result.status, result.found, result.links, result.total_duration_ms)
+
+    # Bump topology version so clients refetch updated data
+    from routers.topology import _bump_topo_version
+    _bump_topo_version()
+
+    return result
+
+
+def _finalize_scan_db(
+    db: Session,
+    *,
+    dry_run: bool,
+    scan_mode: str,
+    corr: str,
+    cancel_event,
+    switch_data: Dict[str, SwitchData],
+    ping_by_ip: Dict[str, tuple],
+    range_found_ips: List[str],
+    range_matched_profile: Dict[str, Optional[int]],
+    range_no_profile_ips: List[str],
+    errors: List[str],
+    status: str,
+    total_duration_ms: int,
+    scanned: int,
+    workers: int,
+    switch_metrics: List[ScanSwitchMetric],
+    lock_token: Optional[str],
+) -> tuple:
+    """Synchronous DB rebuild phase -- runs in a worker thread via
+    asyncio.to_thread (see _execute_scan_body).
+
+    Returns ``(result, dry_run_preview)``.
+
+    Cancellation note: port data is committed per device to keep transactions
+    bounded. When a scan is cancelled mid-rebuild, devices already committed
+    keep their new rows -- status "cancelled" may therefore include partially
+    updated port/endpoint data. This is surfaced in result.errors.
+    """
+    # ── Dry run: build the preview and persist it for later retrieval ────────
     if dry_run:
         dry_run_preview = []
+        existing_cred_ips = set()
+        if range_found_ips:
+            existing_cred_ips = {
+                row[0] for row in db.query(Credential.ip).filter(Credential.ip.in_(range_found_ips)).all()
+            }
         for ip in range_found_ips:
             sw = switch_data.get(ip)
             prof_id = range_matched_profile.get(ip)
-            existing_cred = db.query(Credential).filter(Credential.ip == ip).first()
             dry_run_preview.append({
                 "ip": ip,
                 "sys_name": sw.sys_name if sw else "",
@@ -417,7 +539,7 @@ async def _execute_scan(
                 "vendor": sw.vendor if sw else "generic",
                 "location": sw.location if sw else "",
                 "matched_profile_id": prof_id,
-                "already_exists": existing_cred is not None,
+                "already_exists": ip in existing_cred_ips,
             })
         for ip in range_no_profile_ips:
             ping_ok, _ = ping_by_ip.get(ip, (False, 0))
@@ -433,7 +555,7 @@ async def _execute_scan(
                     "no_profile_suitable": True,
                 })
         result = ScanResult(
-            scanned=len(scan_targets),
+            scanned=scanned,
             found=len(range_found_ips),
             links=0,
             errors=errors,
@@ -442,8 +564,6 @@ async def _execute_scan(
             switch_metrics=switch_metrics,
             status="dry_run",
         )
-        # Attach preview as extra data outside the Pydantic model
-        result.__dict__["_dry_run_preview"] = dry_run_preview
 
         # Persist dry-run result to database
         run_id = _persist_scan_run(db, result, [], [])
@@ -454,54 +574,70 @@ async def _execute_scan(
         db.add(dry_run_record)
         db.commit()
         result.run_id = run_id
+        return result, dry_run_preview
 
-        SCAN_ACTIVE.dec()
-        SCAN_DURATION.labels(scan_type=scan_mode).observe(total_duration_ms / 1000)
-        SCAN_TOTAL.labels(scan_type=scan_mode, status="dry_run").inc()
-        return result
+    if lock_token:
+        renew_scan_lock(lock_token)
 
-    # Auto-create credentials for IPs discovered via range probes
+    # ── Auto-create credentials for IPs discovered via range probes ──────────
     if range_found_ips:
+        existing_cred_ips = {
+            row[0] for row in db.query(Credential.ip).filter(Credential.ip.in_(range_found_ips)).all()
+        }
+        profile_ids = {pid for pid in range_matched_profile.values() if pid}
+        profiles_by_id = {}
+        if profile_ids:
+            profiles_by_id = {
+                p.id: p for p in db.query(SnmpProfile).filter(SnmpProfile.id.in_(profile_ids)).all()
+            }
         for found_ip in range_found_ips:
-            existing_cred = db.query(Credential).filter(Credential.ip == found_ip).first()
-            if not existing_cred:
-                sw = switch_data.get(found_ip)
-                cred_label = sw.sys_name if (sw and sw.sys_name) else found_ip
-                matched_prof_id = range_matched_profile.get(found_ip)
-                matched_prof = db.query(SnmpProfile).filter(SnmpProfile.id == matched_prof_id).first() if matched_prof_id else None
-                new_cred = Credential(
-                    label=cred_label,
-                    ip=found_ip,
-                    snmp_port=161,
-                    enabled=True,
-                    profile_id=matched_prof.id if matched_prof else None,
-                    snmp_version=(matched_prof.snmp_version if matched_prof else "v2c"),
-                    community=(matched_prof.community if matched_prof else "public"),
-                    v3_security_level=(matched_prof.v3_security_level if matched_prof else "authPriv"),
-                    v3_username=(matched_prof.v3_username if matched_prof else ""),
-                    v3_auth_protocol=(matched_prof.v3_auth_protocol if matched_prof else "SHA-256"),
-                    v3_auth_password=(matched_prof.v3_auth_password if matched_prof else ""),
-                    v3_priv_protocol=(matched_prof.v3_priv_protocol if matched_prof else "AES-128"),
-                    v3_priv_password=(matched_prof.v3_priv_password if matched_prof else ""),
-                )
-                db.add(new_cred)
-                _log_event(
-                    logging.INFO,
-                    "scan.range_probe.auto_credential",
-                    correlation_id=corr,
-                    ip=found_ip,
-                    label=cred_label,
-                    profile_id=matched_prof.id if matched_prof else None,
-                )
+            if found_ip in existing_cred_ips:
+                continue
+            sw = switch_data.get(found_ip)
+            cred_label = sw.sys_name if (sw and sw.sys_name) else found_ip
+            matched_prof = profiles_by_id.get(range_matched_profile.get(found_ip))
+            new_cred = Credential(
+                label=cred_label,
+                ip=found_ip,
+                snmp_port=161,
+                enabled=True,
+                profile_id=matched_prof.id if matched_prof else None,
+                snmp_version=(matched_prof.snmp_version if matched_prof else "v2c"),
+                community=(matched_prof.community if matched_prof else "public"),
+                v3_security_level=(matched_prof.v3_security_level if matched_prof else "authPriv"),
+                v3_username=(matched_prof.v3_username if matched_prof else ""),
+                v3_auth_protocol=(matched_prof.v3_auth_protocol if matched_prof else "SHA-256"),
+                v3_auth_password=(matched_prof.v3_auth_password if matched_prof else ""),
+                v3_priv_protocol=(matched_prof.v3_priv_protocol if matched_prof else "AES-128"),
+                v3_priv_password=(matched_prof.v3_priv_password if matched_prof else ""),
+            )
+            db.add(new_cred)
+            _log_event(
+                logging.INFO,
+                "scan.range_probe.auto_credential",
+                correlation_id=corr,
+                ip=found_ip,
+                label=cred_label,
+                profile_id=matched_prof.id if matched_prof else None,
+            )
         db.commit()
 
+    # ── Device upsert ─────────────────────────────────────────────────────────
     discovered_ips = set(switch_data.keys()) | {ip for ip, (ok, _) in ping_by_ip.items() if ok}
-    existing_ips = {d.ip for d in db.query(Device.ip).all()}
+    devices_by_ip: Dict[str, Device] = {}
+    if discovered_ips:
+        devices_by_ip = {d.ip: d for d in db.query(Device).filter(Device.ip.in_(list(discovered_ips))).all()}
+    existing_ips = {row[0] for row in db.query(Device.ip).all()}
     new_ips = [ip for ip in discovered_ips if ip not in existing_ips]
     all_ips_ordered = list(existing_ips) + new_ips
     layout = auto_layout(all_ips_ordered)
     # Reload credentials to include any auto-created entries from range probes
-    cred_by_ip = {c.ip: c for c in db.query(Credential).filter(Credential.ip.in_(list(discovered_ips))).all()}
+    cred_by_ip = {}
+    if discovered_ips:
+        cred_by_ip = {c.ip: c for c in db.query(Credential).filter(Credential.ip.in_(list(discovered_ips))).all()}
+
+    # Manual vendor overrides (devices whose vendor_override flag is set)
+    vendor_overrides: Dict[str, str] = {}
 
     for ip in discovered_ips:
         sw = switch_data.get(ip)
@@ -513,19 +649,36 @@ async def _execute_scan(
         vendor = (sw.vendor if sw else "generic")
         model = (extract_model(sw.sys_descr, sw.vendor) if sw else "")
 
-        device = db.query(Device).filter(Device.ip == ip).first()
+        device = devices_by_ip.get(ip)
         if device:
             if sw:
+                detected_vendor = vendor or "generic"
+                if device.vendor_override and device.vendor:
+                    # The vendor was set manually via the topology API
+                    # (vendor_override flag): keep it and use it for port
+                    # filtering in this scan.
+                    vendor_overrides[ip] = device.vendor
+                    _log_event(
+                        logging.INFO,
+                        "scan.vendor_override",
+                        correlation_id=corr,
+                        ip=ip,
+                        detected=detected_vendor,
+                        override=device.vendor,
+                    )
+                else:
+                    device.vendor = detected_vendor or device.vendor
                 device.sys_name  = sw.sys_name  or device.sys_name
                 device.sys_descr = sw.sys_descr or device.sys_descr
                 device.location  = sw.location  or device.location
                 device.model     = model        or device.model
-                device.vendor    = vendor       or device.vendor
                 device.last_seen = datetime.now(timezone.utc)
             elif ping_ok:
                 device.sys_name = device.sys_name or ip
                 device.sys_descr = device.sys_descr or "Discovered by ping (SNMP unavailable)"
-                device.vendor = vendor or device.vendor or "generic"
+                # Never clobber an existing vendor with the "generic" fallback
+                # of a ping-only observation (would erase manual overrides).
+                device.vendor = device.vendor or vendor or "generic"
                 device.model = model or device.model
             device.ping_status = ping_status
             device.ping_rtt_ms = ping_rtt if ping_ok else 0
@@ -558,12 +711,15 @@ async def _execute_scan(
             )
             db.add(new_device)
             db.flush()
+            devices_by_ip[ip] = new_device
             if cred and not cred.device_id:
                 cred.device_id = new_device.id
 
     db.commit()
 
+    # ── Port / endpoint rebuild ───────────────────────────────────────────────
     link_count = 0
+    ports_committed = False
     update_ports = scan_mode in {"full", "ports", "macs"}
     update_links = scan_mode in {"full", "ports", "links"}
     if update_ports:
@@ -582,17 +738,35 @@ async def _execute_scan(
 
                 log.info("Global ARP table: %d entries merged from %d devices", len(global_arp), len(switch_data))
 
+                # Bulk preload endpoints for all MACs seen in this scan to
+                # avoid a per-MAC SELECT (N+1) during endpoint upserts.
+                all_macs: set = set()
+                for sw_data in switch_data.values():
+                    all_macs.update(sw_data.arp_table.keys())
+                    all_macs.update(sw_data.mac_ifindex.keys())
+                endpoints_by_mac: Dict[str, Endpoint] = {}
+                if all_macs:
+                    endpoints_by_mac = {
+                        e.mac: e for e in db.query(Endpoint).filter(Endpoint.mac.in_(list(all_macs))).all()
+                    }
+
                 for ip, sw in switch_data.items():
                     if cancel_event and cancel_event.is_set():
                         db.rollback()
                         status = "cancelled"
                         break
+                    if lock_token:
+                        renew_scan_lock(lock_token)
 
-                    device = db.query(Device).filter(Device.ip == ip).first()
+                    device = devices_by_ip.get(ip)
                     if not device:
                         continue
                     if device.ignored:
                         continue
+
+                    # A manually overridden vendor (DB) wins over the
+                    # auto-detected one for port filtering decisions.
+                    effective_vendor = vendor_overrides.get(ip, sw.vendor)
 
                     peers_by_ifindex: Dict[int, List[tuple[str, str, str]]] = {}
                     for mac, peer_ip in sw.arp_table.items():
@@ -620,74 +794,92 @@ async def _execute_scan(
                         peers_by_ifindex.setdefault(ifindex, []).append((mac, resolved_ip, resolved_host))
 
                     db.query(Port).filter(Port.device_id == device.id).delete()
-                    port_rows = []
-                    for iface in sw.interfaces.values():
-                        if is_virtual(iface.descr, sw.vendor):
-                            continue
 
+                    # Build port objects. Virtual interfaces (loopbacks, VLAN
+                    # SVIs, LAGs) are skipped UNLESS they carry FDB/endpoint
+                    # entries -- dropping those would silently lose all
+                    # endpoints learned on e.g. a LAG ifIndex.
+                    ports_with_endpoints: List[tuple] = []
+                    for iface in sw.interfaces.values():
                         endpoint_entries: List[tuple[str, str, str]] = []
                         if iface.index in peers_by_ifindex and peers_by_ifindex[iface.index]:
                             endpoint_entries = sorted(
                                 peers_by_ifindex[iface.index],
                                 key=lambda x: (x[1] == "", x[1], x[0])
                             )
+                        if is_virtual(iface.descr, effective_vendor) and not endpoint_entries:
+                            continue
+                        port_obj = Port(
+                            device_id=device.id,
+                            if_index=iface.index,
+                            if_descr=iface.descr,
+                            if_alias=iface.alias,
+                            speed_mbps=iface.speed_mbps,
+                            oper_status=iface.oper_status,
+                            vlan=iface.vlan,
+                            tagged_vlans=iface.tagged_vlans,
+                        )
+                        ports_with_endpoints.append((port_obj, iface, endpoint_entries))
 
-                        port_rows.append({
-                            "device_id": device.id,
-                            "if_index": iface.index,
-                            "if_descr": iface.descr,
-                            "if_alias": iface.alias,
-                            "speed_mbps": iface.speed_mbps,
-                            "oper_status": iface.oper_status,
-                            "vlan": iface.vlan,
-                            "tagged_vlans": iface.tagged_vlans,
-                            "_endpoint_entries": endpoint_entries,
-                        })
-                    if port_rows:
-                        for pr in port_rows:
-                            ep_entries = pr.pop("_endpoint_entries", [])
-                            port_obj = Port(**pr)
-                            db.add(port_obj)
-                            db.flush()
-                            # Create/update endpoints and associations
+                    if ports_with_endpoints:
+                        # One flush per device assigns all port ids (batched
+                        # instead of a flush per row).
+                        db.add_all([p for p, _, _ in ports_with_endpoints])
+                        db.flush()
+
+                        now = datetime.now(timezone.utc)
+                        new_endpoints: List[Endpoint] = []
+                        endpoint_assoc_plan: List[tuple] = []  # (endpoint, port_obj, vlan)
+                        for port_obj, iface, ep_entries in ports_with_endpoints:
                             for mac, ep_ip, ep_host in ep_entries:
                                 if not mac:
                                     continue
-                                endpoint = db.query(Endpoint).filter(Endpoint.mac == mac).first()
-                                if endpoint:
+                                endpoint = endpoints_by_mac.get(mac)
+                                if endpoint is not None:
                                     if ep_ip:
                                         endpoint.ip = ep_ip
                                     if ep_host:
                                         endpoint.hostname = ep_host
-                                    endpoint.last_seen = datetime.now(timezone.utc)
+                                    endpoint.last_seen = now
                                 else:
                                     endpoint = Endpoint(
                                         mac=mac,
                                         ip=ep_ip or None,
                                         hostname=ep_host or None,
                                     )
-                                    db.add(endpoint)
-                                    db.flush()
-                                # Upsert association
-                                assoc = db.query(EndpointPortAssociation).filter(
-                                    EndpointPortAssociation.endpoint_id == endpoint.id,
-                                    EndpointPortAssociation.port_id == port_obj.id,
-                                ).first()
-                                if assoc:
-                                    assoc.vlan_id = iface.vlan if iface.vlan else None
-                                    assoc.last_seen = datetime.now(timezone.utc)
-                                else:
-                                    db.add(EndpointPortAssociation(
-                                        endpoint_id=endpoint.id,
-                                        port_id=port_obj.id,
-                                        vlan_id=iface.vlan if iface.vlan else None,
-                                    ))
+                                    endpoints_by_mac[mac] = endpoint
+                                    new_endpoints.append(endpoint)
+                                endpoint_assoc_plan.append((endpoint, port_obj, iface.vlan))
+
+                        if new_endpoints:
+                            db.add_all(new_endpoints)
+                            db.flush()
+
+                        # Ports are freshly inserted, so no association for
+                        # them can exist yet; guard only against duplicates
+                        # within this scan (uq_epa_endpoint_port).
+                        seen_assocs = set()
+                        new_assocs: List[EndpointPortAssociation] = []
+                        for endpoint, port_obj, vlan in endpoint_assoc_plan:
+                            key = (endpoint.id, port_obj.id)
+                            if key in seen_assocs:
+                                continue
+                            seen_assocs.add(key)
+                            new_assocs.append(EndpointPortAssociation(
+                                endpoint_id=endpoint.id,
+                                port_id=port_obj.id,
+                                vlan_id=vlan if vlan else None,
+                            ))
+                        if new_assocs:
+                            db.add_all(new_assocs)
                     db.commit()
+                    ports_committed = True
             except Exception:
                 db.rollback()
                 log.exception("Error during port update, rolled back")
                 errors.append("Port update failed (rolled back)")
 
+    # ── Topology link rebuild ─────────────────────────────────────────────────
     if update_links:
         if cancel_event and cancel_event.is_set():
             status = "cancelled"
@@ -708,7 +900,6 @@ async def _execute_scan(
                     e.g. 'TenGigabitEthernet 1/0/1' -> '1/0/1', 'TF2/0/21' -> '2/0/21'
                     Strip all letters and leading spaces before the first digit group.
                     """
-                    import re
                     m = re.search(r'(\d[\d/]+)$', (s or "").strip())
                     return m.group(1) if m else _norm(s)
 
@@ -729,10 +920,12 @@ async def _execute_scan(
                         if "/" in sfx:
                             port_suffix_lookup[ip][sfx] = iface.descr
 
+                links_cancelled = False
                 for ip, sw in switch_data.items():
                     if cancel_event and cancel_event.is_set():
                         db.rollback()
                         status = "cancelled"
+                        links_cancelled = True
                         break
 
                     for nbr in sw.lldp_neighbors:
@@ -780,15 +973,22 @@ async def _execute_scan(
                             speed_label=spd_label,
                         ))
                         link_count += 1
-                else:
+                if not links_cancelled:
                     db.commit()
             except Exception:
                 db.rollback()
                 log.exception("Error during link update, rolled back")
                 errors.append("Link update failed (rolled back)")
 
+    if status == "cancelled" and ports_committed:
+        # See docstring: cancellation can leave already-committed devices with
+        # updated port/endpoint rows. Make that visible instead of implying
+        # the database is untouched.
+        errors.append("Scan cancelled after partial port data was committed; some devices have updated ports/endpoints")
+        _log_event(logging.WARNING, "scan.cancelled_partial", correlation_id=corr)
+
     result = ScanResult(
-        scanned=len(scan_targets),
+        scanned=scanned,
         found=len(discovered_ips),
         links=link_count,
         errors=errors,
@@ -824,19 +1024,11 @@ async def _execute_scan(
         errors=len(result.errors),
         run_id=result.run_id,
     )
-    _broadcast_scan_complete(corr, result.status, result.found, result.links, result.total_duration_ms)
 
-    # Bump topology version so clients refetch updated data
-    from routers.topology import _bump_topo_version
-    _bump_topo_version()
-
-    # Update Prometheus metrics
-    SCAN_ACTIVE.dec()
-    SCAN_DURATION.labels(scan_type=scan_mode).observe(total_duration_ms / 1000)
-    SCAN_TOTAL.labels(scan_type=scan_mode, status=status).inc()
+    # Update Prometheus gauges from the final DB state
     DEVICE_COUNT.set(db.query(Device).count())
     PORT_COUNT.labels(status="up").set(db.query(Port).filter(Port.oper_status == 1).count())
     PORT_COUNT.labels(status="down").set(db.query(Port).filter(Port.oper_status == 2).count())
     ENDPOINT_COUNT.set(db.query(Endpoint).count())
 
-    return result
+    return result, []

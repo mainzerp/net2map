@@ -134,3 +134,67 @@ def test_delete_endpoint(client, jwt_headers, db):
 
     assert db.query(Endpoint).filter_by(id=ep.id).first() is None
     assert db.query(EndpointPortAssociation).filter_by(endpoint_id=ep.id).first() is None
+
+
+# ---------------------------------------------------------------------------
+# ETag / conditional requests
+# ---------------------------------------------------------------------------
+
+def test_endpoints_etag_returns_304_when_unchanged(client, auth_headers, db):
+    """Second request with matching If-None-Match returns 304."""
+    ep = Endpoint(mac="aa:bb:cc:dd:ee:10", ip="10.0.1.10")
+    db.add(ep)
+    db.commit()
+
+    r1 = client.get("/api/endpoints", headers=auth_headers)
+    assert r1.status_code == 200
+    etag = r1.headers.get("etag")
+    assert etag
+
+    r2 = client.get("/api/endpoints", headers={**auth_headers, "If-None-Match": etag})
+    assert r2.status_code == 304
+
+
+def test_endpoints_etag_changes_on_insert(client, auth_headers, db):
+    ep = Endpoint(mac="aa:bb:cc:dd:ee:11")
+    db.add(ep)
+    db.commit()
+    r1 = client.get("/api/endpoints", headers=auth_headers)
+    etag1 = r1.headers["etag"]
+
+    db.add(Endpoint(mac="aa:bb:cc:dd:ee:12"))
+    db.commit()
+    r2 = client.get("/api/endpoints", headers={**auth_headers, "If-None-Match": etag1})
+    assert r2.status_code == 200
+    assert r2.headers["etag"] != etag1
+
+
+def test_endpoints_etag_changes_on_notes_update(client, auth_headers, jwt_headers, db):
+    """Notes edits must invalidate the ETag even though last_seen is untouched."""
+    ep = Endpoint(mac="aa:bb:cc:dd:ee:13", notes="old")
+    db.add(ep)
+    db.commit()
+    r1 = client.get("/api/endpoints", headers=auth_headers)
+    etag1 = r1.headers["etag"]
+
+    r = client.patch(f"/api/endpoints/{ep.id}", json={"notes": "updated note"}, headers=jwt_headers)
+    assert r.status_code == 200
+
+    r2 = client.get("/api/endpoints", headers={**auth_headers, "If-None-Match": etag1})
+    assert r2.status_code == 200
+    assert r2.headers["etag"] != etag1
+
+
+def test_endpoints_etag_changes_on_ignored_update(client, auth_headers, jwt_headers, db):
+    ep = Endpoint(mac="aa:bb:cc:dd:ee:14", ignored=False)
+    db.add(ep)
+    db.commit()
+    r1 = client.get("/api/endpoints", headers=auth_headers)
+    etag1 = r1.headers["etag"]
+
+    r = client.patch(f"/api/endpoints/{ep.id}", json={"ignored": True}, headers=jwt_headers)
+    assert r.status_code == 200
+
+    r2 = client.get("/api/endpoints", headers={**auth_headers, "If-None-Match": etag1})
+    assert r2.status_code == 200
+    assert r2.headers["etag"] != etag1

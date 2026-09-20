@@ -5,13 +5,29 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from database import Credential, SnmpProfile, get_db
-from schemas import SnmpProfileCreate, SnmpProfileOut, SnmpProfileUpdate
+from schemas import MASK_SENTINELS, SnmpProfileCreate, SnmpProfileOut, SnmpProfileUpdate
 from shared.audit import log_audit
 from shared.auth import require_role
 from shared.crypto import encrypt
 from shared.errors import api_error
 
 router = APIRouter()
+
+_SECRET_FIELDS = ("community", "v3_auth_password", "v3_priv_password")
+
+
+def _strip_mask_sentinels(data: dict) -> None:
+    """Remove fields whose value is a mask sentinel (treated as 'unchanged')."""
+    for field in _SECRET_FIELDS:
+        if data.get(field) in MASK_SENTINELS:
+            del data[field]
+
+
+def _normalize_mask_sentinels(data: dict) -> None:
+    """Normalize mask sentinels to empty strings before insert."""
+    for field in _SECRET_FIELDS:
+        if data.get(field) in MASK_SENTINELS:
+            data[field] = ""
 
 
 @router.get("/api/snmp-profiles", response_model=List[SnmpProfileOut])
@@ -23,6 +39,7 @@ def list_snmp_profiles(db: Session = Depends(get_db)):
              dependencies=[require_role("admin", "operator")])
 def create_snmp_profile(body: SnmpProfileCreate, request: Request, db: Session = Depends(get_db)):
     payload = body.model_dump()
+    _normalize_mask_sentinels(payload)
     if payload.get("v3_auth_password"):
         payload["v3_auth_password"] = encrypt(payload["v3_auth_password"])
     if payload.get("v3_priv_password"):
@@ -42,6 +59,7 @@ def update_snmp_profile(profile_id: int, body: SnmpProfileUpdate, request: Reque
     if not profile:
         api_error(404, "PROFILE_NOT_FOUND", "Profile not found")
     payload = body.model_dump(exclude_none=True)
+    _strip_mask_sentinels(payload)
 
     if "v3_auth_password" in payload and payload["v3_auth_password"]:
         payload["v3_auth_password"] = encrypt(payload["v3_auth_password"])

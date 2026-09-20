@@ -11,6 +11,7 @@ from database import Rack as RackModel
 from schemas import AppSettingOut, AppSettingUpdate
 from shared.audit import log_audit
 from shared.auth import require_role
+from shared.errors import api_error
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
@@ -21,10 +22,32 @@ def list_settings(db: Session = Depends(get_db)):
     return db.query(AppSetting).all()
 
 
+# Keys that may be written via PUT /api/settings/{key}. Covers every key read
+# by the backend (scheduler, tasks, scan/dns/map settings) or written by the
+# frontend; unknown keys are rejected to prevent settings-table pollution.
+ALLOWED_SETTING_KEYS = {
+    "discovery_interval_sec",
+    "link_update_interval_sec",
+    "mac_update_interval_sec",
+    "port_update_interval_sec",  # legacy, still read as fallback
+    "discovery_scan_ranges",
+    "scan_max_workers",
+    "scan_snmp_timeout",
+    "scan_snmp_retries",
+    "dns_servers",
+    "map_opacity",
+    "map_scale",
+    "map_bg_color",
+    "audit_retention_days",
+}
+
+
 @router.put("/api/settings/{key}", response_model=AppSettingOut,
             dependencies=[require_role("admin", "operator")])
 @limiter.limit("10/minute")
 def update_setting(key: str, body: AppSettingUpdate, request: Request, db: Session = Depends(get_db)):
+    if key not in ALLOWED_SETTING_KEYS:
+        api_error(400, "UNKNOWN_SETTING_KEY", f"Unknown setting key: '{key}'", field="key")
     setting = db.query(AppSetting).filter(AppSetting.key == key).first()
     if not setting:
         setting = AppSetting(key=key, value=body.value)

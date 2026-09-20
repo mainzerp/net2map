@@ -96,7 +96,12 @@ def get_topology(request: Request, db: Session = Depends(get_db)):
     nodes   = db.query(Device).filter(
         Device.ignored.is_(False),
     ).all()
-    links   = db.query(TopologyLink).all()
+    node_ips = {d.ip for d in nodes}
+    # Drop links that reference devices not present in the node list
+    links   = [
+        link for link in db.query(TopologyLink).all()
+        if link.local_ip in node_ips and link.remote_ip in node_ips
+    ]
     racks   = db.query(RackModel).order_by(RackModel.id).all()
     classes = db.query(SwitchClassModel).order_by(SwitchClassModel.id).all()
     models  = db.query(SwitchModelModel).order_by(SwitchModelModel.id).all()
@@ -126,7 +131,8 @@ def get_topology(request: Request, db: Session = Depends(get_db)):
     return Response(content=body, media_type="application/json", headers={"ETag": etag, "Cache-Control": "no-cache"})
 
 
-@router.patch("/api/topology/devices/{device_id}/position", response_model=DeviceOut)
+@router.patch("/api/topology/devices/{device_id}/position", response_model=DeviceOut,
+              dependencies=[require_role("admin", "operator")])
 def update_device_position(
     device_id: int, body: DevicePositionUpdate, db: Session = Depends(get_db)
 ):
@@ -142,7 +148,8 @@ def update_device_position(
     return device
 
 
-@router.patch("/api/topology/racks/{rack_id}/position", response_model=RackOut)
+@router.patch("/api/topology/racks/{rack_id}/position", response_model=RackOut,
+              dependencies=[require_role("admin", "operator")])
 def update_rack_position(
     rack_id: int, body: RackPositionUpdate, db: Session = Depends(get_db)
 ):
@@ -165,9 +172,26 @@ def bulk_update_device_meta(body: BulkDeviceMetaUpdate, request: Request, db: Se
     updates = {}
     if body.ignored is not None:
         updates["ignored"] = body.ignored
-    if body.rack_id is not None:
+    if body.clear_rack:
+        updates["rack_id"] = None
+    elif body.rack_id is not None:
+        if not db.query(RackModel).filter(RackModel.id == body.rack_id).first():
+            api_error(404, "RACK_NOT_FOUND", "Rack not found")
         updates["rack_id"] = body.rack_id
     if body.class_id is not None:
+        target_class = db.query(SwitchClassModel).filter(SwitchClassModel.id == body.class_id).first()
+        if not target_class:
+            api_error(404, "SWITCH_CLASS_NOT_FOUND", "Switch class not found")
+        if not target_class.allow_outside_rack:
+            if body.clear_rack:
+                api_error(400, "OUTSIDE_RACK_NOT_ALLOWED", "Selected switch class requires rack assignment")
+            if body.rack_id is None:
+                unracked = db.query(Device).filter(
+                    Device.id.in_(body.device_ids),
+                    Device.rack_id.is_(None),
+                ).count()
+                if unracked > 0:
+                    api_error(400, "OUTSIDE_RACK_NOT_ALLOWED", "Selected switch class requires rack assignment")
         updates["class_id"] = body.class_id
     if not updates:
         api_error(400, "NO_FIELDS", "No fields to update")
@@ -212,7 +236,14 @@ def update_device_meta(
     if "sys_name" in payload:
         device.sys_name = payload["sys_name"]
     if "vendor" in payload:
-        device.vendor = payload["vendor"]
+        device.vendor = payload["vendor"] or ""
+        # A non-empty vendor set via the API is a manual override; an emptied
+        # vendor hands control back to auto-detection on the next scan.
+        device.vendor_override = bool(payload["vendor"])
+    if "vendor_override" in payload and payload["vendor_override"] is not None:
+        # Explicit flag control (e.g. "reset to auto-detected") wins over the
+        # implicit derivation from the vendor field.
+        device.vendor_override = payload["vendor_override"]
     if "model" in payload:
         device.model = payload["model"]
     if "rack_id" in payload:

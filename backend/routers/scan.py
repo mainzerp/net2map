@@ -1,14 +1,12 @@
 """Scan trigger and job management endpoints."""
+import asyncio
 import logging
-import uuid
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from sqlalchemy.orm import Session
 
-from database import get_db
-from scan_engine import _execute_scan, _start_job
+from scan_engine import _start_job
 from schemas import ScanResult
 from shared.audit import log_audit
 from shared.auth import require_role
@@ -18,14 +16,38 @@ from shared.state import _log_event, get_scan_job, request_scan_cancel
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
 
+_TERMINAL_JOB_STATUSES = {"finished", "failed", "cancelled", "skipped", "dry_run"}
+
 
 @router.post("/api/scan", response_model=ScanResult, deprecated=True,
              dependencies=[require_role("admin", "operator")])
 @limiter.limit("2/minute")
-async def run_scan(request: Request, db: Session = Depends(get_db)):
-    """Synchronous scan execution. Deprecated: use POST /api/scan/jobs instead."""
+async def run_scan(request: Request):
+    """Synchronous scan execution. Deprecated: use POST /api/scan/jobs instead.
+
+    Internally this dispatches through the background job path
+    (scan_engine.jobs._start_job) and asynchronously polls for completion
+    instead of running the scan inline on the API event loop. The response
+    shape (ScanResult) is unchanged.
+    """
     log_audit(request, "scan", "scan", "", {"mode": "sync"})
-    return await _execute_scan(db, None, correlation_id=f"sync-{uuid.uuid4()}")
+    job = _start_job(dry_run=False, scan_type="full")
+    job_id = job["job_id"]
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 600
+    while loop.time() < deadline:
+        state = get_scan_job(job_id)
+        if state and state.get("status") in _TERMINAL_JOB_STATUSES:
+            result_data = state.get("result") or {}
+            if not isinstance(result_data, dict) or "scanned" not in result_data:
+                # Lock conflict / skipped: no ScanResult-shaped payload
+                api_error(409, "SCAN_CONFLICT", "Scan could not be started (another scan is active)")
+            fields = {k: v for k, v in result_data.items() if k in ScanResult.model_fields}
+            return ScanResult(**fields)
+        await asyncio.sleep(1)
+
+    api_error(504, "SCAN_TIMEOUT", "Scan did not finish within the polling window")
 
 
 @router.post("/api/scan/jobs",

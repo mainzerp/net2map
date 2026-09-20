@@ -9,7 +9,14 @@ from sqlalchemy.orm import Session
 
 from database import AppSetting, Credential, SnmpProfile, get_db
 from routers.bulk import _normalize_bool, _normalize_optional_int
-from schemas import CredentialCreate, GlobalConfigExportOut, GlobalConfigImportRequest, SnmpProfileCreate
+from schemas import (
+    MASK_EXPORT,
+    MASK_SENTINELS,
+    CredentialCreate,
+    GlobalConfigExportOut,
+    GlobalConfigImportRequest,
+    SnmpProfileCreate,
+)
 from shared.audit import log_audit
 from shared.auth import require_role
 from shared.crypto import encrypt
@@ -24,7 +31,7 @@ limiter = Limiter(key_func=get_remote_address)
 def export_global_config(request: Request, db: Session = Depends(get_db)):
     payload = {
         "version": 1,
-        "exported_at": datetime.now(timezone.utc).isoformat() + "Z",
+        "exported_at": datetime.now(timezone.utc).isoformat(),
         "settings": [
             {"key": s.key, "value": s.value}
             for s in db.query(AppSetting).order_by(AppSetting.key).all()
@@ -33,13 +40,13 @@ def export_global_config(request: Request, db: Session = Depends(get_db)):
             {
                 "label": p.label,
                 "snmp_version": p.snmp_version,
-                "community": "********" if p.community else "",
+                "community": MASK_EXPORT if p.community else "",
                 "v3_security_level": p.v3_security_level,
                 "v3_username": p.v3_username,
                 "v3_auth_protocol": p.v3_auth_protocol,
-                "v3_auth_password": "********" if p.v3_auth_password else "",
+                "v3_auth_password": MASK_EXPORT if p.v3_auth_password else "",
                 "v3_priv_protocol": p.v3_priv_protocol,
-                "v3_priv_password": "********" if p.v3_priv_password else "",
+                "v3_priv_password": MASK_EXPORT if p.v3_priv_password else "",
             }
             for p in db.query(SnmpProfile).order_by(SnmpProfile.id).all()
         ],
@@ -47,16 +54,17 @@ def export_global_config(request: Request, db: Session = Depends(get_db)):
             {
                 "label": c.label,
                 "ip": c.ip,
+                "priority": c.priority,
                 "snmp_port": c.snmp_port,
                 "enabled": bool(c.enabled),
                 "snmp_version": c.snmp_version,
-                "community": "********" if c.community else "",
+                "community": MASK_EXPORT if c.community else "",
                 "v3_security_level": c.v3_security_level,
                 "v3_username": c.v3_username,
                 "v3_auth_protocol": c.v3_auth_protocol,
-                "v3_auth_password": "********" if c.v3_auth_password else "",
+                "v3_auth_password": MASK_EXPORT if c.v3_auth_password else "",
                 "v3_priv_protocol": c.v3_priv_protocol,
-                "v3_priv_password": "********" if c.v3_priv_password else "",
+                "v3_priv_password": MASK_EXPORT if c.v3_priv_password else "",
                 "profile_id": c.profile_id,
                 "device_id": c.device_id,
             }
@@ -130,34 +138,42 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
                 db.add(AppSetting(**row))
                 inserted["settings"] += 1
 
-        _PASSWORD_MASK = "********"
+        _MASKED_SECRET_FIELDS = ("v3_auth_password", "v3_priv_password", "community")
         for row in valid_profiles:
+            masked_fields = {f for f in _MASKED_SECRET_FIELDS if row.get(f) in MASK_SENTINELS}
             for pwd_field in ("v3_auth_password", "v3_priv_password"):
-                if row.get(pwd_field) and row[pwd_field] != _PASSWORD_MASK:
+                if row.get(pwd_field) and pwd_field not in masked_fields:
                     row[pwd_field] = encrypt(row[pwd_field])
             existing = db.query(SnmpProfile).filter(SnmpProfile.label == row["label"]).first()
             if existing:
                 for key, value in row.items():
-                    if key in ("v3_auth_password", "v3_priv_password", "community") and value == _PASSWORD_MASK:
+                    if key in masked_fields:
                         continue
                     setattr(existing, key, value)
                 updated["profiles"] += 1
             else:
+                for field in masked_fields:
+                    row[field] = ""
                 db.add(SnmpProfile(**row))
                 inserted["profiles"] += 1
 
         for row in valid_credentials:
+            masked_fields = {f for f in _MASKED_SECRET_FIELDS if row.get(f) in MASK_SENTINELS}
             for pwd_field in ("v3_auth_password", "v3_priv_password"):
-                if row.get(pwd_field) and row[pwd_field] != _PASSWORD_MASK:
+                if row.get(pwd_field) and pwd_field not in masked_fields:
                     row[pwd_field] = encrypt(row[pwd_field])
-            existing = db.query(Credential).filter(Credential.ip == row["ip"]).first()
+            existing = db.query(Credential).filter(
+                Credential.ip == row["ip"], Credential.priority == row.get("priority", 0)
+            ).first()
             if existing:
                 for key, value in row.items():
-                    if key in ("v3_auth_password", "v3_priv_password", "community") and value == _PASSWORD_MASK:
+                    if key in masked_fields:
                         continue
                     setattr(existing, key, value)
                 updated["credentials"] += 1
             else:
+                for field in masked_fields:
+                    row[field] = ""
                 db.add(Credential(**row))
                 inserted["credentials"] += 1
 

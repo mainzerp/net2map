@@ -156,3 +156,117 @@ def test_config_import_profiles(client, auth_headers, db):
 
     prof = db.query(SnmpProfile).filter(SnmpProfile.label == "ConfProf").first()
     assert prof is not None
+
+
+# -- Timestamp format, mask round-trip, (ip, priority) matching -----------------
+
+def test_config_export_timestamp_has_no_double_timezone(client, auth_headers):
+    """exported_at must be a plain ISO timestamp, not '...+00:00Z'."""
+    r = client.get("/api/config/export", headers=auth_headers)
+    payload = json.loads(r.json()["data"])
+    exported_at = payload["exported_at"]
+    assert not exported_at.endswith("Z")
+    assert exported_at.endswith("+00:00")
+
+
+def test_config_export_includes_credential_priority(client, auth_headers, db):
+    """Export carries priority so re-import can match on (ip, priority)."""
+    db.add(Credential(label="Prio", ip="10.6.0.1", priority=3))
+    db.commit()
+
+    r = client.get("/api/config/export", headers=auth_headers)
+    payload = json.loads(r.json()["data"])
+    cred_row = [c for c in payload["credentials"] if c["ip"] == "10.6.0.1"][0]
+    assert cred_row["priority"] == 3
+
+
+def test_config_import_mask_not_stored_on_insert(client, auth_headers, db):
+    """Re-importing an export must not store the '********' mask as a real value."""
+    config_payload = json.dumps({
+        "settings": [],
+        "profiles": [
+            {"label": "MaskProf", "community": "********",
+             "v3_auth_password": "********", "v3_priv_password": "********"},
+        ],
+        "credentials": [
+            {"label": "MaskCred", "ip": "10.6.0.2", "community": "********",
+             "v3_auth_password": "***", "v3_priv_password": "********"},
+        ],
+    })
+    r = client.post("/api/config/import", json={
+        "data": config_payload, "dry_run": False,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["inserted"]["profiles"] == 1
+    assert r.json()["inserted"]["credentials"] == 1
+
+    prof = db.query(SnmpProfile).filter(SnmpProfile.label == "MaskProf").first()
+    assert prof.community == ""
+    assert prof.v3_auth_password == ""
+    assert prof.v3_priv_password == ""
+
+    cred = db.query(Credential).filter(Credential.ip == "10.6.0.2").first()
+    assert cred.community == ""
+    assert cred.v3_auth_password == ""
+    assert cred.v3_priv_password == ""
+
+
+def test_config_import_matches_credential_by_ip_and_priority(client, auth_headers, db):
+    """Credential upsert matches on the unique key (ip, priority), not ip alone."""
+    db.add_all([
+        Credential(label="Prio0", ip="10.6.0.3", priority=0, community="c0"),
+        Credential(label="Prio1", ip="10.6.0.3", priority=1, community="c1"),
+    ])
+    db.commit()
+
+    config_payload = json.dumps({
+        "settings": [],
+        "profiles": [],
+        "credentials": [
+            {"label": "Prio1-Updated", "ip": "10.6.0.3", "priority": 1, "community": "c1-new"},
+        ],
+    })
+    r = client.post("/api/config/import", json={
+        "data": config_payload, "dry_run": False,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["updated"]["credentials"] == 1
+    assert r.json()["inserted"]["credentials"] == 0
+
+    db.expire_all()
+    prio0 = db.query(Credential).filter(Credential.ip == "10.6.0.3", Credential.priority == 0).first()
+    prio1 = db.query(Credential).filter(Credential.ip == "10.6.0.3", Credential.priority == 1).first()
+    assert prio0.label == "Prio0"
+    assert prio0.community == "c0"
+    assert prio1.label == "Prio1-Updated"
+    assert prio1.community == "c1-new"
+
+
+def test_config_import_mask_keeps_values_on_update(client, auth_headers, db):
+    """Masked fields in a config import leave existing values unchanged on update."""
+    db.add(Credential(
+        label="KeepCred", ip="10.6.0.4", community="keepme",
+        v3_auth_password="keepauth", v3_priv_password="keeppriv",
+    ))
+    db.commit()
+
+    config_payload = json.dumps({
+        "settings": [],
+        "profiles": [],
+        "credentials": [
+            {"label": "KeepCred-Renamed", "ip": "10.6.0.4", "community": "********",
+             "v3_auth_password": "********", "v3_priv_password": "********"},
+        ],
+    })
+    r = client.post("/api/config/import", json={
+        "data": config_payload, "dry_run": False,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["updated"]["credentials"] == 1
+
+    db.expire_all()
+    cred = db.query(Credential).filter(Credential.ip == "10.6.0.4").first()
+    assert cred.label == "KeepCred-Renamed"
+    assert cred.community == "keepme"
+    assert cred.v3_auth_password == "keepauth"
+    assert cred.v3_priv_password == "keeppriv"

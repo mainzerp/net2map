@@ -14,7 +14,7 @@ from sqlalchemy import JSON as _JSON
 _pg.JSONB = _JSON
 
 # Mock heavy / platform-specific modules that are not needed for API tests
-for _mod in ("pysnmp", "pysnmp.hlapi", "snmp_scanner", "scan_engine"):
+for _mod in ("pysnmp", "pysnmp.hlapi", "snmp_scanner", "scan_engine", "scan_engine.scheduler"):
     sys.modules.setdefault(_mod, MagicMock())
 
 import pytest

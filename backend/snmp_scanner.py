@@ -1,4 +1,4 @@
-﻿"""SNMP scanner - SNMPv2c / SNMPv3, vendor-aware (Aruba CX + FS.com + generic).
+"""SNMP scanner - SNMPv2c / SNMPv3, vendor-aware (Aruba CX + FS.com + generic).
 
 Fully async: all SNMP I/O uses pysnmp.hlapi.asyncio so the event loop is
 never blocked. scan_switch() is now a coroutine; call it with await.
@@ -40,6 +40,11 @@ from pysnmp.hlapi.asyncio import (
     getCmd,
 )
 
+# Vendor detection and pure parsing helpers live in pysnmp-free modules so
+# they stay unit-testable without pysnmp.
+from scanners.detection import detect_vendor
+from scanners.parsing import _hex_to_mac, resolve_fdb_candidates
+
 log = logging.getLogger(__name__)
 
 
@@ -61,6 +66,7 @@ class Vendor(str, Enum):
     FS = "fs"
     UNIFI = "unifi"
     OPNSENSE = "opnsense"
+    CISCO = "cisco"
     GENERIC = "generic"
 
 
@@ -127,24 +133,6 @@ OID_NETSNMP_ENTERPRISE = "1.3.6.1.4.1.8072"
 OID_DOT1Q_PVID = "1.3.6.1.2.1.17.7.1.4.5.1.1"  # dot1qPvid
 OID_DOT1Q_VLAN_STATIC_EGRESS   = "1.3.6.1.2.1.17.7.1.4.3.1.2"  # dot1qVlanStaticEgressPorts
 OID_DOT1Q_VLAN_STATIC_UNTAGGED = "1.3.6.1.2.1.17.7.1.4.3.1.4"  # dot1qVlanStaticUntaggedPorts
-
-# --- Vendor enterprise OIDs ---------------------------------------------------
-VENDOR_OIDS: Dict[str, str] = {
-    "1.3.6.1.4.1.47196": "aruba_cx",  # Aruba Networks (CX)
-    "1.3.6.1.4.1.11":    "aruba_cx",  # Hewlett-Packard (legacy Aruba/HPE)
-    "1.3.6.1.4.1.25506": "aruba_cx",  # H3C (some HPE rebrand)
-    "1.3.6.1.4.1.52642": "fs",        # FS.COM (FSOS)
-    "1.3.6.1.4.1.41112": "unifi",     # Ubiquiti / UniFi
-    "1.3.6.1.4.1.8072":  "opnsense",  # Net-SNMP (FreeBSD / OPNsense)
-}
-
-# sysDescr keywords per vendor (case-insensitive)
-VENDOR_KEYWORDS: Dict[str, List[str]] = {
-    "aruba_cx": ["arubaos-cx", "aruba cx", "arubacx"],
-    "fs":       ["fsos", "fs s", "fs.com", " fss"],
-    "unifi":    ["unifi", "ubiquiti", "usw-", "u7", "udm", "uxg"],
-    "opnsense": ["opnsense", "freebsd"],
-}
 
 
 # --- Data classes -------------------------------------------------------------
@@ -410,16 +398,8 @@ def parse_port_bitmask(data: bytes) -> set:
 
 # --- Vendor detection ---------------------------------------------------------
 
-def detect_vendor(sys_descr: str, sys_object_id: str) -> str:
-    """Identify vendor from sysDescr and sysObjectID."""
-    for prefix, vendor in VENDOR_OIDS.items():
-        if sys_object_id.startswith(prefix):
-            return vendor
-    descr_lower = sys_descr.lower()
-    for vendor, keywords in VENDOR_KEYWORDS.items():
-        if any(k in descr_lower for k in keywords):
-            return vendor
-    return "generic"
+# detect_vendor() lives in scanners.detection (imported above) so it stays
+# unit-testable without pysnmp.
 
 
 # --- Vendor-aware helpers (delegated to scanners plugin) ----------------------
@@ -506,40 +486,6 @@ def _decode_snmp_str(val) -> str:
         return ""
 
     return cleaned
-
-
-def _hex_to_mac(hex_str: str) -> str:
-    clean = hex_str.replace("0x", "").replace(" ", "").replace(":", "")
-    try:
-        pairs = [clean[i:i+2] for i in range(0, len(clean), 2)]
-        return ":".join(pairs).lower()
-    except Exception:
-        return hex_str
-
-
-def _oid_to_mac(oid_str: str) -> str:
-    """Extract MAC from last 6 OID components (decimal bytes)."""
-    try:
-        parts = oid_str.rstrip(".").split(".")
-        octets = [int(x) for x in parts[-6:]]
-        if len(octets) != 6 or any(o < 0 or o > 255 for o in octets):
-            return ""
-        return ":".join(f"{o:02x}" for o in octets)
-    except Exception:
-        return ""
-
-
-def _oid_to_mac_qbridge(oid_str: str) -> str:
-    """Extract MAC from Q-Bridge OID index: last 7 components are {VLAN}.{6 MAC bytes}."""
-    try:
-        parts = oid_str.rstrip(".").split(".")
-        # parts[-7] = VLAN id, parts[-6:] = 6 MAC octets
-        octets = [int(x) for x in parts[-6:]]
-        if len(octets) != 6 or any(o < 0 or o > 255 for o in octets):
-            return ""
-        return ":".join(f"{o:02x}" for o in octets)
-    except Exception:
-        return ""
 
 
 # --- Main async scan function -------------------------------------------------
@@ -734,6 +680,19 @@ async def _scan_switch_inner(
             snmp_bulk_walk(ip, snmp_port, auth, fdb_oid, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
         )
 
+        # If the primary FDB walk returned nothing, retry with the alternate
+        # OID -- some firmwares implement only one of dot1d / qbridge, and an
+        # empty primary walk would otherwise silently lose all endpoints.
+        if not fdb_rows:
+            alt_oid = OID_DOT1D_TP_FDB_PORT if fdb_strategy == "qbridge" else OID_QBRIDGE_FDB_PORT
+            log.info("Primary FDB walk (%s) empty for %s, trying alternate OID %s", fdb_strategy, ip, alt_oid)
+            fdb_rows = await snmp_bulk_walk(
+                ip, snmp_port, auth, alt_oid,
+                timeout=snmp_timeout, retries=snmp_retries, engine=engine,
+            )
+            if fdb_rows:
+                fdb_strategy = "dot1d" if fdb_strategy == "qbridge" else "qbridge"
+
         log.info(
             "MAC/ARP walk results for %s (%s): arp_mac=%d, arp_ip=%d, base_port=%d, fdb=%d",
             ip, sw.sys_name,
@@ -760,18 +719,12 @@ async def _scan_switch_inner(
             except ValueError:
                 continue
 
-        mac_parser = _oid_to_mac_qbridge if fdb_strategy == "qbridge" else _oid_to_mac
-        for oid_s, bridge_port_val in fdb_rows:
-            mac = mac_parser(oid_s)
-            if not mac:
-                continue
-            try:
-                bridge_port = int(bridge_port_val)
-            except ValueError:
-                continue
-            ifindex = bridge_to_ifindex.get(bridge_port)
-            if ifindex is not None:
-                sw.mac_ifindex[mac] = ifindex
+        # Q-Bridge indexes FDB entries per VLAN, so the same MAC can appear
+        # several times; resolve collisions deterministically (see
+        # scanners.parsing.resolve_fdb_candidates).
+        sw.mac_ifindex = resolve_fdb_candidates(
+            fdb_rows, fdb_strategy, bridge_to_ifindex, set(sw.interfaces.keys()),
+        )
 
         # IP-MIB unified fallback when legacy ARP table is empty
         if not sw.arp_table:

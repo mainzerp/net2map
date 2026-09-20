@@ -16,11 +16,21 @@ JWT_SECRET = settings.jwt_secret or settings.secret_token
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = settings.jwt_expiry_hours
 
-# Backward compat: legacy single-token mode
-_LEGACY_TOKEN = settings.secret_token
+# Backward compat: legacy single-token mode. Only honored when JWT_SECRET is
+# not set; once JWT auth is configured the static token must not grant access.
+if settings.jwt_secret and settings.secret_token:
+    _log.warning(
+        "Both JWT_SECRET and SECRET_TOKEN are set -- ignoring legacy SECRET_TOKEN; "
+        "only JWT authentication is accepted"
+    )
+_LEGACY_TOKEN = settings.secret_token if not settings.jwt_secret else ""
 
 if not JWT_SECRET and not _LEGACY_TOKEN:
     _log.warning("Neither JWT_SECRET nor SECRET_TOKEN is set -- API authentication is DISABLED")
+
+# Precomputed bcrypt hash used for dummy verification on login attempts with
+# unknown usernames, so response timing does not reveal whether a user exists.
+DUMMY_PASSWORD_HASH = "$2b$12$43/hneyCbrcdSGlerxj3M.rM1tEO9kzfsp4NT2v2eRpmA3GmFoowa"
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -102,21 +112,11 @@ def _is_user_revoked(user_id: int, token_iat: int) -> bool:
         return False
 
 
-def _require_auth(request: Request, credentials: HTTPAuthorizationCredentials = Security(_bearer)):
-    if request.url.path in _AUTH_EXEMPT_PATHS:
-        return
-    if not JWT_SECRET and not _LEGACY_TOKEN:
-        request.state.user = {"id": 0, "username": "anonymous", "role": "admin"}
-        return  # auth disabled -- startup warning already logged
-    if not credentials:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": {"code": "AUTH_MISSING", "message": "Missing token"}},
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+def _set_user_from_token(request: Request, token: str):
+    """Validate a bearer token and populate request.state.user.
 
-    token = credentials.credentials
-
+    Raises HTTPException(401) when the token is invalid, expired or revoked.
+    """
     # Legacy single-token support
     if _LEGACY_TOKEN and token == _LEGACY_TOKEN:
         request.state.user = {"id": 0, "username": "legacy", "role": "admin"}
@@ -163,12 +163,43 @@ def _require_auth(request: Request, credentials: HTTPAuthorizationCredentials = 
         )
 
 
+def _require_auth(request: Request, credentials: HTTPAuthorizationCredentials = Security(_bearer)):
+    if not JWT_SECRET and not _LEGACY_TOKEN:
+        request.state.user = {"id": 0, "username": "anonymous", "role": "admin"}
+        return  # auth disabled -- startup warning already logged
+    if request.url.path in _AUTH_EXEMPT_PATHS:
+        # Soft auth: a presented token is honored (so role-guarded endpoints on
+        # exempt paths still work), but an absent or invalid token is tolerated.
+        if credentials:
+            try:
+                _set_user_from_token(request, credentials.credentials)
+            except HTTPException:
+                pass
+        return
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": {"code": "AUTH_MISSING", "message": "Missing token"}},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    _set_user_from_token(request, credentials.credentials)
+
+
 def require_role(*roles):
     """Dependency factory: require the current user to have one of the given roles."""
     def _check(request: Request):
         user = getattr(request.state, "user", None)
         if not user:
-            return  # auth disabled
+            if JWT_SECRET or _LEGACY_TOKEN:
+                # Auth is active but no user was resolved (e.g. exempt path) --
+                # never let a role-guarded endpoint through silently.
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail={"error": {"code": "AUTH_REQUIRED", "message": "Authentication required"}},
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            return  # auth globally disabled
         if user["role"] not in roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

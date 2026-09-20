@@ -52,3 +52,39 @@ def test_delete_nonexistent_switch_model(client, auth_headers):
     r = client.delete("/api/switch-models/999", headers=auth_headers)
     assert r.status_code == 404
     assert r.json()["error"]["code"] == "SWITCH_MODEL_NOT_FOUND"
+
+
+# ---------------------------------------------------------------------------
+# exclude_unset update semantics
+# ---------------------------------------------------------------------------
+
+def test_update_switch_model_clears_total_ports_with_null(client, auth_headers, db):
+    """Explicit null for the nullable total_ports field clears it."""
+    from database import SwitchModel as SwitchModelModel
+    r = client.post("/api/switch-models", json={"name": "Clearable", "total_ports": 48}, headers=auth_headers)
+    sm_id = r.json()["id"]
+    assert r.json()["total_ports"] == 48
+
+    r = client.put(f"/api/switch-models/{sm_id}", json={"total_ports": None}, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["total_ports"] is None
+
+    db.expire_all()
+    sm = db.query(SwitchModelModel).filter(SwitchModelModel.id == sm_id).first()
+    assert sm.total_ports is None
+
+
+def test_update_switch_model_partial_keeps_other_fields(client, auth_headers, db):
+    """Fields not sent in a PUT keep their current values."""
+    r = client.post("/api/switch-models", json={
+        "name": "Partial", "ports_per_row": 12, "total_ports": 24, "description": "keep",
+    }, headers=auth_headers)
+    sm_id = r.json()["id"]
+
+    r = client.put(f"/api/switch-models/{sm_id}", json={"description": "changed"}, headers=auth_headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["description"] == "changed"
+    assert data["name"] == "Partial"
+    assert data["ports_per_row"] == 12
+    assert data["total_ports"] == 24

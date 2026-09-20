@@ -163,6 +163,9 @@ class Device(Base):
     sys_descr    = Column(Text, default="")
     model        = Column(String, default="")
     vendor       = Column(String, default="")             # "aruba_cx" | "fs" | "generic"
+    # True when vendor was set manually via the topology API; the scan engine
+    # then keeps it instead of overwriting it with the auto-detected vendor.
+    vendor_override = Column(Boolean, default=False, nullable=False, server_default="false")
     location     = Column(String, default="")             # sysLocation
     ping_status  = Column(String, default="unknown")      # online|offline|unknown
     ping_rtt_ms  = Column(Integer, default=0)
@@ -353,6 +356,8 @@ def _seed_default_settings():
         defaults = [
             ("discovery_interval_sec", "1800"),
             ("port_update_interval_sec", "30"),
+            ("link_update_interval_sec", "60"),
+            ("mac_update_interval_sec", "300"),
             ("discovery_scan_ranges", "[]"),
             ("scan_max_workers", "12"),
             ("scan_snmp_timeout", "3"),

@@ -27,33 +27,50 @@ def test_list_settings_returns_entries(client, auth_headers, db):
 def test_put_setting_creates_new(client, jwt_headers, db):
     """PUT /api/settings/{key} creates a new setting if it does not exist."""
     r = client.put(
-        "/api/settings/new_key",
-        json={"value": "new_val"},
+        "/api/settings/link_update_interval_sec",
+        json={"value": "60"},
         headers=jwt_headers,
     )
     assert r.status_code == 200
     data = r.json()
-    assert data["key"] == "new_key"
-    assert data["value"] == "new_val"
+    assert data["key"] == "link_update_interval_sec"
+    assert data["value"] == "60"
 
 
 def test_put_setting_updates_existing(client, jwt_headers, db):
     """PUT /api/settings/{key} updates an existing setting."""
-    db.add(AppSetting(key="existing", value="old"))
+    # The key is seeded at app startup (see _seed_default_settings), so
+    # upsert instead of plain insert to avoid a UNIQUE collision.
+    existing = db.query(AppSetting).filter(AppSetting.key == "mac_update_interval_sec").first()
+    if existing:
+        existing.value = "300"
+    else:
+        db.add(AppSetting(key="mac_update_interval_sec", value="300"))
     db.commit()
 
     r = client.put(
-        "/api/settings/existing",
-        json={"value": "updated"},
+        "/api/settings/mac_update_interval_sec",
+        json={"value": "600"},
         headers=jwt_headers,
     )
     assert r.status_code == 200
-    assert r.json()["value"] == "updated"
+    assert r.json()["value"] == "600"
 
     # Verify DB was updated
     db.expire_all()
-    setting = db.query(AppSetting).filter(AppSetting.key == "existing").first()
-    assert setting.value == "updated"
+    setting = db.query(AppSetting).filter(AppSetting.key == "mac_update_interval_sec").first()
+    assert setting.value == "600"
+
+
+def test_put_setting_unknown_key_rejected(client, jwt_headers):
+    """PUT /api/settings/{key} rejects keys outside the whitelist."""
+    r = client.put(
+        "/api/settings/arbitrary_key",
+        json={"value": "x"},
+        headers=jwt_headers,
+    )
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "UNKNOWN_SETTING_KEY"
 
 
 def test_stats_endpoint(client, auth_headers):

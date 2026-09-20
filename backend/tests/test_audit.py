@@ -39,10 +39,15 @@ class TestAuditListEndpoint:
         assert resp.status_code == 200
         assert len(resp.json()) == 3
 
-    def test_list_audit_logs_limit_capped_at_500(self, client, jwt_headers, db):
+    def test_list_audit_logs_limit_above_500_rejected(self, client, jwt_headers):
         resp = client.get("/api/audit-logs?limit=9999", headers=jwt_headers)
-        assert resp.status_code == 200
-        # Should not error; server caps at 500 internally
+        assert resp.status_code == 400
+        assert resp.json()["error"]["code"] == "INVALID_LIMIT"
+
+    def test_list_audit_logs_negative_limit_rejected(self, client, jwt_headers):
+        resp = client.get("/api/audit-logs?limit=-5", headers=jwt_headers)
+        assert resp.status_code == 400
+        assert resp.json()["error"]["code"] == "INVALID_LIMIT"
 
     def test_viewer_cannot_access_audit_logs(self, client, viewer_jwt_headers):
         resp = client.get("/api/audit-logs", headers=viewer_jwt_headers)
@@ -107,6 +112,12 @@ class TestAuditPurge:
         resp = client.delete("/api/audit-logs/purge?days=3", headers=jwt_headers)
         assert resp.status_code == 200
         assert resp.json()["deleted"] == 1
+
+    def test_purge_non_positive_days_rejected(self, client, jwt_headers):
+        for days in (0, -10):
+            resp = client.delete(f"/api/audit-logs/purge?days={days}", headers=jwt_headers)
+            assert resp.status_code == 400
+            assert resp.json()["error"]["code"] == "INVALID_RETENTION"
 
 
 class TestAuditPurgeTask:

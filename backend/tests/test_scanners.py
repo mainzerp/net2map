@@ -4,6 +4,7 @@ import pytest
 from scanners import SCANNER_REGISTRY, get_scanner
 from scanners.aruba_cx import ArubaCXScanner
 from scanners.base import VendorScanner
+from scanners.cisco import CiscoScanner
 from scanners.fs_scanner import FSScanner
 from scanners.generic import GenericScanner
 from scanners.opnsense import OPNsenseScanner
@@ -152,6 +153,34 @@ class TestGenericScanner:
 
 
 # ---------------------------------------------------------------------------
+# Cisco Scanner
+# ---------------------------------------------------------------------------
+
+class TestCiscoScanner:
+    scanner = CiscoScanner()
+
+    def test_extract_model_match(self):
+        result = self.scanner.extract_model("Cisco WS-C2960X-48FPD-L Switch")
+        assert "Cisco" in result
+
+    def test_extract_model_no_match(self):
+        assert self.scanner.extract_model("Random appliance") == ""
+
+    def test_is_virtual_port_virtual(self):
+        assert self.scanner.is_virtual_port("Loopback0") is True
+        assert self.scanner.is_virtual_port("Vlan100") is True
+        assert self.scanner.is_virtual_port("Port-channel1") is True
+        assert self.scanner.is_virtual_port("Null0") is True
+
+    def test_is_virtual_port_physical(self):
+        assert self.scanner.is_virtual_port("GigabitEthernet1/0/1") is False
+        assert self.scanner.is_virtual_port("TenGigabitEthernet1/1/1") is False
+
+    def test_vendor_id(self):
+        assert self.scanner.vendor_id == "cisco"
+
+
+# ---------------------------------------------------------------------------
 # fdb_strategy -- parametrized across all scanners
 # ---------------------------------------------------------------------------
 
@@ -160,6 +189,7 @@ class TestGenericScanner:
     (FSScanner, "dot1d"),
     (UniFiScanner, "qbridge"),
     (OPNsenseScanner, "dot1d"),
+    (CiscoScanner, "dot1d"),
     (GenericScanner, "dot1d"),
 ])
 def test_fdb_strategy(scanner_cls, expected):
@@ -170,9 +200,9 @@ def test_fdb_strategy(scanner_cls, expected):
 # Registry & edge cases
 # ---------------------------------------------------------------------------
 
-EXPECTED_VENDOR_IDS = {"aruba_cx", "fs", "unifi", "opnsense", "generic"}
+EXPECTED_VENDOR_IDS = {"aruba_cx", "fs", "unifi", "opnsense", "cisco", "generic"}
 
-ALL_SCANNERS = [ArubaCXScanner, FSScanner, UniFiScanner, OPNsenseScanner, GenericScanner]
+ALL_SCANNERS = [ArubaCXScanner, FSScanner, UniFiScanner, OPNsenseScanner, CiscoScanner, GenericScanner]
 
 
 def test_vendor_registry_all_registered():

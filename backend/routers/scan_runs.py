@@ -2,7 +2,7 @@
 from typing import List
 
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from database import DryRunResult, ScanRun, get_db
 from scan_engine import _safe_json_list
@@ -15,20 +15,36 @@ router = APIRouter()
 @router.get("/api/scan-runs", response_model=List[ScanRunOut])
 def list_scan_runs(limit: int = 20, db: Session = Depends(get_db)):
     clamped = max(1, min(200, limit))
-    runs = db.query(ScanRun).order_by(ScanRun.created_at.desc()).limit(clamped).all()
+    # Fetch one extra run so the oldest run in the window can be diffed
+    # against a real predecessor instead of an empty snapshot.
+    runs = (
+        db.query(ScanRun)
+        .options(selectinload(ScanRun.switch_metrics))
+        .order_by(ScanRun.created_at.desc())
+        .limit(clamped + 1)
+        .all()
+    )
 
     out: List[ScanRunOut] = []
-    for idx, run in enumerate(runs):
+    for idx, run in enumerate(runs[:clamped]):
         prev_run = runs[idx + 1] if idx + 1 < len(runs) else None
         current_devices = set(_safe_json_list(getattr(run, "devices_snapshot_json", "[]")))
         current_links = set(_safe_json_list(getattr(run, "links_snapshot_json", "[]")))
-        prev_devices = set(_safe_json_list(getattr(prev_run, "devices_snapshot_json", "[]"))) if prev_run else set()
-        prev_links = set(_safe_json_list(getattr(prev_run, "links_snapshot_json", "[]"))) if prev_run else set()
 
-        new_devices = sorted(current_devices - prev_devices)
-        removed_devices = sorted(prev_devices - current_devices)
-        new_links = sorted(current_links - prev_links)
-        removed_links = sorted(prev_links - current_links)
+        if prev_run:
+            prev_devices = set(_safe_json_list(getattr(prev_run, "devices_snapshot_json", "[]")))
+            prev_links = set(_safe_json_list(getattr(prev_run, "links_snapshot_json", "[]")))
+            new_devices = sorted(current_devices - prev_devices)
+            removed_devices = sorted(prev_devices - current_devices)
+            new_links = sorted(current_links - prev_links)
+            removed_links = sorted(prev_links - current_links)
+        else:
+            # No predecessor exists; leave the diff empty rather than
+            # reporting every device/link as new.
+            new_devices = []
+            removed_devices = []
+            new_links = []
+            removed_links = []
 
         metrics = [
             ScanSwitchMetric(

@@ -5,11 +5,35 @@ import socket
 from shared.state import _log_event
 
 
+def _normalize_name(name: str) -> str:
+    """Normalize a hostname for comparison: lowercase, stripped, no trailing dot."""
+    return (name or "").strip().lower().rstrip(".")
+
+
 def _resolve_ip(sys_name: str, switch_data: dict) -> str:
-    """Try to find the management IP of a device by sysName in the scan batch."""
+    """Try to find the management IP of a device by sysName in the scan batch.
+
+    Matching is done in two passes: first an exact match (case-insensitive,
+    FQDN-normalized -- short names also match the first label of an FQDN),
+    then a substring match as last-resort fallback. This prevents short names
+    like "sw1" from accidentally matching "sw11".
+    """
+    target = _normalize_name(sys_name)
+    if not target:
+        return ""
+    target_short = target.split(".")[0]
+
+    # Pass 1: exact match on the full normalized name or on the hostname label
     for ip, sw in switch_data.items():
-        if sw.sys_name and sys_name.lower() in sw.sys_name.lower():
+        cand = _normalize_name(sw.sys_name)
+        if cand and (cand == target or cand.split(".")[0] == target_short):
             return ip
+
+    # Pass 2: substring fallback (legacy behavior)
+    for ip, sw in switch_data.items():
+        if sw.sys_name and target in sw.sys_name.lower():
+            return ip
+
     try:
         return socket.gethostbyname(sys_name)
     except Exception:

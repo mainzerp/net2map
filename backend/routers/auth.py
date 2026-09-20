@@ -4,21 +4,25 @@ import secrets
 from typing import List, Optional
 
 import jwt as pyjwt
-from fastapi import APIRouter, Body, Depends, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from database import User, get_db
 from schemas import LoginRequest, TokenResponse, UserCreate, UserOut, UserUpdate
 from shared.audit import log_audit
 from shared.auth import (
+    DUMMY_PASSWORD_HASH,
     JWT_ALGORITHM,
     JWT_SECRET,
+    _is_user_revoked,
     blacklist_all_user_tokens,
     blacklist_token,
     create_token,
     hash_password,
+    is_token_blacklisted,
     require_role,
     verify_password,
 )
@@ -35,7 +39,13 @@ def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
     user = db.query(User).filter(
         User.username == body.username, User.is_active.is_(True)
     ).first()
-    if not user or not verify_password(body.password, user.hashed_pw):
+    if user:
+        password_ok = verify_password(body.password, user.hashed_pw)
+    else:
+        # Dummy verification so response timing does not reveal unknown usernames
+        verify_password(body.password, DUMMY_PASSWORD_HASH)
+        password_ok = False
+    if not password_ok:
         api_error(401, "AUTH_INVALID_CREDENTIALS", "Invalid username or password")
     token = create_token(user.id, user.username, user.role)
     return TokenResponse(access_token=token, role=user.role, username=user.username)
@@ -90,11 +100,19 @@ def refresh_token(request: Request, db: Session = Depends(get_db)):
             now = datetime.now(timezone.utc)
             if (now - exp).total_seconds() > 3600:
                 api_error(401, "AUTH_EXPIRED", "Token expired beyond refresh window")
+            jti = payload.get("jti")
+            if jti and is_token_blacklisted(jti):
+                api_error(401, "AUTH_REVOKED", "Token has been revoked")
+            user_id = int(payload["sub"])
+            if _is_user_revoked(user_id, payload.get("iat", 0)):
+                api_error(401, "AUTH_REVOKED", "All sessions have been revoked")
             user_info = {
-                "id": int(payload["sub"]),
+                "id": user_id,
                 "username": payload["username"],
                 "role": payload["role"],
             }
+        except HTTPException:
+            raise  # keep the specific api_error raised above
         except Exception:
             api_error(401, "AUTH_INVALID", "Invalid token")
 
@@ -122,7 +140,11 @@ def create_user(body: UserCreate, request: Request, db: Session = Depends(get_db
         role=body.role,
     )
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()  # concurrent create hit the unique username constraint
+        api_error(409, "USER_EXISTS", f"Username '{body.username}' already exists", field="username")
     db.refresh(user)
     log_audit(request, "create", "user", str(user.id), {"username": user.username, "role": user.role})
     return user
@@ -134,6 +156,21 @@ def list_users(db: Session = Depends(get_db)):
     return db.query(User).order_by(User.id).all()
 
 
+def _count_active_admins(db: Session) -> int:
+    return db.query(User).filter(User.role == "admin", User.is_active.is_(True)).count()
+
+
+def _guard_admin_lockout(request: Request, db: Session, user: User, removes_admin: bool):
+    """Reject operations that degrade/delete the caller or the last active admin."""
+    if not removes_admin:
+        return
+    caller = getattr(request.state, "user", None) or {}
+    if caller.get("id") and caller["id"] == user.id:
+        api_error(400, "CANNOT_MODIFY_SELF", "You cannot deactivate, demote or delete your own account")
+    if user.role == "admin" and user.is_active and _count_active_admins(db) <= 1:
+        api_error(400, "LAST_ADMIN", "Cannot remove the last active admin account")
+
+
 @router.put("/api/users/{user_id}", response_model=UserOut,
             dependencies=[require_role("admin")])
 @limiter.limit("10/minute")
@@ -142,6 +179,11 @@ def update_user(user_id: int, body: UserUpdate, request: Request, db: Session = 
     if not user:
         api_error(404, "USER_NOT_FOUND", "User not found")
     updates = body.model_dump(exclude_none=True)
+    removes_admin = (
+        ("is_active" in updates and updates["is_active"] is False)
+        or ("role" in updates and updates["role"] != "admin")
+    )
+    _guard_admin_lockout(request, db, user, removes_admin)
     if "password" in updates:
         updates["hashed_pw"] = hash_password(updates.pop("password"))
     for k, v in updates.items():
@@ -159,6 +201,7 @@ def delete_user(user_id: int, request: Request, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         api_error(404, "USER_NOT_FOUND", "User not found")
+    _guard_admin_lockout(request, db, user, removes_admin=True)
     log_audit(request, "delete", "user", str(user_id), {"username": user.username})
     db.delete(user)
     db.commit()

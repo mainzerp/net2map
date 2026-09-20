@@ -1,4 +1,4 @@
-﻿"""FastAPI application entry point -- NetMap backend."""
+"""FastAPI application entry point -- NetMap backend."""
 import logging
 import threading
 import time
@@ -106,7 +106,10 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         start = time.perf_counter()
         response = await call_next(request)
         duration = time.perf_counter() - start
-        endpoint = request.url.path
+        # Label with the route template (e.g. /api/users/{user_id}) instead of
+        # the raw path to bound Prometheus series cardinality.
+        route = request.scope.get("route")
+        endpoint = getattr(route, "path", None) or "unmatched"
         REQUEST_LATENCY.labels(method=request.method, endpoint=endpoint).observe(duration)
         REQUEST_TOTAL.labels(method=request.method, endpoint=endpoint, status=response.status_code).inc()
         return response

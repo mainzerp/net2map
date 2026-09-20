@@ -243,3 +243,177 @@ def test_dry_run_requires_auth(client):
     """Dry-run endpoint now requires admin/operator role."""
     r = client.post("/api/scan/dry-run/jobs")
     assert r.status_code == 401
+
+
+# -- Refresh revocation tests --------------------------------------------------
+
+def _recently_expired_token(user):
+    """Token expired 10 minutes ago: within the refresh window, but soft auth rejects it."""
+    from datetime import datetime, timedelta, timezone
+
+    import jwt as pyjwt
+
+    from shared.auth import JWT_ALGORITHM, JWT_SECRET
+
+    payload = {
+        "sub": str(user.id),
+        "username": user.username,
+        "role": user.role,
+        "jti": "test-jti",
+        "iat": int((datetime.now(timezone.utc) - timedelta(hours=1)).timestamp()),
+        "exp": datetime.now(timezone.utc) - timedelta(minutes=10),
+    }
+    return pyjwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def test_refresh_rejects_blacklisted_token(client, db):
+    """Refresh returns 401 when the token's JTI is blacklisted."""
+    from unittest.mock import patch
+
+    user = User(
+        username="blrefresh", email="blr@test.com",
+        hashed_pw=hash_password("TestPass123"), role="admin", is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    token = _recently_expired_token(user)
+    with patch("routers.auth.is_token_blacklisted", return_value=True):
+        r = client.post("/api/auth/refresh", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 401
+    assert r.json()["error"]["code"] == "AUTH_REVOKED"
+
+
+def test_refresh_rejects_revoked_user(client, db):
+    """Refresh returns 401 when all sessions of the user were revoked."""
+    from unittest.mock import patch
+
+    user = User(
+        username="revrefresh", email="rev@test.com",
+        hashed_pw=hash_password("TestPass123"), role="admin", is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    token = _recently_expired_token(user)
+    with patch("routers.auth._is_user_revoked", return_value=True):
+        r = client.post("/api/auth/refresh", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 401
+    assert r.json()["error"]["code"] == "AUTH_REVOKED"
+
+
+def test_refresh_beyond_window_keeps_expired_code(client, db):
+    """Refresh of a token expired beyond the window returns AUTH_EXPIRED, not AUTH_INVALID."""
+    from datetime import datetime, timedelta, timezone
+
+    import jwt as pyjwt
+
+    from shared.auth import JWT_ALGORITHM, JWT_SECRET
+
+    user = User(
+        username="oldexp", email="old@test.com",
+        hashed_pw=hash_password("TestPass123"), role="admin", is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    payload = {
+        "sub": str(user.id),
+        "username": user.username,
+        "role": user.role,
+        "iat": int((datetime.now(timezone.utc) - timedelta(hours=3)).timestamp()),
+        "exp": datetime.now(timezone.utc) - timedelta(hours=2),
+    }
+    old_token = pyjwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    r = client.post("/api/auth/refresh", headers={"Authorization": f"Bearer {old_token}"})
+    assert r.status_code == 401
+    assert r.json()["error"]["code"] == "AUTH_EXPIRED"
+
+
+# -- create_user race condition test -------------------------------------------
+
+def test_create_user_integrity_error_returns_409(client, jwt_headers, db, monkeypatch):
+    """A unique-constraint race on username is mapped to 409, not a 500."""
+    from sqlalchemy.exc import IntegrityError
+
+    def failing_commit():
+        raise IntegrityError("INSERT INTO users ...", {}, Exception("unique constraint"))
+
+    monkeypatch.setattr(db, "commit", failing_commit)
+    r = client.post("/api/users", json={
+        "username": "raceuser", "password": "RacePass123", "role": "viewer",
+    }, headers=jwt_headers)
+    assert r.status_code == 409
+    assert r.json()["error"]["code"] == "USER_EXISTS"
+
+
+# -- Admin lockout guard tests --------------------------------------------------
+
+def _get_user_id(db, username):
+    return db.query(User).filter(User.username == username).first().id
+
+
+def test_admin_cannot_deactivate_self(client, jwt_headers, db):
+    """An admin cannot deactivate their own account."""
+    admin_id = _get_user_id(db, "testadmin")
+    r = client.put(f"/api/users/{admin_id}", json={"is_active": False}, headers=jwt_headers)
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "CANNOT_MODIFY_SELF"
+
+
+def test_admin_cannot_demote_self(client, jwt_headers, db):
+    """An admin cannot change their own role away from admin."""
+    admin_id = _get_user_id(db, "testadmin")
+    r = client.put(f"/api/users/{admin_id}", json={"role": "viewer"}, headers=jwt_headers)
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "CANNOT_MODIFY_SELF"
+
+
+def test_admin_cannot_delete_self(client, jwt_headers, db):
+    """An admin cannot delete their own account."""
+    admin_id = _get_user_id(db, "testadmin")
+    r = client.delete(f"/api/users/{admin_id}", headers=jwt_headers)
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "CANNOT_MODIFY_SELF"
+
+
+def test_cannot_deactivate_last_active_admin(client, auth_headers, db):
+    """Deactivating the last active admin is rejected (legacy-token caller)."""
+    admin = User(
+        username="onlyadmin", email="only@test.com",
+        hashed_pw=hash_password("TestPass123"), role="admin", is_active=True,
+    )
+    db.add(admin)
+    db.commit()
+    db.refresh(admin)
+    r = client.put(f"/api/users/{admin.id}", json={"is_active": False}, headers=auth_headers)
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "LAST_ADMIN"
+
+
+def test_cannot_delete_last_active_admin(client, auth_headers, db):
+    """Deleting the last active admin is rejected (legacy-token caller)."""
+    admin = User(
+        username="onlyadmin2", email="only2@test.com",
+        hashed_pw=hash_password("TestPass123"), role="admin", is_active=True,
+    )
+    db.add(admin)
+    db.commit()
+    db.refresh(admin)
+    r = client.delete(f"/api/users/{admin.id}", headers=auth_headers)
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "LAST_ADMIN"
+
+
+def test_deactivate_admin_allowed_when_other_admin_active(client, auth_headers, db):
+    """Deactivating an admin succeeds when another active admin exists."""
+    for name in ("admin_a", "admin_b"):
+        db.add(User(
+            username=name, email=f"{name}@test.com",
+            hashed_pw=hash_password("TestPass123"), role="admin", is_active=True,
+        ))
+    db.commit()
+    target = _get_user_id(db, "admin_a")
+    r = client.put(f"/api/users/{target}", json={"is_active": False}, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["is_active"] is False

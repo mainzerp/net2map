@@ -4,6 +4,7 @@ import json
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session, joinedload
 
 from database import Endpoint, EndpointPortAssociation, Port, get_db
@@ -15,7 +16,7 @@ from shared.errors import api_error
 router = APIRouter()
 
 
-def _build_endpoint_out(ep: Endpoint, db: Session) -> EndpointOut:
+def _build_endpoint_out(ep: Endpoint) -> EndpointOut:
     found_on = []
     for assoc in ep.port_associations:
         port = assoc.port
@@ -43,8 +44,37 @@ def _build_endpoint_out(ep: Endpoint, db: Session) -> EndpointOut:
     )
 
 
+def _endpoint_list_etag(db: Session) -> str:
+    """Cheap change indicator for the endpoint list without materializing rows.
+
+    Covers endpoint inserts/deletes, scan sightings (last_seen), ignored/notes
+    edits, and port-association changes. Does not detect renames of linked
+    ports/devices; those are rare and covered by the next scan.
+    """
+    ep_count, ep_max_id, ep_max_seen, ep_ignored, ep_notes_len = db.query(
+        func.count(Endpoint.id),
+        func.max(Endpoint.id),
+        func.max(Endpoint.last_seen),
+        func.sum(case((Endpoint.ignored, 1), else_=0)),
+        func.sum(func.length(func.coalesce(Endpoint.notes, ""))),
+    ).one()
+    as_count, as_max_id, as_max_seen = db.query(
+        func.count(EndpointPortAssociation.id),
+        func.max(EndpointPortAssociation.id),
+        func.max(EndpointPortAssociation.last_seen),
+    ).one()
+    raw = (
+        f"{ep_count}:{ep_max_id}:{ep_max_seen}:{ep_ignored}:{ep_notes_len}"
+        f":{as_count}:{as_max_id}:{as_max_seen}"
+    )
+    return f'"{hashlib.sha256(raw.encode()).hexdigest()[:32]}"'
+
+
 @router.get("/api/endpoints")
 def list_endpoints(request: Request, db: Session = Depends(get_db)):
+    etag = _endpoint_list_etag(db)
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304)
     endpoints = (
         db.query(Endpoint)
         .options(
@@ -55,11 +85,8 @@ def list_endpoints(request: Request, db: Session = Depends(get_db)):
         .order_by(Endpoint.mac)
         .all()
     )
-    result = [_build_endpoint_out(ep, db) for ep in endpoints]
+    result = [_build_endpoint_out(ep) for ep in endpoints]
     body = json.dumps([e.model_dump() for e in result], default=str)
-    etag = f'"{hashlib.sha256(body.encode()).hexdigest()[:32]}"'
-    if request.headers.get("if-none-match") == etag:
-        return Response(status_code=304)
     return Response(content=body, media_type="application/json",
                     headers={"ETag": etag, "Cache-Control": "no-cache"})
 
@@ -78,7 +105,7 @@ def get_endpoint(endpoint_id: int, db: Session = Depends(get_db)):
     )
     if not ep:
         api_error(404, "ENDPOINT_NOT_FOUND", "Endpoint not found")
-    return _build_endpoint_out(ep, db)
+    return _build_endpoint_out(ep)
 
 
 @router.patch("/api/endpoints/bulk",
@@ -117,7 +144,7 @@ def update_endpoint(endpoint_id: int, body: EndpointUpdate, request: Request,
     db.commit()
     db.refresh(ep)
     log_audit(request, "update", "endpoint", str(endpoint_id), {"fields": list(payload.keys())})
-    return _build_endpoint_out(ep, db)
+    return _build_endpoint_out(ep)
 
 
 @router.delete("/api/endpoints/{endpoint_id}",

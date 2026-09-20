@@ -82,6 +82,14 @@ class AuditLogOut(BaseModel):
         from_attributes = True
 
 
+# ─── Secret masking ───────────────────────────────────────────────────────────
+# API responses mask secrets with "***"; config/bulk exports use "********".
+# Both sentinels must be treated as "unchanged" by update paths and must never
+# be encrypted or stored as real values.
+MASK_API = "***"
+MASK_EXPORT = "********"
+MASK_SENTINELS = frozenset({MASK_API, MASK_EXPORT})
+
 # ─── Enums ────────────────────────────────────────────────────────────────────
 SnmpVersion   = Literal["v2c", "v3"]
 SecurityLevel = Literal["noAuthNoPriv", "authNoPriv", "authPriv"]
@@ -226,7 +234,11 @@ class SnmpProfileOut(SnmpProfileBase):
 
     @field_serializer("v3_auth_password", "v3_priv_password")
     def _mask_password(self, v: str) -> str:
-        return "***" if v else ""
+        return MASK_API if v else ""
+
+    @field_serializer("community")
+    def _mask_community(self, v: str) -> str:
+        return MASK_API if v else ""
 
     class Config:
         from_attributes = True
@@ -293,7 +305,11 @@ class CredentialOut(CredentialBase):
 
     @field_serializer("v3_auth_password", "v3_priv_password")
     def _mask_password(self, v: str) -> str:
-        return "***" if v else ""
+        return MASK_API if v else ""
+
+    @field_serializer("community")
+    def _mask_community(self, v: str) -> str:
+        return MASK_API if v else ""
 
     class Config:
         from_attributes = True
@@ -353,6 +369,7 @@ class DeviceBase(BaseModel):
     ignored:   bool  = False
     label:     str   = ""
     enabled:   bool  = True
+    vendor_override: bool = False
 
 
 class DeviceOut(DeviceBase):
@@ -390,6 +407,9 @@ class DeviceMetaUpdate(BaseModel):
     ignored:  Optional[bool] = None
     label:    Optional[str] = None
     enabled:  Optional[bool] = None
+    # Explicit control over the manual-vendor flag; wins over the implicit
+    # derivation from the vendor field when both are sent.
+    vendor_override: Optional[bool] = None
 
 
 class BulkDeviceMetaUpdate(BaseModel):
@@ -397,6 +417,8 @@ class BulkDeviceMetaUpdate(BaseModel):
     ignored: Optional[bool] = None
     rack_id: Optional[int] = None
     class_id: Optional[int] = None
+    # Explicitly unassign devices from their rack (rack_id cannot express this)
+    clear_rack: bool = False
 
 
 # ─── Endpoint ─────────────────────────────────────────────────────────────────

@@ -48,14 +48,13 @@ class TestAuthenticateWs:
             assert exc.value.code == 1008
 
     def test_ticket_based_auth_accepted(self):
-        """A valid Redis-backed ticket should be consumed and accepted."""
+        """A valid Redis-backed ticket should be consumed atomically (GETDEL)."""
         mock_redis = MagicMock()
-        mock_redis.get.return_value = '{"user_id": 1}'
+        mock_redis.getdel.return_value = '{"user_id": 1}'
         with _patch_cfg(jwt_secret="secret", secret_token=""), \
              patch("shared.redis_client.get_redis", return_value=mock_redis):
             _authenticate_ws("valid-ticket-token")
-        mock_redis.get.assert_called_once_with("ws_ticket:valid-ticket-token")
-        mock_redis.delete.assert_called_once_with("ws_ticket:valid-ticket-token")
+        mock_redis.getdel.assert_called_once_with("ws_ticket:valid-ticket-token")
 
     def test_jwt_fallback_accepted(self):
         """A valid JWT token should be accepted when ticket lookup misses."""
@@ -63,7 +62,8 @@ class TestAuthenticateWs:
         secret = "test-jwt-secret"
         token = pyjwt.encode({"sub": "1", "username": "u"}, secret, algorithm="HS256")
         mock_redis = MagicMock()
-        mock_redis.get.return_value = None
+        mock_redis.getdel.return_value = None
+        mock_redis.get.return_value = None  # no revocation markers
         with _patch_cfg(jwt_secret=secret, secret_token=""), \
              patch("shared.redis_client.get_redis", return_value=mock_redis):
             _authenticate_ws(token)
@@ -78,7 +78,43 @@ class TestAuthenticateWs:
             {"sub": 1, "exp": int(time.time()) - 3600}, secret, algorithm="HS256"
         )
         mock_redis = MagicMock()
-        mock_redis.get.return_value = None
+        mock_redis.getdel.return_value = None
+        with _patch_cfg(jwt_secret=secret, secret_token=""), \
+             patch("shared.redis_client.get_redis", return_value=mock_redis):
+            with pytest.raises(WebSocketException) as exc:
+                _authenticate_ws(token)
+            assert exc.value.code == 1008
+
+    def test_jwt_blacklisted_raises(self):
+        """A JWT whose jti is blacklisted must be rejected."""
+        import jwt as pyjwt
+        secret = "test-jwt-secret"
+        token = pyjwt.encode(
+            {"sub": "1", "username": "u", "jti": "abc123"}, secret, algorithm="HS256"
+        )
+        mock_redis = MagicMock()
+        mock_redis.getdel.return_value = None
+        mock_redis.exists.return_value = 1  # jti blacklisted
+        with _patch_cfg(jwt_secret=secret, secret_token=""), \
+             patch("shared.redis_client.get_redis", return_value=mock_redis):
+            with pytest.raises(WebSocketException) as exc:
+                _authenticate_ws(token)
+            assert exc.value.code == 1008
+
+    def test_jwt_revoked_user_raises(self):
+        """A JWT issued before a user-level revoke_all must be rejected."""
+        import time
+
+        import jwt as pyjwt
+        secret = "test-jwt-secret"
+        now = int(time.time())
+        token = pyjwt.encode(
+            {"sub": "1", "username": "u", "iat": now - 100}, secret, algorithm="HS256"
+        )
+        mock_redis = MagicMock()
+        mock_redis.getdel.return_value = None
+        mock_redis.exists.return_value = 0
+        mock_redis.get.return_value = str(now)  # revoke_all marker after iat
         with _patch_cfg(jwt_secret=secret, secret_token=""), \
              patch("shared.redis_client.get_redis", return_value=mock_redis):
             with pytest.raises(WebSocketException) as exc:
