@@ -44,3 +44,20 @@
   is emptied; the scan executor only honors a DB vendor when the flag is set,
   otherwise auto-detection wins. Bulk import/export matches credentials on
   `(ip, priority)`, matching the unique constraint.
+
+## Frontend rework (v2.0.0)
+
+- **Tailwind v4 token-based styling** replaces inline styles: theme tokens in
+  `src/index.css` (dark default, light via `[data-theme="light"]`), semantic
+  utilities (`bg-surface`, `text-primary`, `border-line`). Reason: one theme
+  source, free dark/light switching, no per-component hex drift.
+- **@xyflow/react + dagre for the topology map** (`src/features/topology/`).
+  Reason: the hand-rolled SVG map could not deliver auto-layout, minimap, zoom
+  controls and group nodes without growing unmaintainable.
+- **TanStack Query as the data layer** (`src/hooks/api/`, QueryClientProvider in
+  `main.tsx`). Reason: polling, caching and invalidation were re-implemented per
+  page; the store now only holds UI selection state.
+- **True U-based rack model** (migration 015: `Rack.height_u`,
+  `Device.rack_u_position`, `Device.u_height`, `PATCH /api/racks/{id}/layout`)
+  over the list-based rack panel ordering. Reason: the elevation view needs real
+  U positions (U1 bottom, overlap detection); list order cannot express that.

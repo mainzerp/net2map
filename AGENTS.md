@@ -6,9 +6,9 @@ map, rack views, endpoint tracking; FastAPI + React, deployed as a Docker stack)
 
 Naming: the product is "NetMap" everywhere that matters; the GitHub repo is `netmap`,
 the local folder is `switch-map`, the frontend package name is `switch-map`, and older
-files say "Switch-Map" — all refer to the same product. Frontend has both
-`src/main.jsx` (dead) and `src/main.tsx` (live; `index.html` loads it) — never edit
-`main.jsx`.
+files say "Switch-Map" — all refer to the same product. The frontend entry is
+`src/main.tsx` (loaded by `index.html`); the former dead duplicate `src/main.jsx`
+has been removed.
 
 ## Initial setup (first contact)
 
@@ -264,6 +264,15 @@ Rules of thumb:
   `celery_app.py`, `tasks.py`, `seed_db.py`, legacy `snmp_scanner.py`.
 - `frontend/` — React 18 + Vite + TypeScript SPA served by nginx; entry
   `index.html` → `src/main.tsx` (lazy-loaded pages); owning doc: `docs/README.md`.
+  Feature modules in `src/features/`: `dashboard/` (ScanHero, StatCards,
+  AttentionCard), `topology/` (React Flow map: TopologyCanvas, graph/layout,
+  nodes/, edges/, MapToolbar), `racks/` (rack elevation view at route `/racks`:
+  RackElevation, useRackLayout, rackLayout).
+  Styling: Tailwind v4 (`@tailwindcss/vite`) with theme tokens in `src/index.css`
+  (dark default, `[data-theme="light"]`; semantic utilities like `bg-surface`,
+  `text-primary`, `border-line`); theme state in `src/theme/ThemeProvider.tsx`
+  (`useTheme`), visual constants in `src/theme/visual.ts`; UI primitives in
+  `src/components/ui/`; React Query data hooks in `src/hooks/api/`.
 - `docs/` — doc map `docs/README.md` plus `docs/SubAgent/` (AI-agent ANALYSIS/PLAN
   working notes; not maintained user docs).
 - `scripts/` — `backup.sh` / `restore.sh` PostgreSQL dump/restore wrappers.
@@ -287,8 +296,11 @@ session-spanning context.
 - Backend: Python 3.12, ruff-clean (line length 120, rules E/W/F/I per
   `backend/pyproject.toml`); async SQLAlchemy 2 patterns; new tables need an Alembic
   migration; every router/feature gets tests in `backend/tests/`.
-- Frontend: TypeScript only (finish the migration — no new `.jsx`/`.js` in `src/`);
-  keep shared types in `types.ts`; run `npm run typecheck` before declaring done.
+- Frontend: TypeScript only (no `.jsx`/`.js` in `src/`); keep shared types in
+  `types.ts`; styling via Tailwind tokens only (no inline hex colors); use the UI
+  primitives in `src/components/ui/` instead of ad-hoc markup; data fetching goes
+  through the React Query hooks in `src/hooks/api/`; run `npm run typecheck`
+  before declaring done.
 - Reuse `shared/` helpers (auth, crypto, audit, metrics) instead of duplicating them
   in routers or scanners.
 - Keep one-shot scripts out of the packages; if a root script is still needed, note it

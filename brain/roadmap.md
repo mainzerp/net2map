@@ -20,19 +20,18 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 - SNMPv3 engine ID auto-discovery · priority: P1 · area: backend
   For enterprise switches requiring an explicit engine ID.
   Verify: scanner test with a v3 profile; VERSION.md entry.
-- Responsive/mobile layout · priority: P2 · area: frontend
-  Fix fixed pixel widths and desktop-only layout in header nav and settings sidebar.
-- Dark/light theme toggle · priority: P2 · area: frontend
-  Second token set + context-based theme switching (currently hardcoded dark theme).
 - API reference doc · priority: P2 · area: docs
   18 routers currently have no reference documentation.
 - Ops/deployment guide · priority: P2 · area: docs
   Env vars beyond `.env.example`; update/rollback flow; backup pointer to BACKUP.md.
 - Logical topology overlays · priority: P3 · area: frontend
   Toggle map views for STP root paths, blocked ports, VLAN topologies.
+  Note: the map now runs on React Flow (@xyflow/react) -- overlays build on
+  `src/features/topology` (TopologyCanvas, graph.ts, edges/).
 - Repo cleanup · priority: P3 · area: repo
-  Remove dead `frontend/src/main.jsx`, stray root files (`bundle_debug.js`),
-  stale `frontend/package.json` version, decide fate of one-shot scripts.
+  Remove stray root files (`bundle_debug.js`), stale `frontend/package.json`
+  version, decide fate of one-shot scripts. (Dead `frontend/src/main.jsx` and
+  `Port.jsx` already removed in the v2.0.0 frontend rework.)
 
 ## In Progress
 
@@ -40,7 +39,19 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
-(none)
+- Responsive/mobile layout · priority: P2 · area: frontend
+  Implemented in the v2.0.0 frontend rework: collapsible sidebar, mobile drawer,
+  fluid grids instead of fixed pixel widths.
+  Verify: open the UI on a narrow viewport (or device emulation ~375px); sidebar
+  collapses to a drawer, dashboard/map/settings remain usable without horizontal
+  scrolling. User verification pending.
+- Dark/light theme toggle · priority: P2 · area: frontend
+  Implemented in the v2.0.0 frontend rework: token-based theme in
+  `src/index.css` (dark default, `[data-theme="light"]`), toggle in the sidebar
+  via `src/theme/ThemeProvider.tsx`.
+  Verify: toggle the theme in the sidebar; all pages (map, racks, settings,
+  dashboard) switch consistently and the choice survives a reload. User
+  verification pending.
 
 ## Done
 

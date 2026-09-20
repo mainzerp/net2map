@@ -7,14 +7,16 @@ Das Projekt besteht aus einem FastAPI-Backend (Scan, Persistenz, API) und einem 
 
 - SNMP-Scan für Geräte via SNMPv2c und SNMPv3
 - Automatische Vendor-Erkennung (Aruba CX, FS.com, Generic)
-- Topologie über LLDP-Links inkl. Port-/Speed-Infos
-- Rack-Ansicht mit Geräte-Zuordnung und Sortierung
+- Interaktive Topologie-Karte (React Flow) über LLDP-Links inkl. Port-/Speed-Infos, Auto-Layout, Gerätesuche und Minimap
+- Rack-Elevation unter `/racks`: echte U-Positionen (U1 unten), Drag-and-Drop mit Vorschau, einstellbare Gerätehöhe (`u_height`)
+- Dashboard mit Status-Karten, Deep-Links und Live-Scan-Anzeige
+- Dark-/Light-Theme (Tailwind-Design-System, Umschalter in der Sidebar)
 - Manuelle Metadaten-Anpassung pro Gerät (z. B. Vendor/Modell)
 
 ## Architektur
 
 - `backend/` – FastAPI + SQLAlchemy + SNMP Scanner
-- `frontend/` – React + Vite, ausgeliefert über Nginx im Docker-Setup
+- `frontend/` – React + Vite + TypeScript (Tailwind v4, TanStack Query, React Flow), ausgeliefert über Nginx im Docker-Setup
 - `docker-compose.yml` – Startet Frontend und Backend gemeinsam
 
 ## Schnellstart mit Docker
@@ -103,7 +105,7 @@ Das Scan-Ergebnis (`POST /api/scan`) enthält zusätzliche Laufzeitdaten:
 ## Tech Stack
 
 - Backend: FastAPI, SQLAlchemy, Pydantic, PySNMP
-- Frontend: React, React Router, Vite
+- Frontend: React, React Router, Vite, TypeScript, Tailwind CSS v4, TanStack Query, @xyflow/react
 - Deployment: Docker, Nginx
 
 ## Configuration

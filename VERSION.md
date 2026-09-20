@@ -1,5 +1,37 @@
 # Version History
 
+## v2.0.0 -- Frontend-Rework & Rack-Elevation
+
+**Type:** MAJOR (Breaking: neuer API-Endpunkt `/api/racks/{id}/layout`, neue DB-Spalten via Migration 015, UI komplett neu aufgebaut)
+
+### Changes
+
+#### Features
+
+- Tailwind-Design-System mit Token-Theme: Dark-Theme als Standard, Light-Theme per Umschalter in der Sidebar
+- Neue App-Shell: einklappbare Sidebar, mobiler Drawer, Settings jetzt unter `/settings/:tab` als Sub-Routen
+- Dashboard ueberarbeitet: Scan-Hero, Stat-Cards mit Deep-Links, Attention-Card, Verteilungs- und Rack-Uebersicht
+- Topology-Map auf React Flow (@xyflow/react) + dagre: Auto-Layout fuer unpositionierte Knoten, Geraetesuche, Minimap, Zoom-Controls, 30s-Live-Refresh mit "aktualisiert vor Xs", aggregierte Link-Badges, einklappbare Rack-Gruppen, persistierte Rack-Positionen
+- Echte Rack-Ansicht unter `/racks`: U-Positionen (U1 unten), Drag-and-Drop mit Ghost-Vorschau, Tray fuer nicht zugeordnete Geraete, `u_height`-Stepper, Read-only fuer Viewer; Tastenkuerzel `7`
+- Inline-Endpoint-Liste pro Port im Port-Detail-Modal
+- DeviceTable/EndpointTable auf gemeinsamer DataTable mit URL-synchronisierten Filtern (`?q=`, `?status=down`); Logs-Seite mit React-Query-Polling
+- UI-Primitives (`src/components/ui/`) und TanStack-Query-Hooks (`src/hooks/api/`) als gemeinsame Basis
+
+#### Backend
+
+- Alembic-Migration 015 (`rack_units`): `Rack.height_u` (6..60, Default 42), `Device.rack_u_position`, `Device.u_height`
+- Neuer Endpunkt `PATCH /api/racks/{id}/layout`: Bulk-Update des U-Layouts; Fehler 409 `U_OVERLAP` / `U_POSITION_OUT_OF_RANGE`, 422 `DEVICE_NOT_IN_RACK`; Rollen admin/operator
+- `DeviceMetaUpdate` akzeptiert `rack_u_position` und `u_height`
+- Neue Tests `backend/tests/test_rack_layout.py` (9 Tests)
+
+#### Fixes
+
+- Pan auf der Karte funktioniert auch ohne Hintergrundbild
+- Fehlerbehandlung auf der Endpoints-Seite
+- `alert()` durch Toast-Benachrichtigungen ersetzt
+
+_Hinweis: Commit-Referenzen werden beim Taggen des Releases ergaenzt._
+
 ## v1.16.0 -- Endpoint Table Separation
 
 **Type:** MINOR (new feature, backward-compatible data migration)
