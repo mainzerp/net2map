@@ -59,7 +59,16 @@ print('[entrypoint] WARNING: Redis not reachable after 30s, continuing anyway')
 sys.exit(0)
 "
 
-echo "[entrypoint] Running Alembic migrations..."
-gosu appuser alembic -c /app/alembic.ini upgrade head
+# Migrations run only in containers that own the schema lifecycle (the backend
+# service). Worker images (celery-worker, celery-beat) share this entrypoint but
+# set RUN_MIGRATIONS=false: they lack DEFAULT_ADMIN_PASSWORD, so a worker winning
+# the first-boot race would seed the admin with the "changeme" fallback and can
+# collide with the backend on the alembic_version table.
+if [ "${RUN_MIGRATIONS:-true}" = "true" ]; then
+    echo "[entrypoint] Running Alembic migrations..."
+    gosu appuser alembic -c /app/alembic.ini upgrade head
+else
+    echo "[entrypoint] RUN_MIGRATIONS=false, skipping Alembic migrations."
+fi
 
 exec gosu appuser "$@"

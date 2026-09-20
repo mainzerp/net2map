@@ -97,6 +97,7 @@ services:
       SECRET_TOKEN: "${SECRET_TOKEN:?Set SECRET_TOKEN in .env}"
       JWT_SECRET: "${JWT_SECRET:-}"
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-}"
+      RUN_MIGRATIONS: "false"
     volumes:
       - netmap-data:/data
     networks:
@@ -124,13 +125,14 @@ services:
     build: ./backend
     container_name: netmap-celery-beat
     restart: unless-stopped
-    command: celery -A celery_app beat --loglevel=info
+    command: celery -A celery_app beat --loglevel=info --schedule /data/celerybeat-schedule
     environment:
       DATABASE_URL: "postgresql://netmap:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres/netmap"
       REDIS_URL: "redis://redis:6379/0"
       SECRET_TOKEN: "${SECRET_TOKEN:?Set SECRET_TOKEN in .env}"
       JWT_SECRET: "${JWT_SECRET:-}"
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-}"
+      RUN_MIGRATIONS: "false"
     networks:
       - netmap
     deploy:
