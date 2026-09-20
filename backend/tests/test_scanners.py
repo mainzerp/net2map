@@ -26,6 +26,15 @@ class TestArubaCXScanner:
     def test_extract_model_no_match(self):
         assert self.scanner.extract_model("Some other device") == ""
 
+    def test_extract_version_match(self):
+        result = self.scanner.extract_version(
+            "ArubaOS-CX, Aruba CX 6300 48G, SW: FL.10.12.0010"
+        )
+        assert result == "FL.10.12.0010"
+
+    def test_extract_version_no_match(self):
+        assert self.scanner.extract_version("Some other device") == ""
+
     def test_is_virtual_port_virtual(self):
         assert self.scanner.is_virtual_port("loopback0") is True
         assert self.scanner.is_virtual_port("vlan100") is True
@@ -54,6 +63,13 @@ class TestFSScanner:
     def test_extract_model_no_match(self):
         assert self.scanner.extract_model("Unknown device") == ""
 
+    def test_extract_version_base_default(self):
+        result = self.scanner.extract_version("FSOS, Version 2.5.1 build 123")
+        assert result == "2.5.1"
+
+    def test_extract_version_no_match(self):
+        assert self.scanner.extract_version("Unknown device") == ""
+
     def test_is_virtual_port_virtual(self):
         assert self.scanner.is_virtual_port("loopback0") is True
         assert self.scanner.is_virtual_port("vlan10") is True
@@ -79,6 +95,13 @@ class TestUniFiScanner:
 
     def test_extract_model_no_match(self):
         assert self.scanner.extract_model("Random AP") == ""
+
+    def test_extract_version_match(self):
+        result = self.scanner.extract_version("USW-Pro-48-PoE, 6.5.59.14722, Linux 4.4.253")
+        assert result == "6.5.59.14722"
+
+    def test_extract_version_no_match(self):
+        assert self.scanner.extract_version("Random AP") == ""
 
     def test_is_virtual_port_virtual(self):
         assert self.scanner.is_virtual_port("bridge0") is True
@@ -106,6 +129,12 @@ class TestOPNsenseScanner:
 
     def test_extract_model_no_match(self):
         assert self.scanner.extract_model("Linux router") == ""
+
+    def test_extract_version_base_default_v_prefix(self):
+        assert self.scanner.extract_version("OPNsense firmware v23.7.1") == "23.7.1"
+
+    def test_extract_version_no_match(self):
+        assert self.scanner.extract_version("Linux router") == ""
 
     def test_is_virtual_port_virtual(self):
         assert self.scanner.is_virtual_port("loopback0") is True
@@ -139,6 +168,12 @@ class TestGenericScanner:
     def test_extract_model_no_match(self):
         assert self.scanner.extract_model("Telecom device") == ""
 
+    def test_extract_version_base_default_sw(self):
+        assert self.scanner.extract_version("Some switch, SW: 1.2.3") == "1.2.3"
+
+    def test_extract_version_no_match(self):
+        assert self.scanner.extract_version("Telecom device") == ""
+
     def test_is_virtual_port_virtual(self):
         assert self.scanner.is_virtual_port("tunnel0") is True
         assert self.scanner.is_virtual_port("loopback1") is True
@@ -165,6 +200,16 @@ class TestCiscoScanner:
 
     def test_extract_model_no_match(self):
         assert self.scanner.extract_model("Random appliance") == ""
+
+    def test_extract_version_match(self):
+        result = self.scanner.extract_version(
+            "Cisco IOS Software, C2960X Software (C2960X-UNIVERSALK9-M), "
+            "Version 15.2(7)E4, RELEASE SOFTWARE (fc1)"
+        )
+        assert result == "15.2(7)E4"
+
+    def test_extract_version_no_match(self):
+        assert self.scanner.extract_version("Random appliance") == ""
 
     def test_is_virtual_port_virtual(self):
         assert self.scanner.is_virtual_port("Loopback0") is True
@@ -218,6 +263,16 @@ def test_extract_model_none_input(scanner_cls):
 @pytest.mark.parametrize("scanner_cls", ALL_SCANNERS)
 def test_extract_model_empty_string(scanner_cls):
     assert scanner_cls().extract_model("") == ""
+
+
+@pytest.mark.parametrize("scanner_cls", ALL_SCANNERS)
+def test_extract_version_none_input(scanner_cls):
+    assert scanner_cls().extract_version(None) == ""
+
+
+@pytest.mark.parametrize("scanner_cls", ALL_SCANNERS)
+def test_extract_version_empty_string(scanner_cls):
+    assert scanner_cls().extract_version("") == ""
 
 
 @pytest.mark.parametrize("scanner_cls", ALL_SCANNERS)

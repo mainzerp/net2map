@@ -25,6 +25,15 @@
 - **jcodemunch repo id.** `mainzerp/netmap` (derived from the git remote; the local
   folder is `switch-map`).
 
+## Firmware version source (2026-09-20)
+
+- **ENTITY-MIB first, sysDescr fallback.** Firmware comes from
+  `entPhysicalSoftwareRev.1` (appended to the existing system-scalar GET, so no extra
+  round trip); if the device does not answer it, the vendor scanner's
+  `extract_version(sys_descr)` parses it out of sysDescr. Reason: one OID works on
+  most managed switches, but several vendors only carry the version in sysDescr —
+  the fallback keeps coverage without per-vendor OID tables.
+
 ## Credential masking contract (2026-09-20)
 
 - **Mask sentinels.** API responses mask `community`, `v3_auth_password` and

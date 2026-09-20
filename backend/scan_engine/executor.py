@@ -538,6 +538,7 @@ def _finalize_scan_db(
                 "sys_descr": sw.sys_descr if sw else "",
                 "vendor": sw.vendor if sw else "generic",
                 "location": sw.location if sw else "",
+                "firmware": sw.firmware if sw else "",
                 "matched_profile_id": prof_id,
                 "already_exists": ip in existing_cred_ips,
             })
@@ -550,6 +551,7 @@ def _finalize_scan_db(
                     "sys_descr": "",
                     "vendor": "unknown",
                     "location": "",
+                    "firmware": "",
                     "matched_profile_id": None,
                     "already_exists": False,
                     "no_profile_suitable": True,
@@ -645,9 +647,10 @@ def _finalize_scan_db(
         ping_status = "online" if ping_ok else "offline"
         cred = cred_by_ip.get(ip)
 
-        # Determine vendor and model from scan data (overrides now live on Device)
+        # Determine vendor, model and firmware from scan data (overrides now live on Device)
         vendor = (sw.vendor if sw else "generic")
         model = (extract_model(sw.sys_descr, sw.vendor) if sw else "")
+        firmware = (sw.firmware if sw else "")
 
         device = devices_by_ip.get(ip)
         if device:
@@ -672,6 +675,7 @@ def _finalize_scan_db(
                 device.sys_descr = sw.sys_descr or device.sys_descr
                 device.location  = sw.location  or device.location
                 device.model     = model        or device.model
+                device.firmware  = firmware     or device.firmware
                 device.last_seen = datetime.now(timezone.utc)
             elif ping_ok:
                 device.sys_name = device.sys_name or ip
@@ -699,6 +703,7 @@ def _finalize_scan_db(
                 sys_name=sw.sys_name if sw else ip,
                 sys_descr=sw.sys_descr if sw else "",
                 model=model,
+                firmware=firmware,
                 vendor=vendor,
                 location=sw.location if sw else "",
                 ping_status=ping_status,

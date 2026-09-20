@@ -7,6 +7,7 @@ Das Projekt besteht aus einem FastAPI-Backend (Scan, Persistenz, API) und einem 
 
 - SNMP-Scan für Geräte via SNMPv2c und SNMPv3
 - Automatische Vendor-Erkennung (Aruba CX, FS.com, Generic)
+- Firmware-Versionserfassung pro Gerät (ENTITY-MIB-OID mit Vendor-Parsing aus sysDescr als Fallback)
 - Interaktive Topologie-Karte (React Flow) über LLDP-Links inkl. Port-/Speed-Infos, Auto-Layout, Gerätesuche und Minimap
 - Rack-Elevation unter `/racks`: echte U-Positionen (U1 unten), Drag-and-Drop mit Vorschau, einstellbare Gerätehöhe (`u_height`)
 - Dashboard mit Status-Karten, Deep-Links und Live-Scan-Anzeige

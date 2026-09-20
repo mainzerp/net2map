@@ -373,6 +373,7 @@ class DeviceBase(BaseModel):
     ip:        str
     sys_descr: str = ""
     model:     str = ""
+    firmware:  str = ""
     vendor:    str = ""
     location:  str = ""
     ping_status: str = "unknown"
@@ -552,6 +553,7 @@ class DryRunPreviewItem(BaseModel):
     sys_descr: str = ""
     vendor: str = "generic"
     location: str = ""
+    firmware: str = ""
     matched_profile_id: Optional[int] = None
     already_exists: bool = False
 

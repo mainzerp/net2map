@@ -39,6 +39,14 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
+- Firmware version scanning · priority: P2 · area: full-stack
+  SNMP scan now collects firmware/software version per device: ENTITY-MIB OID
+  entPhysicalSoftwareRev with vendor-specific sysDescr parsing as fallback
+  (extract_version in backend/scanners). New devices.firmware column (migration
+  016), exposed via DeviceOut, shown in SwitchDetailSlideIn and DeviceTable.
+  Verify: run alembic upgrade + a real scan against the live network; firmware
+  appears in the device detail slide-in and device table. User verification
+  pending.
 - Responsive/mobile layout · priority: P2 · area: frontend
   Implemented in the v2.0.0 frontend rework: collapsible sidebar, mobile drawer,
   fluid grids instead of fixed pixel widths.

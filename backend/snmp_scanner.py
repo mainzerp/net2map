@@ -96,6 +96,9 @@ OID_SYS_DESCR     = "1.3.6.1.2.1.1.1.0"
 OID_SYS_LOCATION  = "1.3.6.1.2.1.1.6.0"
 OID_SYS_OBJECT_ID = "1.3.6.1.2.1.1.2.0"
 
+# ENTITY-MIB entPhysicalSoftwareRev for the main chassis entry (index 1)
+OID_ENT_PHYSICAL_SOFTWARE_REV = "1.3.6.1.2.1.47.1.1.1.1.9.1"
+
 OID_IF_DESCR       = "1.3.6.1.2.1.2.2.1.2"     # ifDescr
 OID_IF_OPER_STATUS = "1.3.6.1.2.1.2.2.1.8"     # 1=up, 2=down
 OID_IF_HIGH_SPEED  = "1.3.6.1.2.1.31.1.1.1.15" # ifHighSpeed Mbps
@@ -164,6 +167,7 @@ class SwitchData:
     sys_name:       str = ""
     sys_descr:      str = ""
     location:       str = ""
+    firmware:       str = ""
     vendor:         str = "generic"   # "aruba_cx" | "fs" | "generic"
     interfaces:     Dict[int, IfInfo]  = field(default_factory=dict)
     lldp_neighbors: List[LldpNeighbor] = field(default_factory=list)
@@ -412,6 +416,11 @@ def extract_model(sys_descr: str, vendor: str) -> str:
     return get_scanner(vendor).extract_model(sys_descr)
 
 
+def extract_version(sys_descr: str, vendor: str) -> str:
+    """Extract firmware version from sysDescr using the vendor scanner plugin."""
+    return get_scanner(vendor).extract_version(sys_descr)
+
+
 def is_virtual(if_descr: str, vendor: str) -> bool:
     """Check if an interface is virtual using the vendor scanner plugin."""
     return get_scanner(vendor).is_virtual_port(if_descr)
@@ -549,6 +558,7 @@ async def _scan_switch_inner(
         ip, snmp_port, auth,
         OID_SYS_NAME, OID_SYS_DESCR,
         OID_SYS_LOCATION, OID_SYS_OBJECT_ID,
+        OID_ENT_PHYSICAL_SOFTWARE_REV,
         timeout=snmp_timeout,
         retries=snmp_retries,
         engine=engine,
@@ -563,12 +573,17 @@ async def _scan_switch_inner(
         sys_name  = (vals[0] if len(vals) > 0 else "").strip(),
         sys_descr = (vals[1] if len(vals) > 1 else "").strip(),
         location  = (vals[2] if len(vals) > 2 else "").strip(),
+        firmware  = (vals[4] if len(vals) > 4 else "").strip(),
     )
     sys_oid = (vals[3] if len(vals) > 3 else "").strip()
 
     # -- 2. Vendor detection --------------------------------------------------
     sw.vendor = detect_vendor(sw.sys_descr, sys_oid)
     log.info("Detected vendor=%s for %s (%s)", sw.vendor, ip, sw.sys_name)
+
+    # Fall back to parsing sysDescr when ENTITY-MIB is not implemented
+    if not sw.firmware:
+        sw.firmware = extract_version(sw.sys_descr, sw.vendor)
 
     if scan_mode == "discovery":
         return sw
