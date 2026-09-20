@@ -96,7 +96,7 @@ export default function MapPage() {
     topology.nodes.forEach(n => {
       if (n.rack_id) {
         ipToEndpoint[n.ip] = String(n.rack_id);
-      } else if (n.class_id && classAllowsOutside[n.class_id]) {
+      } else if (n.class_id == null || classAllowsOutside[n.class_id]) {
         ipToEndpoint[n.ip] = `outside:${n.id}`;
       }
     });

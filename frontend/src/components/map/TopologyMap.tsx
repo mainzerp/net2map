@@ -177,7 +177,10 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
   );
 
   const outsideNodes = useMemo(() => {
-    let result = nodes.filter(node => node.rack_id == null && node.class_id && classAllowsOutside[node.class_id]);
+    // Nodes without a rack are shown outside when their class allows it.
+    // Nodes without any class would otherwise be invisible on the map, so
+    // they are always rendered as outside nodes (fallback).
+    let result = nodes.filter(node => node.rack_id == null && (node.class_id == null || classAllowsOutside[node.class_id]));
     if (filters?.classes) {
       result = result.filter(node => node.class_id && filters.classes!.has(node.class_id));
     }
@@ -203,7 +206,7 @@ function TopologyMap({ nodes, links, managedRacks, switchClasses, filters, onSel
       const rackKey = node.rack_id != null ? String(node.rack_id) : null;
       if (rackKey && rackForNode[rackKey]) {
         map[node.ip] = rackKey;
-      } else if (node.class_id && classAllowsOutside[node.class_id]) {
+      } else if (node.class_id == null || classAllowsOutside[node.class_id]) {
         map[node.ip] = `outside:${node.id}`;
       }
     });
