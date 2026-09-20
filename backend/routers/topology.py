@@ -261,6 +261,11 @@ def update_device_meta(
         device.label = payload["label"]
     if "enabled" in payload:
         device.enabled = payload["enabled"]
+    if "rack_u_position" in payload:
+        # Explicit null unplaces the device from the rack elevation
+        device.rack_u_position = payload["rack_u_position"]
+    if "u_height" in payload and payload["u_height"] is not None:
+        device.u_height = payload["u_height"]
 
     db.commit()
     db.refresh(device)

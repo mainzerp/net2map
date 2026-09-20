@@ -59,6 +59,7 @@ class Rack(Base):
     description = Column(String, default="")
     map_x       = Column(Float, default=100.0)
     map_y       = Column(Float, default=100.0)
+    height_u    = Column(Integer, nullable=False, server_default="42")  # usable rack units
     created_at  = Column(DateTime, server_default=func.now())
     updated_at  = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -179,6 +180,11 @@ class Device(Base):
     rack_id      = Column(Integer, ForeignKey("racks.id"), nullable=True)
     class_id     = Column(Integer, ForeignKey("switch_classes.id"), nullable=True)
     model_id     = Column(Integer, ForeignKey("switch_models.id"), nullable=True)
+
+    # Rack elevation placement: 1-based bottom U position (null = not placed)
+    # and the number of rack units the device occupies.
+    rack_u_position = Column(Integer, nullable=True)
+    u_height        = Column(Integer, nullable=False, server_default="1")
 
     # Consolidation fields (metadata now lives here, not on Credential)
     label        = Column(String, default="")

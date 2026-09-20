@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, field_serializer, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
 # ─── Structured Error Response ────────────────────────────────────────────────
 
@@ -116,6 +116,7 @@ class RackBase(BaseModel):
     description: str = ""
     map_x:       float = 100.0
     map_y:       float = 100.0
+    height_u:    int = Field(42, ge=6, le=60)
 
 
 class RackCreate(RackBase):
@@ -128,6 +129,7 @@ class RackUpdate(BaseModel):
     description: Optional[str] = None
     map_x:       Optional[float] = None
     map_y:       Optional[float] = None
+    height_u:    Optional[int] = Field(None, ge=6, le=60)
 
 
 class RackOut(RackBase):
@@ -137,6 +139,17 @@ class RackOut(RackBase):
 
     class Config:
         from_attributes = True
+
+
+class RackLayoutEntry(BaseModel):
+    """Placement of one device in the rack elevation (1-based U space)."""
+    device_id:       int
+    rack_u_position: int = Field(..., ge=1)
+    u_height:        int = Field(..., ge=1, le=60)
+
+
+class RackLayoutIn(BaseModel):
+    entries: List[RackLayoutEntry]
 
 
 # ─── SwitchClass ──────────────────────────────────────────────────────────────
@@ -381,6 +394,8 @@ class DeviceOut(DeviceBase):
     rack_id:       Optional[int] = None
     class_id:      Optional[int] = None
     model_id:      Optional[int] = None
+    rack_u_position: Optional[int] = None
+    u_height:      int = 1
     ports_per_row: Optional[int] = None   # resolved from switch_model
     total_ports:   Optional[int] = None   # port cutoff: ports beyond this index are hidden
 
@@ -407,6 +422,8 @@ class DeviceMetaUpdate(BaseModel):
     ignored:  Optional[bool] = None
     label:    Optional[str] = None
     enabled:  Optional[bool] = None
+    rack_u_position: Optional[int] = Field(None, ge=1)
+    u_height: Optional[int] = Field(None, ge=1, le=60)
     # Explicit control over the manual-vendor flag; wins over the implicit
     # derivation from the vendor field when both are sent.
     vendor_override: Optional[bool] = None

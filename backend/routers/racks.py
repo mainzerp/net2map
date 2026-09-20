@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from database import Device, get_db
 from database import Rack as RackModel
 from routers.topology import _bump_topo_version
-from schemas import RackCreate, RackOut, RackUpdate
+from schemas import RackCreate, RackLayoutIn, RackOut, RackUpdate
 from shared.audit import log_audit
 from shared.auth import require_role
 from shared.errors import api_error
@@ -62,3 +62,57 @@ def delete_rack(rack_id: int, request: Request, db: Session = Depends(get_db)):
     db.delete(rack)
     db.commit()
     _bump_topo_version()
+
+
+@router.patch("/api/racks/{rack_id}/layout",
+              dependencies=[require_role("admin", "operator")])
+def update_rack_layout(rack_id: int, body: RackLayoutIn, request: Request, db: Session = Depends(get_db)):
+    """Place devices in the rack elevation (1-based U space) in one transaction.
+
+    Every entry must reference a device assigned to this rack, must fit inside
+    rack.height_u, and no two entries may overlap in U-space.
+    """
+    rack = db.query(RackModel).filter(RackModel.id == rack_id).first()
+    if not rack:
+        api_error(404, "RACK_NOT_FOUND", "Rack not found")
+
+    device_ids = [e.device_id for e in body.entries]
+    if len(set(device_ids)) != len(device_ids):
+        api_error(422, "DUPLICATE_DEVICE", "A device may appear only once in the layout")
+
+    devices = {}
+    if device_ids:
+        devices = {d.id: d for d in db.query(Device).filter(Device.id.in_(device_ids)).all()}
+    missing = [i for i in device_ids if i not in devices]
+    if missing:
+        api_error(404, "DEVICE_NOT_FOUND", f"Devices not found: {missing}")
+    wrong_rack = [i for i in device_ids if devices[i].rack_id != rack_id]
+    if wrong_rack:
+        api_error(422, "DEVICE_NOT_IN_RACK", f"Devices not assigned to this rack: {wrong_rack}")
+
+    # Range check: a device occupies [pos, pos + u_height - 1] and must fit in the rack
+    for e in body.entries:
+        if e.rack_u_position + e.u_height > rack.height_u + 1:
+            api_error(
+                409, "U_POSITION_OUT_OF_RANGE",
+                f"Device {e.device_id} occupies U{e.rack_u_position}-U{e.rack_u_position + e.u_height - 1} "
+                f"but rack {rack_id} only has {rack.height_u}U",
+            )
+
+    # Overlap check on entries sorted by position
+    ordered = sorted(body.entries, key=lambda e: e.rack_u_position)
+    for prev, cur in zip(ordered, ordered[1:]):
+        if cur.rack_u_position <= prev.rack_u_position + prev.u_height - 1:
+            api_error(
+                409, "U_OVERLAP",
+                f"Devices {prev.device_id} and {cur.device_id} overlap in U-space",
+                details=[{"device_ids": [prev.device_id, cur.device_id]}],
+            )
+
+    for e in body.entries:
+        devices[e.device_id].rack_u_position = e.rack_u_position
+        devices[e.device_id].u_height = e.u_height
+    db.commit()
+    _bump_topo_version()
+    log_audit(request, "update", "rack_layout", str(rack_id), {"device_ids": device_ids})
+    return {"updated": len(body.entries)}
