@@ -23,6 +23,7 @@ export interface TopologyNode {
   sys_name: string;
   vendor: string;
   model: string;
+  firmware?: string;
   mac: string;
   rack_id: number | null;
   class_id: number | null;

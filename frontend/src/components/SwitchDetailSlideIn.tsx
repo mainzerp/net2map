@@ -132,6 +132,7 @@ export default function SwitchDetailSlideIn({ deviceId, nodes, topologyLinks, ra
               <span><span className="opacity-70">IP:</span> {device.ip}</span>
               {device.vendor && <span><span className="opacity-70">Vendor:</span> {device.vendor}</span>}
               {device.model && <span><span className="opacity-70">Model:</span> {device.model}</span>}
+              {device.firmware && <span><span className="opacity-70">Firmware:</span> {device.firmware}</span>}
               {device.location && <span><span className="opacity-70">Location:</span> {String(device.location)}</span>}
               <span><span className="opacity-70">Ports:</span> {activePorts.length}/{device.ports.length} active</span>
               {device.ping_rtt_ms != null && pingStatus === "online" && (

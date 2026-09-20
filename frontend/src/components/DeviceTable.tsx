@@ -190,7 +190,7 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
           {d.vendor && (
             <div className="text-[10px] text-muted">
               {d.vendor}
-              {d.model ? ` - ${d.model}` : ""}
+              {d.model || d.firmware ? ` - ${[d.model, d.firmware].filter(Boolean).join(" · ")}` : ""}
             </div>
           )}
         </div>
