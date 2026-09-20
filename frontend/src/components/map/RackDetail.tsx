@@ -1,8 +1,10 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { Link } from "react-router-dom";
 import { buildPortLinkMap, normPort } from "../../api";
 import { CABLE_COLORS, VENDOR_COLOR, VENDOR_ICON } from "../../theme/visual";
 import type { TopologyNode, TopologyLink, SwitchClass, SwitchModel } from "../../types";
 import SwitchPanel from "../SwitchPanel";
+import { splitDevicesForRackPanel, uBadgeLabel } from "./rackPanelOrder";
 
 interface RackDetailRack {
   id: number | string;
@@ -143,6 +145,11 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
     });
   }, [deviceOrder, localOrder]);
 
+  const { placed: placedDevices, unplaced: unplacedDevices } = useMemo(
+    () => splitDevicesForRackPanel(rack.devices || []),
+    [rack.devices],
+  );
+
   const classMap = useMemo(() => Object.fromEntries((switchClasses || []).map(c => [c.id, c])), [switchClasses]);
   const modelMap = useMemo(() => Object.fromEntries((switchModels || []).map(m => [m.id, m])), [switchModels]);
   const classOrderMap = useMemo(() => {
@@ -155,7 +162,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
     const grouped: Record<string, ClassSection> = {};
     const unclassified: TopologyNode[] = [];
 
-    (rack.devices || []).forEach(d => {
+    unplacedDevices.forEach(d => {
       if (d.class_id == null) {
         unclassified.push(d);
         return;
@@ -205,7 +212,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
       if (!ordered.find(x => x.key === s.key)) ordered.push(s);
     });
     return ordered;
-  }, [rack.devices, classMap, classOrderMap, sortGroup, deviceOrder, localSectionOrder]);
+  }, [unplacedDevices, classMap, classOrderMap, sortGroup, deviceOrder, localSectionOrder]);
 
   const { uplinks, trunks, external } = useMemo(() => {
     const rackIps  = new Set(rack.devices.map(d => d.ip));
@@ -365,6 +372,21 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
     </div>
   ));
 
+  const renderPlacedDevice = (d: TopologyNode) => (
+    <div key={d.id} className="mb-1">
+      <SwitchPanel device={d} otherRacks={otherRacks} onMove={onMoveDevice}
+        onUpdateMeta={onUpdateDeviceMeta}
+        portLinkMap={portLinkMap} selectedLink={resolvedSelectedLink}
+        onPortClick={toggleLink} linkColorMap={linkColorMap}
+        interRackPortKeys={interRackPortKeys}
+        switchClass={d.class_id ? classMap[d.class_id] : null}
+        switchModel={d.model_id ? modelMap[d.model_id] : null}
+        onShowDetail={onShowDetail}
+        highlightPortKey={highlightPortKey}
+        uBadge={uBadgeLabel(d) ?? undefined}/>
+    </div>
+  );
+
   const renderLink = (l: TopologyLink, i: number, accentColor: string) => {
     const a = devByIp[l.local_ip], b = devByIp[l.remote_ip];
     const isSel = (resolvedSelectedLink?.local_ip===l.local_ip && resolvedSelectedLink?.local_port===l.local_port)
@@ -473,6 +495,30 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
 
       {/* Content */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-auto px-5 py-3">
+
+        {placedDevices.length > 0 && (
+          <div>
+            <div className={`${sectionHeaderClass} text-accent`}>
+              <span className="flex-1 h-0 inline-block border-b border-accent opacity-40"/>
+              Rack elevation ({placedDevices.length})
+              <span className="flex-1 h-0 inline-block border-b border-accent opacity-40"/>
+            </div>
+            {placedDevices.map(renderPlacedDevice)}
+          </div>
+        )}
+
+        {placedDevices.length > 0 && unplacedDevices.length > 0 && (
+          <div className={`${sectionHeaderClass} text-muted mt-4`}>
+            <span className="flex-1 h-0 inline-block border-b border-line"/>
+            Unplaced ({unplacedDevices.length})
+            <Link
+              to="/racks"
+              className="text-accent hover:underline cursor-pointer"
+              style={{ textTransform: "none", letterSpacing: "normal" }}
+            >Place in rack elevation</Link>
+            <span className="flex-1 h-0 inline-block border-b border-line"/>
+          </div>
+        )}
 
         {classSections.map((section, idx) => (
           <div key={section.key}>

@@ -17,10 +17,11 @@ interface SwitchPanelProps {
   interRackPortKeys?: Set<string>;
   onShowDetail?: (deviceId: number) => void;
   highlightPortKey?: string | null;
+  uBadge?: string;
 }
 
 // ── SwitchPanel ──────────────────────────────────────────────────────────────
-export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateMeta, portLinkMap, selectedLink, onPortClick, linkColorMap, switchClass, switchModel, interRackPortKeys, onShowDetail, highlightPortKey }: SwitchPanelProps) {
+export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateMeta, portLinkMap, selectedLink, onPortClick, linkColorMap, switchClass, switchModel, interRackPortKeys, onShowDetail, highlightPortKey, uBadge }: SwitchPanelProps) {
   const [showMove, setShowMove] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const activePorts = device.ports.filter(p => p.oper_status === 1);
@@ -40,6 +41,9 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
           />
           <div>
             <div className="flex items-center gap-2">
+              {uBadge && (
+                <span className="text-[10px] px-1.5 py-px rounded border border-line-strong text-muted bg-panel-2 font-semibold shrink-0">{uBadge}</span>
+              )}
               <span className="text-primary font-semibold text-sm">{switchModel ? switchModel.name : (device.model || device.sys_name)}</span>
               {switchClass && (
                 <span
