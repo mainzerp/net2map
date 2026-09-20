@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { API, login } from "../api";
+import { api, extractErrorMessage, login } from "../api";
+import { Button, Input } from "../components/ui";
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
@@ -14,129 +15,67 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const r = await fetch(`${API}/api/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
-      if (!r.ok) {
-        const body = await r.json().catch(() => null);
-        throw new Error(body?.error?.message || body?.detail || `HTTP ${r.status}`);
-      }
-      const data = await r.json();
+      const data = await api.post("/api/auth/login", { username, password });
       login(data.access_token, { username: data.username, role: data.role });
       navigate("/", { replace: true });
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      // api.post errors carry an "HTTP <status>: " prefix - strip it for display
+      setError(extractErrorMessage(err).replace(/^HTTP \d+:\s*/, "") || "Login failed");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div style={{
-      minHeight: "100vh",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: "#020817",
-    }}>
-      <form onSubmit={handleSubmit} style={{
-        width: 340,
-        padding: 32,
-        borderRadius: 12,
-        border: "1px solid #1e293b",
-        backgroundColor: "#0f172a",
-      }}>
-        <div style={{ textAlign: "center", marginBottom: 24 }}>
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <div className="min-h-screen flex items-center justify-center bg-surface">
+      <form
+        onSubmit={handleSubmit}
+        className="w-[340px] p-8 rounded-xl border border-line bg-panel"
+      >
+        <div className="text-center mb-6">
+          <svg className="inline-block" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="1" y="2" width="22" height="6" rx="1.5" />
             <rect x="1" y="16" width="22" height="6" rx="1.5" />
             <line x1="6" y1="8" x2="6" y2="16" />
             <line x1="18" y1="8" x2="18" y2="16" />
           </svg>
-          <h2 style={{ color: "#e2e8f0", fontSize: 18, fontWeight: 700, marginTop: 8, fontFamily: "'Inter', system-ui, sans-serif" }}>
+          <h2 className="text-primary text-lg font-bold mt-2">
             NetMap Login
           </h2>
         </div>
 
         {error && (
-          <div style={{
-            padding: "8px 12px",
-            marginBottom: 16,
-            borderRadius: 6,
-            backgroundColor: "#450a0a",
-            border: "1px solid #7f1d1d",
-            color: "#fca5a5",
-            fontSize: 12,
-          }}>
+          <div className="px-3 py-2 mb-4 rounded-md bg-panel-2 border border-danger text-danger text-xs">
             {error}
           </div>
         )}
 
-        <label style={{ display: "block", marginBottom: 12 }}>
-          <span style={{ color: "#94a3b8", fontSize: 12, display: "block", marginBottom: 4 }}>Username</span>
-          <input
+        <label className="block mb-3">
+          <span className="text-muted text-xs block mb-1">Username</span>
+          <Input
             type="text"
             value={username}
             onChange={e => setUsername(e.target.value)}
             required
             autoFocus
             autoComplete="username"
-            style={{
-              width: "100%",
-              padding: "8px 10px",
-              borderRadius: 6,
-              border: "1px solid #334155",
-              backgroundColor: "#1e293b",
-              color: "#e2e8f0",
-              fontSize: 13,
-              outline: "none",
-              boxSizing: "border-box",
-            }}
           />
         </label>
 
-        <label style={{ display: "block", marginBottom: 20 }}>
-          <span style={{ color: "#94a3b8", fontSize: 12, display: "block", marginBottom: 4 }}>Password</span>
-          <input
+        <label className="block mb-5">
+          <span className="text-muted text-xs block mb-1">Password</span>
+          <Input
             type="password"
             value={password}
             onChange={e => setPassword(e.target.value)}
             required
             autoComplete="current-password"
-            style={{
-              width: "100%",
-              padding: "8px 10px",
-              borderRadius: 6,
-              border: "1px solid #334155",
-              backgroundColor: "#1e293b",
-              color: "#e2e8f0",
-              fontSize: 13,
-              outline: "none",
-              boxSizing: "border-box",
-            }}
           />
         </label>
 
-        <button
-          type="submit"
-          disabled={loading}
-          style={{
-            width: "100%",
-            padding: "9px 0",
-            borderRadius: 6,
-            border: "none",
-            backgroundColor: "#0891b2",
-            color: "#fff",
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: loading ? "wait" : "pointer",
-            opacity: loading ? 0.7 : 1,
-          }}
-        >
+        <Button type="submit" variant="primary" disabled={loading} className="w-full">
           {loading ? "Signing in..." : "Sign In"}
-        </button>
+        </Button>
       </form>
     </div>
   );

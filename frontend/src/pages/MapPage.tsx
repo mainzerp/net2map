@@ -1,22 +1,80 @@
-import { useState, useMemo, useEffect } from "react";
-import { api, CABLE_COLORS, extractErrorMessage } from "../api";
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api, extractErrorMessage } from "../api";
 import useNetmapStore from "../store";
 import { useToast } from "../components/ToastProvider";
-import FilterBar from "../components/map/FilterBar";
-import TopologyMap from "../components/map/TopologyMap";
+import { useScanProgress } from "../hooks/useScanProgress";
+import { queryKeys } from "../hooks/api/keys";
+import { useInvalidateApi } from "../hooks/api/invalidate";
+import TopologyCanvas, {
+  type AutoLayoutAssignment,
+  type DevicePositionPatch,
+} from "../features/topology/TopologyCanvas";
+import { buildRackPairColorMap } from "../features/topology/graph";
 import RackDetail from "../components/map/RackDetail";
 import SwitchDetailSlideIn from "../components/SwitchDetailSlideIn";
-import { useTopologyData } from "../hooks/useTopologyData";
 import { useMapBackground } from "../hooks/useMapBackground";
 import { useRackOrders } from "../hooks/useRackOrders";
-import type { TopologyNode, TopologyLink, RackInfo, SelectedRack, FilterState } from "../types";
+import type { TopologyNode, TopologyLink, SelectedRack, FilterState, TopologyData } from "../types";
+
+const EMPTY_TOPOLOGY: TopologyData = { nodes: [], links: [], racks: [], classes: [], models: [] };
+
+const EXPANDED_STORAGE_KEY = "netmap-expanded-racks";
+
+function loadExpandedRacks(): Set<number> {
+  try {
+    const raw = localStorage.getItem(EXPANDED_STORAGE_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) return new Set(arr.map(Number).filter(Number.isFinite));
+  } catch { /* ignore */ }
+  return new Set();
+}
 
 // ── MapPage ──────────────────────────────────────────────────────────────────
 export default function MapPage() {
-  const { topology, selectedRack, setSelectedRack, loadError, loadTopology } = useTopologyData();
-  const { mapBgUrl, mapBgNat, mapBgOpacity, mapBgScale, mapBgColor } = useMapBackground();
+  // Live topology: 30s polling; the ETag in api.get keeps 304 responses cheap.
+  const topologyQuery = useQuery<TopologyData>({
+    queryKey: queryKeys.topology,
+    queryFn: () => api.get("/api/topology"),
+    refetchInterval: 30_000,
+  });
+  const topology = topologyQuery.data ?? EMPTY_TOPOLOGY;
+  const loadError = topologyQuery.error ? extractErrorMessage(topologyQuery.error) : null;
+
+  const { mapBgUrl, mapBgOpacity, mapBgScale, mapBgColor } = useMapBackground();
+  const selectedRack = useNetmapStore(s => s.selectedRack);
+  const setSelectedRack = useNetmapStore(s => s.setSelectedRack);
   const highlightPortKey = useNetmapStore(s => s.highlightPortKey);
   const clearHighlightPortKey = useNetmapStore(s => s.clearHighlightPortKey);
+  const activeScanJobId = useNetmapStore(s => s.activeScanJobId);
+  const { invalidateTopology } = useInvalidateApi();
+  const { rackOrders, reorderDevice, reorderClassSection } = useRackOrders();
+  const { addToast } = useToast();
+
+  const [filters, setFilters] = useState<FilterState>({ racks: null, classes: null });
+  const [selectedLink, setSelectedLink] = useState<TopologyLink | null>(null);
+  const [selectedOutsideNode, setSelectedOutsideNode] = useState<TopologyNode | null>(null);
+  const [detailSwitchId, setDetailSwitchId] = useState<number | null>(null);
+  const [expandedRackIds, setExpandedRackIds] = useState<Set<number>>(loadExpandedRacks);
+
+  // When the active scan job finishes, refresh the topology immediately.
+  const scanProgress = useScanProgress(activeScanJobId);
+  useEffect(() => {
+    if (scanProgress?.type === "scan_complete") {
+      invalidateTopology();
+    }
+  }, [scanProgress, invalidateTopology]);
+
+  const toggleExpand = useCallback((rackId: number) => {
+    setExpandedRackIds(prev => {
+      const next = new Set(prev);
+      if (next.has(rackId)) next.delete(rackId);
+      else next.add(rackId);
+      try { localStorage.setItem(EXPANDED_STORAGE_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
 
   const selectedRackFull = useMemo(() => {
     if (!selectedRack) return null;
@@ -24,13 +82,6 @@ export default function MapPage() {
     const devices = topology.nodes.filter(n => Number(n.rack_id) === selectedRackId);
     return { ...selectedRack, devices };
   }, [selectedRack, topology.nodes]);
-
-  const { rackOrders, reorderDevice, reorderClassSection } = useRackOrders();
-  const { addToast } = useToast();
-  const [filters, setFilters] = useState<FilterState>({ racks: null, classes: null });
-  const [selectedLink, setSelectedLink] = useState<TopologyLink | null>(null);
-  const [selectedOutsideNode, setSelectedOutsideNode] = useState<TopologyNode | null>(null);
-  const [detailSwitchId, setDetailSwitchId] = useState<number | null>(null);
 
   // Auto-select rack and clear highlight when navigating from Devices/Network page
   useEffect(() => {
@@ -47,7 +98,7 @@ export default function MapPage() {
     }
     const timer = setTimeout(() => clearHighlightPortKey(), 3000);
     return () => clearTimeout(timer);
-  }, [highlightPortKey, topology.nodes, topology.racks]);
+  }, [highlightPortKey, topology.nodes, topology.racks, setSelectedRack, clearHighlightPortKey]);
 
   // Clear selected link when switching racks
   const handleSelectRack = (rack: { id: number; label: string; location: string }) => {
@@ -60,6 +111,21 @@ export default function MapPage() {
     setSelectedLink(null);
     setSelectedRack(null);
     setSelectedOutsideNode(p => p?.id === node.id ? null : node);
+  };
+
+  // Toolbar search: racked devices select (and center) their rack, unracked
+  // devices select the outside node -- same targets as clicking the canvas.
+  const handleSearchSelect = (device: TopologyNode) => {
+    if (device.rack_id != null) {
+      const rack = (topology.racks || []).find(r => r.id === device.rack_id);
+      if (rack) {
+        setSelectedLink(null);
+        setSelectedOutsideNode(null);
+        setSelectedRack({ ...rack, devices: [] });
+        return;
+      }
+    }
+    handleSelectOutside(device);
   };
 
   const allRacks = useMemo(() => {
@@ -88,54 +154,67 @@ export default function MapPage() {
 
   const selectedDetail = selectedRackFull || selectedOutsideDetail;
 
-  const rackPairColorMap = useMemo(() => {
-    const classAllowsOutside = Object.fromEntries(
-      (topology.classes || []).map(c => [c.id, !!c.allow_outside_rack])
-    );
-    const ipToEndpoint: Record<string, string> = {};
-    topology.nodes.forEach(n => {
-      if (n.rack_id) {
-        ipToEndpoint[n.ip] = String(n.rack_id);
-      } else if (n.class_id == null || classAllowsOutside[n.class_id]) {
-        ipToEndpoint[n.ip] = `outside:${n.id}`;
-      }
-    });
-    const seen: Record<string, string> = {};
-    let idx = 0;
-    topology.links.forEach(l => {
-      const a = ipToEndpoint[l.local_ip];
-      const b = ipToEndpoint[l.remote_ip];
-      if (!a || !b || a === b) return;
-      const key = [a, b].sort().join("|");
-      if (!(key in seen)) {
-        seen[key] = CABLE_COLORS[idx % CABLE_COLORS.length];
-        idx++;
-      }
-    });
-    return seen;
-  }, [topology.nodes, topology.links, topology.classes]);
+  const rackPairColorMap = useMemo(
+    () => buildRackPairColorMap(topology.nodes, topology.links, topology.classes || []),
+    [topology.nodes, topology.links, topology.classes],
+  );
 
-  const savePosition = (id: number, x: number, y: number) => {
-    // Requires admin/operator role -- surface failures instead of failing silently
-    api.patch(`/api/topology/devices/${id}/position`, { map_x: x, map_y: y }).catch((ex: unknown) => {
+  // Device drag: center-convention position PATCH (unchanged contract).
+  const saveDevicePosition = useCallback((id: number, pos: { x: number; y: number }) => {
+    api.patch(`/api/topology/devices/${id}/position`, { map_x: pos.x, map_y: pos.y }).catch((ex: unknown) => {
       addToast(`Position could not be saved: ${extractErrorMessage(ex)}`, "error");
     });
-  };
+  }, [addToast]);
+
+  // Rack drag: persist the rack position and all member device positions in
+  // parallel; a single toast covers any failure.
+  const saveRackPosition = useCallback((rackId: number, pos: { x: number; y: number }, devicePositions: DevicePositionPatch[]) => {
+    const tasks: Promise<unknown>[] = [
+      api.patch(`/api/topology/racks/${rackId}/position`, { map_x: pos.x, map_y: pos.y }),
+      ...devicePositions.map(d =>
+        api.patch(`/api/topology/devices/${d.id}/position`, { map_x: d.x, map_y: d.y }),
+      ),
+    ];
+    void Promise.allSettled(tasks).then(results => {
+      const failed = results.find(r => r.status === "rejected") as PromiseRejectedResult | undefined;
+      if (failed) {
+        addToast(`Position could not be saved: ${extractErrorMessage(failed.reason)}`, "error");
+      }
+    });
+  }, [addToast]);
+
+  // Auto-Layout: persist every computed position, one toast on failure.
+  const persistAutoLayout = useCallback((assignment: AutoLayoutAssignment) => {
+    const tasks: Promise<unknown>[] = [
+      ...Object.entries(assignment.racks).map(([id, p]) =>
+        api.patch(`/api/topology/racks/${id}/position`, { map_x: p.x, map_y: p.y }),
+      ),
+      ...Object.entries(assignment.devices).map(([id, p]) =>
+        api.patch(`/api/topology/devices/${id}/position`, { map_x: p.x, map_y: p.y }),
+      ),
+    ];
+    void Promise.allSettled(tasks).then(results => {
+      const failed = results.filter(r => r.status === "rejected");
+      if (failed.length > 0) {
+        addToast(`Auto-Layout: ${failed.length} position(s) could not be saved`, "error");
+      }
+    });
+  }, [addToast]);
 
   const renameRack = async (rack: SelectedRack, newName: string) => {
     await api.put(`/api/racks/${rack.id}`, { label: newName });
     setSelectedRack(prev => prev ? { ...prev, label: newName } : null);
-    loadTopology();
+    invalidateTopology();
   };
 
   const moveDevice = async (device: TopologyNode, newRackId: number | null) => {
     await api.patch(`/api/topology/devices/${device.id}/meta`, { rack_id: newRackId || null });
-    loadTopology();
+    invalidateTopology();
   };
 
   const updateDeviceMeta = async (device: TopologyNode, patch: Record<string, unknown>) => {
     await api.patch(`/api/topology/devices/${device.id}/meta`, patch);
-    loadTopology();
+    invalidateTopology();
   };
 
   const panelWidth = useMemo(() => {
@@ -148,8 +227,13 @@ export default function MapPage() {
     if (maxPPR === 0) maxPPR = 24;
     return Math.max(520, maxPPR * 36 + 108);
   }, [selectedDetail]);
-  const links10g = topology.links.filter(l => ["10G","25G","40G","100G"].includes(l.speed_label || "")).length;
-  const links1g  = topology.links.filter(l => l.speed_label === "1G").length;
+
+  const linkStats = useMemo(() => ({
+    switches: topology.nodes.length,
+    fast: topology.links.filter(l => ["10G", "25G", "40G", "100G"].includes(l.speed_label || "")).length,
+    gig: topology.links.filter(l => l.speed_label === "1G").length,
+  }), [topology.nodes, topology.links]);
+
   const selectedRackOrders = useMemo(() => {
     if (!selectedDetail) return {};
     const prefix = `${selectedDetail.id}::`;
@@ -162,77 +246,47 @@ export default function MapPage() {
   }, [rackOrders, selectedDetail]);
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", height:"calc(100vh - 48px)", overflow:"hidden" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 48px)", overflow: "hidden" }}>
       {loadError && (
-        <div style={{ padding: 24, color: "#e74c3c", textAlign: "center" }}>
+        <div className="p-6 text-danger text-center">
           Failed to load topology: {loadError}
         </div>
       )}
-      {/* Map toolbar */}
-      <div style={{
-        padding: "8px 24px", borderBottom: "1px solid #0f172a",
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        backgroundColor: "#020817", fontSize: 11,
-        fontFamily: "'Inter', system-ui, sans-serif",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <span style={{ color: "#475569" }}><span style={{ color: "#22c55e" }}>|</span> {topology.nodes.length} Switches</span>
-          <span style={{ color: "#475569" }}><span style={{ color: "#22d3ee" }}>|</span> {links10g} x {">="}10G</span>
-          <span style={{ color: "#475569" }}><span style={{ color: "#334155" }}>|</span> {links1g} x 1G</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button
-            onClick={() => { loadTopology(); }}
-            title="Reload topology"
-            style={{
-              border: "1px solid #1e293b", background: "none",
-              color: "#475569", borderRadius: 6, padding: "4px 10px",
-              cursor: "pointer", fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11,
-            }}
-          >(R)</button>
-        </div>
-      </div>
 
-      {/* Map area: flex row so panel sits inline and map fills the left */}
-      <div style={{ flex:1, display:"flex", overflow:"hidden" }}>
-        {/* Map content column */}
-        <div style={{
-          flex:1, display:"flex", flexDirection:"column", overflow:"hidden",
-          transition:"flex 0.25s ease",
-        }}>
-          <FilterBar
-            racks={topology.racks || []}
-            classes={topology.classes || []}
-            filters={filters}
-            onFilterChange={setFilters}
-          />
-          <div style={{
-            flex:1, overflow:"hidden", borderRadius:12, margin:"0 12px 12px",
-            backgroundColor: mapBgColor || "#020817",
-          }}>
-            <TopologyMap
+      {/* Map area: flex row so the panel sits inline and the map fills the left */}
+      <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden transition-all">
+          <div className="flex-1 overflow-hidden rounded-xl border border-line mx-3 mb-3 mt-1">
+            <TopologyCanvas
               nodes={topology.nodes}
               links={topology.links}
               managedRacks={topology.racks || []}
               switchClasses={topology.classes || []}
               filters={filters}
-              onSelectRack={handleSelectRack}
-              onSelectOutside={handleSelectOutside}
+              onFilterChange={setFilters}
               selectedRackId={selectedRack?.id}
               selectedOutsideId={selectedOutsideNode?.id ?? null}
-              centerRackId={selectedRack?.id ?? null}
-              onPositionChange={savePosition}
+              onSelectRack={handleSelectRack}
+              onSelectOutside={handleSelectOutside}
+              onShowDeviceDetail={setDetailSwitchId}
+              onSearchSelect={handleSearchSelect}
+              onRackPositionChange={saveRackPosition}
+              onDevicePositionChange={saveDevicePosition}
+              onAutoLayout={persistAutoLayout}
+              selectedLink={selectedLink}
+              rackPairColorMap={rackPairColorMap}
               mapBgUrl={mapBgUrl}
               mapBgOpacity={mapBgOpacity}
               mapBgScale={mapBgScale}
-              mapBgNat={mapBgNat}
               mapBgColor={mapBgColor}
-              rackPairColorMap={rackPairColorMap}
-              selectedLink={selectedLink}
+              stats={linkStats}
+              updatedAt={topologyQuery.dataUpdatedAt || null}
+              expandedRackIds={expandedRackIds}
+              onToggleExpand={toggleExpand}
             />
           </div>
-          {topology.nodes.length === 0 && (
-            <p style={{ textAlign: "center", color: "#334155", fontSize: 11, marginBottom: 8 }}>
+          {topology.nodes.length === 0 && !topologyQuery.isPending && (
+            <p className="text-center text-muted text-[11px] mb-2">
               No switches found - add credentials in Settings and run Scan
             </p>
           )}
@@ -240,7 +294,10 @@ export default function MapPage() {
 
         {/* Right panel: inline, not fixed, so map shrinks gracefully */}
         {selectedDetail && (
-          <div style={{ width: panelWidth, flexShrink: 0, borderLeft:"1px solid #0f172a", overflow:"hidden", display:"flex", flexDirection:"column" }}>
+          <div
+            style={{ width: panelWidth }}
+            className="shrink-0 border-l border-line overflow-hidden flex flex-col"
+          >
             <RackDetail
               rack={selectedDetail}
               allRacks={allRacks}

@@ -1,6 +1,10 @@
 import { useState, useEffect } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { api, extractErrorMessage, AUTH_PROTOCOLS, PRIV_PROTOCOLS, SEC_LEVELS } from "../../api";
 import type { SnmpProfile } from "../../types";
+import { queryKeys, useInvalidateApi, useSnmpProfiles } from "../../hooks/api";
+import { Badge, Button, Card, EmptyState, Input, Modal, Select } from "../ui";
+import { ConfirmDeleteModal, Field, TabError, TabLoading } from "./shared";
 
 // ── SnmpProfilesTabContent ──────────────────────────────────────────────────
 interface ProfileForm {
@@ -21,26 +25,24 @@ interface EditState {
 }
 
 interface SnmpProfilesTabContentProps {
-  profiles: SnmpProfile[];
-  loading: boolean;
-  onChanged: () => void;
   newEntryTrigger: number;
-  loadError: string;
 }
 
 const EMPTY_PROFILE_FORM: ProfileForm = {
-  label:"",
-  snmp_version:"v2c", community:"public",
-  v3_security_level:"authPriv", v3_username:"",
-  v3_auth_protocol:"SHA-256", v3_auth_password:"",
-  v3_priv_protocol:"AES-128", v3_priv_password:"",
+  label: "",
+  snmp_version: "v2c", community: "public",
+  v3_security_level: "authPriv", v3_username: "",
+  v3_auth_protocol: "SHA-256", v3_auth_password: "",
+  v3_priv_protocol: "AES-128", v3_priv_password: "",
 };
 
-function SnmpProfilesTabContent({ profiles, loading, onChanged, newEntryTrigger, loadError }: SnmpProfilesTabContentProps) {
+function SnmpProfilesTabContent({ newEntryTrigger }: SnmpProfilesTabContentProps) {
+  const { data: profiles = [], isLoading, error: loadError } = useSnmpProfiles();
+  const { invalidate } = useInvalidateApi();
   const [editState, setEditState] = useState<EditState>({ id: null, open: false });
-  const [form, setForm]         = useState<ProfileForm>({ ...EMPTY_PROFILE_FORM });
-  const [err, setErr]           = useState<string>("");
-  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [form, setForm] = useState<ProfileForm>({ ...EMPTY_PROFILE_FORM });
+  const [err, setErr] = useState<string>("");
+  const [deleteTarget, setDeleteTarget] = useState<SnmpProfile | null>(null);
 
   useEffect(() => {
     if (newEntryTrigger > 0) { startNew(); }
@@ -55,196 +57,181 @@ function SnmpProfilesTabContent({ profiles, loading, onChanged, newEntryTrigger,
     const unmask = (v: string) => (v === "***" ? "" : v);
     setEditState({ id: p.id, open: true });
     setForm({
-      label:p.label, snmp_version:p.snmp_version, community:unmask(p.community),
-      v3_security_level:p.v3_security_level, v3_username:p.v3_username,
-      v3_auth_protocol:p.v3_auth_protocol, v3_auth_password:unmask(p.v3_auth_password),
-      v3_priv_protocol:p.v3_priv_protocol, v3_priv_password:unmask(p.v3_priv_password),
+      label: p.label, snmp_version: p.snmp_version, community: unmask(p.community),
+      v3_security_level: p.v3_security_level, v3_username: p.v3_username,
+      v3_auth_protocol: p.v3_auth_protocol, v3_auth_password: unmask(p.v3_auth_password),
+      v3_priv_protocol: p.v3_priv_protocol, v3_priv_password: unmask(p.v3_priv_password),
     });
     setErr("");
   };
 
-  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault(); setErr("");
-    try {
-      if (editState.id) {
+  const saveMutation = useMutation({
+    mutationFn: async (values: { id: number | null; form: ProfileForm }) => {
+      if (values.id) {
         // On edit, omit secret fields left empty so the backend keeps the
         // stored value instead of overwriting it.
-        const payload: Record<string, unknown> = { ...form };
-        (["community", "v3_auth_password", "v3_priv_password"] as const).forEach(k => {
+        const payload: Record<string, unknown> = { ...values.form };
+        (["community", "v3_auth_password", "v3_priv_password"] as const).forEach((k) => {
           if (payload[k] === "") delete payload[k];
         });
-        await api.put(`/api/snmp-profiles/${editState.id}`, payload);
+        await api.put(`/api/snmp-profiles/${values.id}`, payload);
+      } else {
+        await api.post("/api/snmp-profiles", values.form);
       }
-      else {
-        await api.post("/api/snmp-profiles", form);
-      }
-      resetForm(); onChanged();
-    } catch (ex) { setErr(extractErrorMessage(ex)); }
-  };
+    },
+    onSuccess: () => {
+      invalidate(queryKeys.snmpProfiles);
+      resetForm();
+    },
+    onError: (ex) => setErr(extractErrorMessage(ex)),
+  });
 
-  const remove = (id: number) => setConfirmDeleteId(id);
-  const removeConfirmed = async (id: number) => {
-    await api.del(`/api/snmp-profiles/${id}`); setConfirmDeleteId(null); onChanged();
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => api.del(`/api/snmp-profiles/${id}`),
+    onSuccess: () => {
+      invalidate(queryKeys.snmpProfiles);
+      setDeleteTarget(null);
+    },
+    onError: (ex) => setErr(extractErrorMessage(ex)),
+  });
+
+  const submit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setErr("");
+    saveMutation.mutate({ id: editState.id, form });
   };
 
   const F = form;
-  const set = <K extends keyof ProfileForm>(k: K, v: ProfileForm[K]) => setForm(p => ({ ...p, [k]: v }));
+  const set = <K extends keyof ProfileForm>(k: K, v: ProfileForm[K]) => setForm((p) => ({ ...p, [k]: v }));
   const isV3 = F.snmp_version === "v3";
   const needAuth = isV3 && F.v3_security_level !== "noAuthNoPriv";
   const needPriv = isV3 && F.v3_security_level === "authPriv";
 
-  const inp: React.CSSProperties = { backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5, color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, lineHeight:1.3, boxSizing:"border-box", width:"100%" };
-  const sel: React.CSSProperties = { ...inp, cursor:"pointer" };
-  const lbl: React.CSSProperties = { fontSize:10, color:"#94a3b8", display:"block", userSelect:"none" };
-
   return (
-    <div style={{flex:1,overflowY:"auto",paddingTop:20}}>
-
-      {/* Modal overlay for new / edit form */}
-      {editState.open && (
-        <div
-          onClick={(e: React.MouseEvent<HTMLDivElement>) => { if (e.target === e.currentTarget) resetForm(); }}
-          style={{
-            position:"fixed", inset:0, zIndex:200,
-            backgroundColor:"rgba(2,8,23,0.75)",
-            display:"flex", alignItems:"center", justifyContent:"center",
-          }}
-        >
-          <form onSubmit={submit} style={{
-            width:480, maxHeight:"calc(100vh - 80px)", overflowY:"auto",
-            backgroundColor:"#0a0e18", border:"1px solid #1e293b", borderRadius:12,
-            padding:"20px", boxShadow:"0 20px 40px rgba(0,0,0,0.6)",
-          }}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-              <div style={{color:"#94a3b8",fontSize:10,fontWeight:700,letterSpacing:1}}>
-                {editState.id ? "EDIT PROFILE" : "NEW PROFILE"}
-              </div>
-              <button type="button" onClick={resetForm} style={{background:"none",border:"none",color:"#475569",cursor:"pointer",fontSize:16,lineHeight:1,padding:"0 2px"}}>{"\u2715"}</button>
-            </div>
-            <div style={{marginBottom:8}}>
-              <label style={lbl}>Profile name *
-                <input required value={F.label} onChange={(e: React.ChangeEvent<HTMLInputElement>) => set("label",e.target.value)} placeholder="SNMPv3 Aruba Core" style={{...inp,marginTop:3}}/>
-              </label>
-            </div>
-            <div style={{marginBottom:10}}>
-              <div style={{fontSize:10,color:"#94a3b8",marginBottom:4}}>SNMP Version</div>
-              <div style={{display:"flex",gap:6}}>
-                {(["v2c","v3"] as const).map(v=>(
-                  <button key={v} type="button" onClick={()=>set("snmp_version",v)} style={{padding:"4px 14px",borderRadius:5,fontSize:11,cursor:"pointer",fontFamily:"'Inter', system-ui, sans-serif",fontWeight:F.snmp_version===v?600:400,backgroundColor:F.snmp_version===v?"#083344":"transparent",border:`1px solid ${F.snmp_version===v?"#164e63":"#1e293b"}`,color:F.snmp_version===v?"#22d3ee":"#64748b"}}>{v}</button>
+    <div className="flex-1 overflow-y-auto pt-5">
+      {/* New / edit profile dialog */}
+      <Modal open={editState.open} onClose={resetForm} title={editState.id ? "Edit Profile" : "New Profile"} width={480}>
+        <form onSubmit={submit}>
+          <div className="flex flex-col gap-3">
+            <Field label="Profile name *">
+              <Input required value={F.label} onChange={(e) => set("label", e.target.value)} placeholder="SNMPv3 Aruba Core" />
+            </Field>
+            <div>
+              <div className="text-[10px] text-muted mb-1 select-none">SNMP Version</div>
+              <div className="flex gap-1.5">
+                {(["v2c", "v3"] as const).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => set("snmp_version", v)}
+                    className={`px-3.5 py-1 rounded text-[11px] cursor-pointer border transition-colors ${
+                      F.snmp_version === v
+                        ? "font-semibold bg-panel-2 border-accent text-accent"
+                        : "bg-transparent border-line-strong text-muted hover:text-primary"
+                    }`}
+                  >{v}</button>
                 ))}
               </div>
             </div>
             {!isV3 && (
-              <div style={{marginBottom:8}}>
-                <label style={lbl}>Community String *{editState.id ? " (leave empty to keep)" : ""}
-                  <input required={!editState.id} value={F.community} onChange={(e: React.ChangeEvent<HTMLInputElement>) => set("community",e.target.value)} placeholder={editState.id ? "unchanged" : "public"} style={{...inp,marginTop:3}}/>
-                  {F.community === "public" && (
-                    <span style={{ color: "#f39c12", fontSize: 11, display: "block", marginTop: 2 }}>
-                      Warning: &quot;public&quot; is the factory-default community string and may allow unauthorised SNMP access.
-                    </span>
-                  )}
-                </label>
-              </div>
+              <Field label={`Community String *${editState.id ? " (leave empty to keep)" : ""}`}>
+                <Input
+                  required={!editState.id}
+                  value={F.community}
+                  onChange={(e) => set("community", e.target.value)}
+                  placeholder={editState.id ? "unchanged" : "public"}
+                />
+                {F.community === "public" && (
+                  <span className="block mt-1 text-[11px] text-warning">
+                    Warning: &quot;public&quot; is the factory-default community string and may allow unauthorised SNMP access.
+                  </span>
+                )}
+              </Field>
             )}
             {isV3 && (
-              <div style={{padding:"10px 12px",borderRadius:8,backgroundColor:"#0c1220",border:"1px solid #1e3a52",marginBottom:8,display:"flex",flexDirection:"column",gap:8}}>
-                <label style={lbl}>Security Level
-                  <select value={F.v3_security_level} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => set("v3_security_level",e.target.value)} style={{...sel,marginTop:3}}>
-                    {SEC_LEVELS.map(l=><option key={l}>{l}</option>)}
-                  </select>
-                </label>
-                <label style={lbl}>Username
-                  <input value={F.v3_username} onChange={(e: React.ChangeEvent<HTMLInputElement>) => set("v3_username",e.target.value)} style={{...inp,marginTop:3}}/>
-                </label>
-                {needAuth && <>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                    <label style={lbl}>Auth Protocol
-                      <select value={F.v3_auth_protocol} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => set("v3_auth_protocol",e.target.value)} style={{...sel,marginTop:3}}>
-                        {AUTH_PROTOCOLS.map(p=><option key={p}>{p}</option>)}
-                      </select>
-                    </label>
-                    <label style={lbl}>Auth Password
-                      <input type="password" value={F.v3_auth_password} onChange={(e: React.ChangeEvent<HTMLInputElement>) => set("v3_auth_password",e.target.value)} style={{...inp,marginTop:3}}/>
-                    </label>
+              <div className="p-3 rounded-lg bg-panel-2 border border-line-strong flex flex-col gap-3">
+                <Field label="Security Level">
+                  <Select value={F.v3_security_level} onChange={(e) => set("v3_security_level", e.target.value)}>
+                    {SEC_LEVELS.map((l) => <option key={l}>{l}</option>)}
+                  </Select>
+                </Field>
+                <Field label="Username">
+                  <Input value={F.v3_username} onChange={(e) => set("v3_username", e.target.value)} />
+                </Field>
+                {needAuth && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <Field label="Auth Protocol">
+                      <Select value={F.v3_auth_protocol} onChange={(e) => set("v3_auth_protocol", e.target.value)}>
+                        {AUTH_PROTOCOLS.map((p) => <option key={p}>{p}</option>)}
+                      </Select>
+                    </Field>
+                    <Field label="Auth Password">
+                      <Input type="password" value={F.v3_auth_password} onChange={(e) => set("v3_auth_password", e.target.value)} />
+                    </Field>
                   </div>
-                </>}
-                {needPriv && <>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                    <label style={lbl}>Priv Protocol
-                      <select value={F.v3_priv_protocol} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => set("v3_priv_protocol",e.target.value)} style={{...sel,marginTop:3}}>
-                        {PRIV_PROTOCOLS.map(p=><option key={p}>{p}</option>)}
-                      </select>
-                    </label>
-                    <label style={lbl}>Priv Password
-                      <input type="password" value={F.v3_priv_password} onChange={(e: React.ChangeEvent<HTMLInputElement>) => set("v3_priv_password",e.target.value)} style={{...inp,marginTop:3}}/>
-                    </label>
+                )}
+                {needPriv && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <Field label="Priv Protocol">
+                      <Select value={F.v3_priv_protocol} onChange={(e) => set("v3_priv_protocol", e.target.value)}>
+                        {PRIV_PROTOCOLS.map((p) => <option key={p}>{p}</option>)}
+                      </Select>
+                    </Field>
+                    <Field label="Priv Password">
+                      <Input type="password" value={F.v3_priv_password} onChange={(e) => set("v3_priv_password", e.target.value)} />
+                    </Field>
                   </div>
-                </>}
+                )}
               </div>
             )}
-            {err && <div style={{color:"#f87171",fontSize:11,marginTop:8}}>{err}</div>}
-            <div style={{ display:"flex", gap:8, marginTop:14 }}>
-              <button type="submit" style={{flex:1,backgroundColor:"#083344",border:"1px solid #164e63",color:"#22d3ee",borderRadius:6,padding:"8px",cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:600}}>
-                {editState.id ? "Save" : "Create profile"}
-              </button>
-              <button type="button" onClick={resetForm} style={{border:"1px solid #1e293b",background:"none",color:"#64748b",borderRadius:6,padding:"8px 16px",cursor:"pointer",fontFamily:"inherit",fontSize:11}}>
-                Cancel
-              </button>
+            {err && <div className="text-[11px] text-danger">{err}</div>}
+            <div className="flex gap-2 mt-1">
+              <Button type="submit" variant="primary" className="flex-1" disabled={saveMutation.isPending}>
+                {saveMutation.isPending ? "Saving..." : editState.id ? "Save" : "Create profile"}
+              </Button>
+              <Button type="button" onClick={resetForm}>Cancel</Button>
             </div>
-          </form>
-        </div>
-      )}
+          </div>
+        </form>
+      </Modal>
+
+      <ConfirmDeleteModal
+        open={deleteTarget != null}
+        title="Delete Profile"
+        message={deleteTarget ? `Delete profile "${deleteTarget.label}"? This cannot be undone.` : ""}
+        busy={deleteMutation.isPending}
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
 
       {/* Card grid listing */}
-      {loadError && (
-        <div style={{color:"#f87171", fontSize:11, padding:"8px 12px", backgroundColor:"#1c1917", border:"1px solid #7f1d1d", borderRadius:6, marginBottom:8}}>
-          {loadError}
-        </div>
-      )}
-      {loading ? (
-        <div style={{color:"#475569",fontSize:11}}>Loading...</div>
+      {loadError && <TabError message={extractErrorMessage(loadError)} />}
+      {isLoading ? (
+        <TabLoading />
       ) : profiles.length === 0 ? (
-        <div style={{color:"#475569",fontSize:11,textAlign:"center",marginTop:20}}>No profiles defined yet</div>
+        <EmptyState title="No profiles defined yet" hint="Create a profile with + New Entry above." />
       ) : (
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(300px, 1fr))",gap:8}}>
-          {profiles.map(p => {
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2">
+          {profiles.map((p) => {
             const isV3Card = p.snmp_version === "v3";
-            const accentColor = isV3Card ? "#8b5cf6" : "#22d3ee";
             return (
-              <div key={p.id} style={{ display:"flex", flexDirection:"column", padding:"10px 12px", backgroundColor:"#0a0e18", border:`1px solid ${accentColor}44`, borderRadius:8, position:"relative", overflow:"hidden" }}>
-                <div style={{ position:"absolute", top:0, left:0, width:3, bottom:0, backgroundColor:accentColor, borderRadius:"8px 0 0 8px" }} />
-                <div style={{ marginLeft:12 }}>
-                  <div style={{ display:"flex", alignItems:"flex-start" }}>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                        <span style={{ color:"#e2e8f0", fontWeight:600, fontSize:13 }}>{p.label}</span>
-                        <span style={{
-                          fontSize:10, padding:"1px 6px", borderRadius:4,
-                          backgroundColor: isV3Card ? "#1e1b4b" : "#083344",
-                          border: `1px solid ${isV3Card ? "#3730a3" : "#164e63"}`,
-                          color: accentColor,
-                        }}>
-                          {p.snmp_version}
-                        </span>
-                      </div>
-                      <div style={{ color:"#475569", fontSize:10, marginTop:2 }}>
-                        {isV3Card ? `${p.v3_security_level} - ${p.v3_username || "-"}` : `Community: ${p.community}`}
-                      </div>
+              <Card key={p.id} className={`border-l-2 ${isV3Card ? "border-l-accent-strong" : "border-l-accent"}`}>
+                <div className="flex items-start gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-primary font-semibold text-[13px] truncate">{p.label}</span>
+                      <Badge tone={isV3Card ? "accent" : "neutral"}>{p.snmp_version}</Badge>
                     </div>
-                    <div style={{ display:"flex", gap:4, flexShrink:0 }}>
-                      <button onClick={()=>startEdit(p)} style={{ background:"none", border:"1px solid #1e293b", color:"#64748b", borderRadius:4, padding:"2px 8px", cursor:"pointer", fontSize:10, fontFamily:"'Inter', system-ui, sans-serif" }}>Edit</button>
-                      {confirmDeleteId === p.id ? (
-                        <span style={{display:"flex",gap:4}}>
-                          <button style={{background:"#450a0a",border:"1px solid #7f1d1d",color:"#fca5a5",borderRadius:4,padding:"2px 8px",cursor:"pointer",fontSize:10,fontFamily:"'Inter', system-ui, sans-serif"}} onClick={()=>removeConfirmed(p.id)}>Confirm</button>
-                          <button style={{background:"none",border:"1px solid #1e293b",color:"#64748b",borderRadius:4,padding:"2px 8px",cursor:"pointer",fontSize:10,fontFamily:"'Inter', system-ui, sans-serif"}} onClick={()=>setConfirmDeleteId(null)}>Cancel</button>
-                        </span>
-                      ) : (
-                        <button onClick={()=>remove(p.id)} style={{ background:"none", border:"1px solid #7f1d1d", color:"#f87171", borderRadius:4, padding:"2px 8px", cursor:"pointer", fontSize:10, fontFamily:"'Inter', system-ui, sans-serif" }}>Delete</button>
-                      )}
+                    <div className="text-muted text-[10px] mt-1">
+                      {isV3Card ? `${p.v3_security_level} - ${p.v3_username || "-"}` : `Community: ${p.community}`}
                     </div>
                   </div>
+                  <div className="flex gap-1.5 shrink-0">
+                    <Button size="sm" onClick={() => startEdit(p)}>Edit</Button>
+                    <Button size="sm" variant="danger" onClick={() => setDeleteTarget(p)}>Delete</Button>
+                  </div>
                 </div>
-              </div>
+              </Card>
             );
           })}
         </div>

@@ -1,0 +1,167 @@
+@import "tailwindcss";
+
+/* ── Theme tokens ────────────────────────────────────────────────────────────
+   Semantic color tokens as CSS custom properties. Dark is the default theme;
+   [data-theme="light"] overrides them. Exposed to Tailwind via @theme inline
+   so utilities like bg-surface, text-primary, border-line resolve per theme. */
+
+:root {
+  --surface: #020817;
+  --panel: #0f172a;
+  --panel-2: #1e293b;
+  --line: #1e293b;
+  --line-strong: #334155;
+  --primary: #e2e8f0;
+  --muted: #94a3b8;
+  --accent: #22d3ee;
+  --accent-strong: #0891b2;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --external: #818cf8;
+  --port-highlight: #38bdf8;
+}
+
+[data-theme="light"] {
+  --surface: #f8fafc;
+  --panel: #ffffff;
+  --panel-2: #f1f5f9;
+  --line: #e2e8f0;
+  --line-strong: #cbd5e1;
+  --primary: #0f172a;
+  --muted: #64748b;
+  --accent: #0891b2;
+  --accent-strong: #0e7490;
+  --success: #16a34a;
+  --warning: #d97706;
+  --danger: #dc2626;
+  --external: #4f46e5;
+  --port-highlight: #0284c7;
+}
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-primary: var(--primary);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-external: var(--external);
+}
+
+/* ── Global base styles (moved from App.tsx) ───────────────────────────────── */
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--surface);
+  color: var(--primary);
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 12px;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--line-strong);
+}
+
+/* ── Port highlight pulse (deep-link from Endpoints page) ──────────────────── */
+
+@keyframes portPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 4px var(--port-highlight), 0 0 8px var(--port-highlight);
+  }
+  50% {
+    box-shadow: 0 0 12px var(--port-highlight), 0 0 24px var(--port-highlight);
+  }
+}
+
+/* ── React Flow (@xyflow/react) theme overrides ──────────────────────────────
+   The library ships light defaults; remap its panels/controls onto the theme
+   tokens so the canvas matches both dark and light themes. */
+
+.react-flow {
+  background: transparent;
+  font-family: "Inter", system-ui, sans-serif;
+}
+
+.react-flow__controls {
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: none;
+  border: 1px solid var(--line);
+}
+
+.react-flow__controls-button {
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  fill: var(--muted);
+  width: 26px;
+  height: 26px;
+}
+
+.react-flow__controls-button:hover {
+  background: var(--panel-2);
+  color: var(--accent);
+  fill: var(--accent);
+}
+
+.react-flow__controls-button svg {
+  fill: currentColor;
+}
+
+.react-flow__minimap {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.react-flow__minimap-mask {
+  fill: var(--surface);
+  fill-opacity: 0.7;
+}
+
+.react-flow__attribution {
+  background: transparent;
+  color: var(--line-strong);
+}
+
+.react-flow__attribution a {
+  color: var(--muted);
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--accent);
+}
+
+.react-flow__node.selectable:focus {
+  outline: none;
+}
+
+.react-flow__panel {
+  font-family: "Inter", system-ui, sans-serif;
+}

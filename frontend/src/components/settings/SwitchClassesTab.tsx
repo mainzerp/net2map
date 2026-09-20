@@ -1,6 +1,10 @@
 import { useState, useEffect } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { api, extractErrorMessage } from "../../api";
 import type { SwitchClass, TopologyNode } from "../../types";
+import { queryKeys, useDevices, useInvalidateApi, useSwitchClasses } from "../../hooks/api";
+import { Badge, Button, Card, EmptyState, Input, Modal } from "../ui";
+import { ConfirmDeleteModal, DeviceAssignment, Field, TabError, TabLoading } from "./shared";
 
 // ── ClassesTabContent ────────────────────────────────────────────────────────
 interface ClassForm {
@@ -22,32 +26,22 @@ interface ClassesTabContentProps {
 const EMPTY_CLASS_FORM: ClassForm = { label: "", description: "", color: "#3b82f6", allow_outside_rack: false };
 
 function ClassesTabContent({ newEntryTrigger }: ClassesTabContentProps) {
-  const [classes, setClasses]   = useState<SwitchClass[]>([]);
-  const [devices, setDevices]   = useState<TopologyNode[]>([]);
-  const [loading, setLoading]   = useState<boolean>(true);
+  const { data: classes = [], isLoading } = useSwitchClasses();
+  const { data: devicesRaw } = useDevices();
+  const { invalidate } = useInvalidateApi();
+
+  const devices: TopologyNode[] = Array.isArray(devicesRaw) ? devicesRaw : [];
+
   const [editState, setEditState] = useState<EditState>({ id: null, open: false });
-  const [form, setForm]         = useState<ClassForm>({ ...EMPTY_CLASS_FORM });
-  const [err, setErr]           = useState<string>("");
+  const [form, setForm] = useState<ClassForm>({ ...EMPTY_CLASS_FORM });
+  const [err, setErr] = useState<string>("");
   const [assignSel, setAssignSel] = useState<Record<number, string>>({});
-  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SwitchClass | null>(null);
 
   useEffect(() => {
     if (newEntryTrigger > 0) { startNew(); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newEntryTrigger]);
-
-  const refreshAll = () => {
-    setLoading(true);
-    Promise.allSettled([api.get("/api/switch-classes"), api.get("/api/devices")])
-      .then(([classesRes, topoRes]) => {
-        if (classesRes.status === "fulfilled") setClasses(classesRes.value);
-        else setClasses([]);
-        if (topoRes.status === "fulfilled") setDevices(topoRes.value || []);
-        else setDevices([]);
-        setLoading(false);
-      });
-  };
-  useEffect(() => { refreshAll(); }, []);
 
   const resetForm = () => { setForm({ ...EMPTY_CLASS_FORM }); setEditState({ id: null, open: false }); setErr(""); };
   const startNew = () => { setForm({ ...EMPTY_CLASS_FORM }); setEditState({ id: null, open: true }); setErr(""); };
@@ -57,170 +51,138 @@ function ClassesTabContent({ newEntryTrigger }: ClassesTabContentProps) {
     setErr("");
   };
 
-  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault(); setErr("");
-    try {
-      if (!form.label.trim()) { setErr("Label is required"); return; }
-      if (editState.id) { await api.put(`/api/switch-classes/${editState.id}`, form); }
-      else {
-        const r = await api.post("/api/switch-classes", form);
-        if (r.detail) { setErr(typeof r.detail === "string" ? r.detail : JSON.stringify(r.detail)); return; }
+  const saveMutation = useMutation({
+    mutationFn: async (values: { id: number | null; form: ClassForm }) => {
+      if (values.id) {
+        await api.put(`/api/switch-classes/${values.id}`, values.form);
+      } else {
+        const r = await api.post("/api/switch-classes", values.form);
+        if (r.detail) throw new Error(typeof r.detail === "string" ? r.detail : JSON.stringify(r.detail));
       }
-      resetForm(); refreshAll();
-    } catch (ex) { setErr(extractErrorMessage(ex)); }
-  };
+    },
+    onSuccess: () => {
+      invalidate(queryKeys.switchClasses);
+      resetForm();
+    },
+    onError: (ex) => setErr(extractErrorMessage(ex)),
+  });
 
-  const remove = (id: number) => setConfirmDeleteId(id);
-  const removeConfirmed = async (id: number) => {
-    await api.del(`/api/switch-classes/${id}`); setConfirmDeleteId(null); refreshAll();
-  };
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => api.del(`/api/switch-classes/${id}`),
+    onSuccess: () => {
+      invalidate(queryKeys.switchClasses);
+      setDeleteTarget(null);
+    },
+  });
 
-  const assignDevice = async (classId: number) => {
-    const devId = assignSel[classId];
-    if (!devId) return;
+  const assignMutation = useMutation({
+    mutationFn: ({ devId, classId }: { devId: string; classId: number | null }) =>
+      api.patch(`/api/topology/devices/${devId}/meta`, { class_id: classId }),
+    onSuccess: (_data, vars) => {
+      invalidate(queryKeys.topology, queryKeys.devices, queryKeys.credentials);
+      const classId = vars.classId;
+      if (classId != null) setAssignSel((prev) => ({ ...prev, [classId]: "" }));
+    },
+    onError: (ex) => setErr(extractErrorMessage(ex)),
+  });
+
+  const submit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
     setErr("");
-    try {
-      await api.patch(`/api/topology/devices/${devId}/meta`, { class_id: classId });
-      api.invalidate("/api/topology", "/api/devices", "/api/credentials");
-      setAssignSel(prev => ({ ...prev, [classId]: "" }));
-      refreshAll();
-    } catch (ex) { setErr(extractErrorMessage(ex)); }
+    if (!form.label.trim()) { setErr("Label is required"); return; }
+    saveMutation.mutate({ id: editState.id, form });
   };
-
-  const unassignDevice = async (devId: number) => {
-    setErr("");
-    try {
-      await api.patch(`/api/topology/devices/${devId}/meta`, { class_id: null });
-      api.invalidate("/api/topology", "/api/devices", "/api/credentials");
-      refreshAll();
-    } catch (ex) { setErr(extractErrorMessage(ex)); }
-  };
-
-  const inp: React.CSSProperties = { backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5, color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, lineHeight:1.3, boxSizing:"border-box", width:"100%" };
-  const lbl: React.CSSProperties = { fontSize:10, color:"#94a3b8", display:"block", userSelect:"none" };
 
   return (
-    <div style={{flex:1,overflowY:"auto",paddingTop:20}}>
-
-      {/* Modal overlay for new / edit form */}
-      {editState.open && (
-        <div
-          onClick={(e: React.MouseEvent<HTMLDivElement>) => { if (e.target === e.currentTarget) resetForm(); }}
-          style={{
-            position:"fixed", inset:0, zIndex:200,
-            backgroundColor:"rgba(2,8,23,0.75)",
-            display:"flex", alignItems:"center", justifyContent:"center",
-          }}
-        >
-          <form onSubmit={submit} style={{
-            width:480, maxHeight:"calc(100vh - 80px)", overflowY:"auto",
-            backgroundColor:"#0a0e18", border:"1px solid #1e293b", borderRadius:12,
-            padding:"20px", boxShadow:"0 20px 40px rgba(0,0,0,0.6)",
-          }}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-              <div style={{color:"#94a3b8",fontSize:10,fontWeight:700,letterSpacing:1}}>
-                {editState.id ? "EDIT CLASS" : "NEW CLASS"}
-              </div>
-              <button type="button" onClick={resetForm} style={{background:"none",border:"none",color:"#475569",cursor:"pointer",fontSize:16,lineHeight:1,padding:"0 2px"}}>{"\u2715"}</button>
+    <div className="flex-1 overflow-y-auto pt-5">
+      {/* New / edit class dialog */}
+      <Modal open={editState.open} onClose={resetForm} title={editState.id ? "Edit Class" : "New Class"} width={480}>
+        <form onSubmit={submit}>
+          <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
+              <Field label="Label">
+                <Input required value={form.label} onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))} placeholder="e.g. Top of Rack" />
+              </Field>
+              <Field label="Color">
+                <input
+                  type="color"
+                  value={form.color}
+                  onChange={(e) => setForm((f) => ({ ...f, color: e.target.value }))}
+                  className="w-10 h-[29px] p-0.5 bg-panel-2 border border-line-strong rounded cursor-pointer"
+                />
+              </Field>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"end"}}>
-              <div><label style={lbl}>Label</label>
-                <input required style={inp} value={form.label} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({...f, label:e.target.value}))} placeholder="e.g. Top of Rack" /></div>
-              <div><label style={lbl}>Color</label>
-                <input type="color" value={form.color} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({...f, color:e.target.value}))}
-                  style={{ width:40, height:29, padding:2, backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5, cursor:"pointer" }} /></div>
-            </div>
-            <div style={{marginTop:8}}><label style={lbl}>Description</label>
-              <input style={inp} value={form.description} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({...f, description:e.target.value}))} placeholder="optional" /></div>
-            <label style={{ display:"flex", alignItems:"center", gap:6, color:"#94a3b8", fontSize:11, cursor:"pointer", marginTop:8 }}>
-              <input type="checkbox" checked={!!form.allow_outside_rack} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({ ...f, allow_outside_rack: e.target.checked }))} />
+            <Field label="Description">
+              <Input value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} placeholder="optional" />
+            </Field>
+            <label className="flex items-center gap-1.5 text-[11px] text-muted cursor-pointer select-none">
+              <input
+                type="checkbox"
+                className="accent-accent"
+                checked={!!form.allow_outside_rack}
+                onChange={(e) => setForm((f) => ({ ...f, allow_outside_rack: e.target.checked }))}
+              />
               Allow outside rack placement
             </label>
-            {err && <div style={{ color:"#f87171", fontSize:11, marginTop:8 }}>{err}</div>}
-            <div style={{ display:"flex", gap:8, marginTop:14 }}>
-              <button type="submit" style={{flex:1,backgroundColor:"#083344",border:"1px solid #164e63",color:"#22d3ee",borderRadius:6,padding:"8px",cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:600}}>
-                {editState.id ? "Save" : "Create class"}
-              </button>
-              <button type="button" onClick={resetForm} style={{border:"1px solid #1e293b",background:"none",color:"#64748b",borderRadius:6,padding:"8px 16px",cursor:"pointer",fontFamily:"inherit",fontSize:11}}>
-                Cancel
-              </button>
+            {err && <div className="text-[11px] text-danger">{err}</div>}
+            <div className="flex gap-2 mt-1">
+              <Button type="submit" variant="primary" className="flex-1" disabled={saveMutation.isPending}>
+                {saveMutation.isPending ? "Saving..." : editState.id ? "Save" : "Create class"}
+              </Button>
+              <Button type="button" onClick={resetForm}>Cancel</Button>
             </div>
-          </form>
-        </div>
-      )}
+          </div>
+        </form>
+      </Modal>
+
+      <ConfirmDeleteModal
+        open={deleteTarget != null}
+        title="Delete Class"
+        message={deleteTarget ? `Delete class "${deleteTarget.label}"? Assigned switches are unassigned, not deleted.` : ""}
+        busy={deleteMutation.isPending}
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
 
       {/* Card grid listing */}
-      {loading ? (
-        <div style={{ color:"#475569", fontSize:11 }}>Loading...</div>
+      {err && !editState.open && <TabError message={err} />}
+      {isLoading ? (
+        <TabLoading />
       ) : classes.length === 0 ? (
-        <div style={{ color:"#475569", fontSize:11, textAlign:"center", marginTop:20 }}>No classes defined yet</div>
+        <EmptyState title="No classes defined yet" hint="Create a class with + New Entry above." />
       ) : (
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(300px, 1fr))",gap:8}}>
-          {classes.map(sc => {
-            const assigned  = devices.filter(d => d.class_id === sc.id);
-            const available = devices.filter(d => d.class_id == null && !d.ignored);
-            const selVal    = assignSel[sc.id] || "";
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2">
+          {classes.map((sc) => {
+            const assigned = devices.filter((d) => d.class_id === sc.id);
+            const available = devices.filter((d) => d.class_id == null && !d.ignored);
+            const selVal = assignSel[sc.id] || "";
             return (
-              <div key={sc.id} style={{ display:"flex", flexDirection:"column", padding:"10px 12px", backgroundColor:"#0a0e18", border:`1px solid ${sc.color}44`, borderRadius:8, position:"relative", overflow:"hidden" }}>
-                <div style={{ position:"absolute", top:0, left:0, width:3, bottom:0, backgroundColor:sc.color, borderRadius:"8px 0 0 8px" }} />
-                <div style={{ marginLeft:12 }}>
-                  <div style={{ display:"flex", alignItems:"flex-start" }}>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                        <div style={{ width:9, height:9, borderRadius:"50%", backgroundColor:sc.color, flexShrink:0 }} />
-                        <span style={{ color:"#e2e8f0", fontWeight:600, fontSize:13 }}>{sc.label}</span>
-                        <span style={{
-                          fontSize:10, padding:"1px 6px", borderRadius:4,
-                          border:`1px solid ${sc.allow_outside_rack ? "#14532d" : "#1e293b"}`,
-                          backgroundColor: sc.allow_outside_rack ? "#052e16" : "#0a0e18",
-                          color: sc.allow_outside_rack ? "#4ade80" : "#64748b",
-                        }}>
-                          {sc.allow_outside_rack ? "Outside allowed" : "Rack required"}
-                        </span>
-                      </div>
-                      {sc.description && <div style={{ color:"#475569", fontSize:10, marginTop:2, marginLeft:17 }}>{sc.description}</div>}
+              <Card key={sc.id} className="border-l-2" style={{ borderLeftColor: sc.color }}>
+                <div className="flex items-start gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: sc.color }} />
+                      <span className="text-primary font-semibold text-[13px] truncate">{sc.label}</span>
+                      <Badge tone={sc.allow_outside_rack ? "success" : "neutral"}>
+                        {sc.allow_outside_rack ? "Outside allowed" : "Rack required"}
+                      </Badge>
                     </div>
-                    <div style={{ display:"flex", gap:4, flexShrink:0 }}>
-                      <button onClick={() => startEdit(sc)} style={{ background:"none", border:"1px solid #1e293b", color:"#64748b", borderRadius:4, padding:"2px 8px", cursor:"pointer", fontSize:10, fontFamily:"'Inter', system-ui, sans-serif" }}>Edit</button>
-                      {confirmDeleteId === sc.id ? (
-                        <span style={{display:"flex",gap:4}}>
-                          <button style={{background:"#450a0a",border:"1px solid #7f1d1d",color:"#fca5a5",borderRadius:4,padding:"2px 8px",cursor:"pointer",fontSize:10,fontFamily:"'Inter', system-ui, sans-serif"}} onClick={()=>removeConfirmed(sc.id)}>Confirm</button>
-                          <button style={{background:"none",border:"1px solid #1e293b",color:"#64748b",borderRadius:4,padding:"2px 8px",cursor:"pointer",fontSize:10,fontFamily:"'Inter', system-ui, sans-serif"}} onClick={()=>setConfirmDeleteId(null)}>Cancel</button>
-                        </span>
-                      ) : (
-                        <button onClick={() => remove(sc.id)} style={{ background:"none", border:"1px solid #7f1d1d", color:"#f87171", borderRadius:4, padding:"2px 8px", cursor:"pointer", fontSize:10, fontFamily:"'Inter', system-ui, sans-serif" }}>Delete</button>
-                      )}
-                    </div>
+                    {sc.description && <div className="text-muted text-[10px] mt-0.5 ml-[18px]">{sc.description}</div>}
                   </div>
-                  <div style={{ marginTop:10, borderTop:"1px solid #0f172a", paddingTop:8 }}>
-                    <div style={{ color:"#475569", fontSize:10, letterSpacing:1, marginBottom:6 }}>
-                      ASSIGNED SWITCHES ({assigned.length})
-                    </div>
-                    {assigned.length > 0 && (
-                      <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginBottom:8 }}>
-                        {assigned.map(d => (
-                          <div key={d.id} style={{ backgroundColor:"#0c1a2e", border:"1px solid #1e3a5f", borderRadius:4, padding:"2px 6px 2px 8px", display:"flex", alignItems:"center", gap:4, fontSize:10 }}>
-                            <span style={{ color:"#7dd3fc" }}>{d.sys_name || d.ip}</span>
-                            <span style={{ color:"#334155", fontSize:10 }}>{d.ip}</span>
-                            <button onClick={() => unassignDevice(d.id)} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", padding:"0 2px", fontSize:11, lineHeight:1 }} title="Unassign">x</button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    <div style={{ display:"flex", gap:4 }}>
-                      <select value={selVal} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setAssignSel(p => ({...p, [sc.id]:e.target.value}))}
-                        style={{ flex:1, backgroundColor:"#020817", border:"1px solid #1e293b", borderRadius:4, padding:"4px 6px", color:selVal?"#e2e8f0":"#475569", fontFamily:"'Inter', system-ui, sans-serif", fontSize:10 }}>
-                        <option value="">-- Assign switch --</option>
-                        {available.map(d => <option key={d.id} value={d.id}>{d.sys_name || d.ip} ({d.ip})</option>)}
-                      </select>
-                      <button onClick={() => assignDevice(sc.id)} disabled={!selVal}
-                        style={{ backgroundColor:selVal?"#083344":"#0a0e18", border:"1px solid #164e63", color:selVal?"#22d3ee":"#1e3a5f", borderRadius:4, padding:"4px 10px", cursor:selVal?"pointer":"not-allowed", fontFamily:"'Inter', system-ui, sans-serif", fontSize:10 }}>
-                        Assign
-                      </button>
-                    </div>
+                  <div className="flex gap-1.5 shrink-0">
+                    <Button size="sm" onClick={() => startEdit(sc)}>Edit</Button>
+                    <Button size="sm" variant="danger" onClick={() => setDeleteTarget(sc)}>Delete</Button>
                   </div>
                 </div>
-              </div>
+                <DeviceAssignment
+                  assigned={assigned}
+                  available={available}
+                  selVal={selVal}
+                  onSelect={(val) => setAssignSel((p) => ({ ...p, [sc.id]: val }))}
+                  onAssign={() => assignMutation.mutate({ devId: selVal, classId: sc.id })}
+                  onUnassign={(devId) => assignMutation.mutate({ devId: String(devId), classId: null })}
+                />
+              </Card>
             );
           })}
         </div>

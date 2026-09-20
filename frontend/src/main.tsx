@@ -1,48 +1,69 @@
 import { StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ToastProvider } from "./components/ToastProvider";
+import { ThemeProvider } from "./theme/ThemeProvider";
+import { Spinner } from "./components/ui";
+import "./index.css";
 
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const MapPage = lazy(() => import("./pages/MapPage"));
 const DevicesPage = lazy(() => import("./pages/DevicesPage"));
+const RacksPage = lazy(() => import("./pages/RacksPage"));
 const NetworkPage = lazy(() => import("./pages/NetworkPage"));
 const LogsPage = lazy(() => import("./pages/LogsPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      retry: 1,
+    },
+  },
+});
+
 const LoadingSpinner = () => (
-  <div style={{
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
-    color: "#475569",
-    fontSize: 13,
-    fontFamily: "'Inter', system-ui, sans-serif",
-  }}>
+  <div className="flex items-center justify-center h-full text-muted text-[13px] gap-2">
+    <Spinner size={14} />
     Loading...
   </div>
 );
 
+function lazyPage(element: React.ReactNode) {
+  return (
+    <ErrorBoundary>
+      <Suspense fallback={<LoadingSpinner />}>{element}</Suspense>
+    </ErrorBoundary>
+  );
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <BrowserRouter>
-      <ToastProvider>
-        <Routes>
-          <Route path="login" element={<Suspense fallback={<LoadingSpinner />}><LoginPage /></Suspense>} />
-          <Route element={<App />}>
-            <Route index element={<ErrorBoundary><Suspense fallback={<LoadingSpinner />}><DashboardPage /></Suspense></ErrorBoundary>} />
-            <Route path="map" element={<ErrorBoundary><Suspense fallback={<LoadingSpinner />}><MapPage /></Suspense></ErrorBoundary>} />
-            <Route path="devices" element={<ErrorBoundary><Suspense fallback={<LoadingSpinner />}><DevicesPage /></Suspense></ErrorBoundary>} />
-            <Route path="network" element={<ErrorBoundary><Suspense fallback={<LoadingSpinner />}><NetworkPage /></Suspense></ErrorBoundary>} />
-            <Route path="logs" element={<ErrorBoundary><Suspense fallback={<LoadingSpinner />}><LogsPage /></Suspense></ErrorBoundary>} />
-            <Route path="settings" element={<ErrorBoundary><Suspense fallback={<LoadingSpinner />}><SettingsPage /></Suspense></ErrorBoundary>} />
-          </Route>
-        </Routes>
-      </ToastProvider>
-    </BrowserRouter>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <ThemeProvider>
+          <ToastProvider>
+            <Routes>
+              <Route path="login" element={<Suspense fallback={<LoadingSpinner />}><LoginPage /></Suspense>} />
+              <Route element={<App />}>
+                <Route index element={lazyPage(<DashboardPage />)} />
+                <Route path="map" element={lazyPage(<MapPage />)} />
+                <Route path="devices" element={lazyPage(<DevicesPage />)} />
+                <Route path="racks" element={lazyPage(<RacksPage />)} />
+                <Route path="network" element={lazyPage(<NetworkPage />)} />
+                <Route path="logs" element={lazyPage(<LogsPage />)} />
+                <Route path="settings" element={<Navigate to="/settings/credentials" replace />} />
+                <Route path="settings/:tab" element={lazyPage(<SettingsPage />)} />
+              </Route>
+            </Routes>
+          </ToastProvider>
+        </ThemeProvider>
+      </BrowserRouter>
+    </QueryClientProvider>
   </StrictMode>
 );

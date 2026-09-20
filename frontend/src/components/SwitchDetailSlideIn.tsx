@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
-import { speedLabel, buildPortLinkMap, normPort, CABLE_COLORS } from "../api";
+import { normPort } from "../api";
+import { speedLabel, CABLE_COLORS } from "../theme/visual";
 import type { TopologyNode, TopologyLink } from "../types";
 
 interface SwitchDetailSlideInProps {
@@ -32,8 +33,6 @@ export default function SwitchDetailSlideIn({ deviceId, nodes, topologyLinks, ra
       l => l.local_ip === device.ip || l.remote_ip === device.ip
     );
   }, [device, topologyLinks]);
-
-  const portLinkMap = useMemo(() => buildPortLinkMap(deviceLinks), [deviceLinks]);
 
   const linkColorMap = useMemo(() => {
     const ipToRackId: Record<string, string> = {};
@@ -97,8 +96,8 @@ export default function SwitchDetailSlideIn({ deviceId, nodes, topologyLinks, ra
   if (!device) return null;
 
   const pingStatus = (device.ping_status as string) || "unknown";
-  const statusColor = pingStatus === "online" ? "#22c55e"
-    : pingStatus === "offline" ? "#f87171" : "#64748b";
+  const statusColor = pingStatus === "online" ? "var(--success)"
+    : pingStatus === "offline" ? "var(--danger)" : "var(--muted)";
   const activePorts = device.ports.filter(p => p.oper_status === 1);
 
   return (
@@ -106,26 +105,11 @@ export default function SwitchDetailSlideIn({ deviceId, nodes, topologyLinks, ra
       {/* Backdrop */}
       <div
         onClick={onClose}
-        style={{
-          position: "fixed", inset: 0,
-          backgroundColor: "rgba(0,0,0,0.4)",
-          zIndex: 1000,
-        }}
+        className="fixed inset-0 bg-black/40 z-[1000]"
       />
 
       {/* Slide-in panel */}
-      <div style={{
-        position: "fixed",
-        top: 48, right: 0, bottom: 0,
-        width: "80vw",
-        maxWidth: 1400,
-        backgroundColor: "#020817",
-        borderLeft: "1px solid #1e293b",
-        zIndex: 1001,
-        display: "flex", flexDirection: "column",
-        fontFamily: "'Inter', system-ui, sans-serif",
-        animation: "slideInDetail 0.25s ease",
-      }}>
+      <div className="fixed top-12 right-0 bottom-0 w-[80vw] max-w-[1400px] bg-surface border-l border-line z-[1001] flex flex-col animate-[slideInDetail_0.25s_ease]">
         <style>{`
           @keyframes slideInDetail {
             from { transform: translateX(100%); }
@@ -134,65 +118,51 @@ export default function SwitchDetailSlideIn({ deviceId, nodes, topologyLinks, ra
         `}</style>
 
         {/* Header */}
-        <div style={{
-          padding: "16px 20px",
-          borderBottom: "1px solid #1e293b",
-          display: "flex", alignItems: "flex-start", justifyContent: "space-between",
-          flexShrink: 0,
-        }}>
+        <div className="px-5 py-4 border-b border-line flex items-start justify-between shrink-0">
           <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+            <div className="flex items-center gap-2.5 mb-2">
               <div title={pingStatus} style={{
-                width: 10, height: 10, borderRadius: "50%",
                 backgroundColor: statusColor, boxShadow: `0 0 6px ${statusColor}`,
-              }} />
-              <span style={{ fontSize: 18, fontWeight: 700, color: "#e2e8f0" }}>
+              }} className="w-2.5 h-2.5 rounded-full" />
+              <span className="text-lg font-bold text-primary">
                 {device.sys_name || device.ip}
               </span>
             </div>
-            <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontSize: 12, color: "#94a3b8" }}>
-              <span><span style={{ color: "#475569" }}>IP:</span> {device.ip}</span>
-              {device.vendor && <span><span style={{ color: "#475569" }}>Vendor:</span> {device.vendor}</span>}
-              {device.model && <span><span style={{ color: "#475569" }}>Model:</span> {device.model}</span>}
-              {device.location && <span><span style={{ color: "#475569" }}>Location:</span> {String(device.location)}</span>}
-              <span><span style={{ color: "#475569" }}>Ports:</span> {activePorts.length}/{device.ports.length} active</span>
+            <div className="flex gap-6 flex-wrap text-xs text-muted">
+              <span><span className="opacity-70">IP:</span> {device.ip}</span>
+              {device.vendor && <span><span className="opacity-70">Vendor:</span> {device.vendor}</span>}
+              {device.model && <span><span className="opacity-70">Model:</span> {device.model}</span>}
+              {device.location && <span><span className="opacity-70">Location:</span> {String(device.location)}</span>}
+              <span><span className="opacity-70">Ports:</span> {activePorts.length}/{device.ports.length} active</span>
               {device.ping_rtt_ms != null && pingStatus === "online" && (
-                <span><span style={{ color: "#475569" }}>RTT:</span> {device.ping_rtt_ms}ms</span>
+                <span><span className="opacity-70">RTT:</span> {device.ping_rtt_ms}ms</span>
               )}
             </div>
           </div>
-          <button onClick={onClose} style={{
-            background: "none", border: "1px solid #1e293b",
-            color: "#64748b", borderRadius: 6, padding: "4px 10px",
-            cursor: "pointer", fontSize: 16, flexShrink: 0,
-          }}>X</button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="bg-transparent border border-line text-muted rounded-md px-2.5 py-1 cursor-pointer text-base shrink-0 hover:text-primary transition-colors"
+          >X</button>
         </div>
 
         {/* Port table (scrollable) */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "12px 20px" }}>
-          <div style={{
-            backgroundColor: "#0a0e18", border: "1px solid #1e293b",
-            borderRadius: 10, padding: "20px 24px",
-          }}>
-            <div style={{
-              fontSize: 10, color: "#475569", letterSpacing: "0.08em",
-              textTransform: "uppercase", marginBottom: 14,
-            }}>
+        <div className="flex-1 overflow-y-auto px-5 py-3">
+          <div className="bg-panel border border-line rounded-lg px-6 py-5">
+            <div className="text-[10px] text-muted tracking-widest uppercase mb-3.5">
               Ports ({device.ports.length})
             </div>
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-[11px]">
                 <thead>
-                  <tr style={{ borderBottom: "1px solid #1e293b" }}>
+                  <tr className="border-b border-line">
                     {columns.map(col => (
                       <th key={col.key}
                         onClick={() => handleSort(col.key)}
-                        style={{
-                          padding: "8px 10px", color: sortCol === col.key ? "#e2e8f0" : "#475569",
-                          fontWeight: 600, fontSize: 9, letterSpacing: 1,
-                          textAlign: col.align, cursor: "pointer", userSelect: "none",
-                          whiteSpace: "nowrap",
-                        }}>
+                        style={{ textAlign: col.align }}
+                        className={`px-2.5 py-2 font-semibold text-[9px] tracking-widest cursor-pointer select-none whitespace-nowrap ${
+                          sortCol === col.key ? "text-primary" : "text-muted"
+                        }`}>
                         {col.label}{sortCol === col.key ? (sortAsc ? " ^" : " v") : ""}
                       </th>
                     ))}
@@ -202,41 +172,38 @@ export default function SwitchDetailSlideIn({ deviceId, nodes, topologyLinks, ra
                   {sortedPorts.map(port => {
                     const pKey = `${device.ip}:${normPort(port.if_descr || "")}`;
                     const cableColor = linkColorMap[pKey];
-                    const linkEntry = portLinkMap[pKey];
-                    const partnerIp = linkEntry
-                      ? (linkEntry.role === "from" ? linkEntry.link.remote_ip : linkEntry.link.local_ip)
-                      : null;
                     return (
                       <tr key={port.id} style={{
-                        borderBottom: "1px solid #0f172a",
                         borderLeft: cableColor ? `3px solid ${cableColor}` : "3px solid transparent",
                         backgroundColor: cableColor ? `${cableColor}08` : undefined,
-                      }}>
-                        <td style={{ padding: "8px 10px", color: "#94a3b8", textAlign: "right" }}>
+                      }} className="border-b border-line">
+                        <td className="px-2.5 py-2 text-muted text-right">
                           {port.if_index}
                         </td>
-                        <td style={{ padding: "8px 10px", color: "#e2e8f0", fontWeight: 500 }}>
+                        <td className="px-2.5 py-2 text-primary font-medium">
                           {port.if_descr || "-"}
                         </td>
-                        <td style={{ padding: "8px 10px", textAlign: "center" }}>
-                          <span style={{
-                            display: "inline-block", width: 8, height: 8, borderRadius: "50%",
-                            backgroundColor: port.oper_status === 1 ? "#22c55e" : "#334155",
-                            boxShadow: port.oper_status === 1 ? "0 0 4px #22c55e" : "none",
-                          }} />
+                        <td className="px-2.5 py-2 text-center">
+                          <span
+                            className="inline-block w-2 h-2 rounded-full"
+                            style={{
+                              backgroundColor: port.oper_status === 1 ? "var(--success)" : "var(--line-strong)",
+                              boxShadow: port.oper_status === 1 ? "0 0 4px var(--success)" : "none",
+                            }}
+                          />
                         </td>
-                        <td style={{ padding: "8px 10px", color: "#94a3b8", textAlign: "right" }}>
+                        <td className="px-2.5 py-2 text-muted text-right">
                           {port.speed_mbps ? speedLabel(port.speed_mbps) : "-"}
                         </td>
-                        <td style={{ padding: "8px 10px", color: "#7dd3fc", textAlign: "right" }}>
+                        <td className="px-2.5 py-2 text-accent text-right">
                           {port.vlan || "-"}
                         </td>
-                        <td style={{ padding: "8px 10px", color: "#94a3b8" }}>
+                        <td className="px-2.5 py-2 text-muted">
                           {port.tagged_vlans && port.tagged_vlans.length > 0
                             ? port.tagged_vlans.join(", ")
                             : "-"}
                         </td>
-                        <td style={{ padding: "8px 10px", color: "#22d3ee", textAlign: "right" }}>
+                        <td className="px-2.5 py-2 text-accent text-right">
                           {port.endpoint_count || 0}
                         </td>
                       </tr>

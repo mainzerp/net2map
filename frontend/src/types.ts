@@ -41,6 +41,8 @@ export interface TopologyNode {
   location?: string;
   label?: string;
   enabled?: boolean;
+  rack_u_position?: number | null;
+  u_height?: number;
   [key: string]: unknown;
 }
 
@@ -63,6 +65,9 @@ export interface RackInfo {
   description?: string;
   row_pos: number | null;
   col_pos: number | null;
+  map_x?: number;
+  map_y?: number;
+  height_u?: number;
 }
 
 export interface SwitchClass {
@@ -110,13 +115,9 @@ export interface ScanProgress {
 }
 
 export interface NetmapState {
-  // Topology
-  topology: TopologyData;
+  // Topology selection (topology data itself lives in TanStack Query)
   selectedRack: SelectedRack | null;
-  loadError: string | null;
-  loadTopology: () => Promise<TopologyData | null>;
   setSelectedRack: (rack: SelectedRack | null | ((prev: SelectedRack | null) => SelectedRack | null)) => void;
-  restoreSelectedRack: (data: TopologyData) => void;
 
   // Highlight
   highlightPortKey: string | null;
@@ -154,17 +155,10 @@ export interface DeviceTableProps {
   emptyMessage: string;
 }
 
-// -- Filter state (used by FilterBar, TopologyMap, MapPage) -------------------
+// -- Filter state (used by MapPage and features/topology) ---------------------
 export interface FilterState {
   racks: Set<number> | null;
   classes: Set<number> | null;
-}
-
-// -- Zoom state (used by TopologyMap) -----------------------------------------
-export interface ZoomState {
-  scale: number;
-  tx: number;
-  ty: number;
 }
 
 // -- Port link map entry (returned by buildPortLinkMap in api.ts) -------------

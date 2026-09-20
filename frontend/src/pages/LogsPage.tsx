@@ -1,18 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "../api";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "../components/ToastProvider";
+import { useLogs, type LogEntry } from "../hooks/api";
+import { Badge, Button, EmptyState, Input, Select, Spinner, type BadgeTone } from "../components/ui";
 
-interface LogEntry {
-  ts?: string;
-  level?: string;
-  event?: string;
-  [key: string]: unknown;
+function levelTone(level: string | undefined): BadgeTone {
+  if (level === "ERROR") return "danger";
+  if (level === "WARNING") return "warning";
+  if (level === "INFO") return "accent";
+  return "neutral";
 }
 
+const LIMIT_OPTIONS = [100, 300, 500, 1000, 2000];
+
 export default function LogsPage() {
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [levelFilter, setLevelFilter] = useState("");
   const [eventFilter, setEventFilter] = useState("");
@@ -28,143 +28,131 @@ export default function LogsPage() {
     return () => clearTimeout(t);
   }, [textFilter]);
 
-  const loadLogs = useCallback(() => {
-    const query = `/api/logs?limit=${Math.max(1, Math.min(2000, Number(limit) || 300))}${levelFilter ? `&level=${levelFilter}` : ""}${eventFilter ? `&event_prefix=${encodeURIComponent(eventFilter)}` : ""}${debouncedText ? `&q=${encodeURIComponent(debouncedText)}` : ""}`;
-    api.get(query)
-      .then((d: unknown) => { setLogs(Array.isArray(d) ? d : []); setFetchError(null); lastToastedErrorRef.current = null; })
-      .catch((e: Error) => {
-        const msg = e.message || "Failed to load logs";
-        setFetchError(msg);
-        // Surface role/permission failures loudly, but do not spam a toast on
-        // every auto-refresh tick while the error persists.
-        if (lastToastedErrorRef.current !== msg) {
-          lastToastedErrorRef.current = msg;
-          addToast(msg, "error");
-        }
-      })
-      .finally(() => setLoading(false));
-  }, [levelFilter, eventFilter, debouncedText, limit, addToast]);
+  const logsQuery = useLogs(
+    {
+      limit,
+      level: levelFilter || undefined,
+      eventPrefix: eventFilter || undefined,
+      q: debouncedText || undefined,
+    },
+    autoRefresh ? 5000 : false,
+  );
 
+  // Surface role/permission failures loudly, but do not spam a toast on every
+  // auto-refresh tick while the same error persists.
   useEffect(() => {
-    loadLogs();
-  }, [loadLogs]);
+    const error = logsQuery.error;
+    if (!error) {
+      lastToastedErrorRef.current = null;
+      return;
+    }
+    const msg = error instanceof Error ? error.message : "Failed to load logs";
+    if (lastToastedErrorRef.current !== msg) {
+      lastToastedErrorRef.current = msg;
+      addToast(msg, "error");
+    }
+  }, [logsQuery.error, addToast]);
 
-  useEffect(() => {
-    if (!autoRefresh) return;
-    const t = setInterval(() => {
-      if (document.visibilityState === "visible") loadLogs();
-    }, 5000);
-    return () => clearInterval(t);
-  }, [autoRefresh, loadLogs]);
-
-  const rows = useMemo(() => [...logs].reverse(), [logs]);
-
-  const lvlColor = (lvl: string | undefined) => {
-    if (lvl === "ERROR") return "#f87171";
-    if (lvl === "WARNING") return "#f59e0b";
-    if (lvl === "INFO") return "#22d3ee";
-    return "#64748b";
-  };
+  const rows = useMemo(() => [...(logsQuery.data ?? [])].reverse(), [logsQuery.data]);
 
   return (
-    <div style={{
-      padding: "24px 32px",
-      maxWidth: 1400,
-      margin: "0 auto",
-      fontFamily: "'Inter', system-ui, sans-serif",
-      color: "#94a3b8",
-    }}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,gap:12,flexWrap:"wrap"}}>
+    <div className="h-full flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <div style={{color:"#e2e8f0",fontSize:20,fontWeight:700}}>Logs</div>
-          <div style={{color:"#475569",fontSize:11,marginTop:4}}>Structured backend events (JSON)</div>
+          <h1 className="text-lg font-bold text-primary">Logs</h1>
+          <p className="text-xs text-muted mt-0.5">Structured backend events (JSON)</p>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-          <select
+        <div className="flex items-center gap-2 flex-wrap">
+          <Select
             value={levelFilter}
-            onChange={e => setLevelFilter(e.target.value)}
-            style={{
-              backgroundColor:"#0c0f18",border:"1px solid #1e293b",borderRadius:6,
-              color:"#e2e8f0",padding:"6px 8px",fontFamily:"inherit",fontSize:11,
-            }}
+            onChange={(e) => setLevelFilter(e.target.value)}
+            aria-label="Filter by level"
+            className="w-auto"
           >
             <option value="">All levels</option>
             <option value="INFO">INFO</option>
             <option value="WARNING">WARNING</option>
             <option value="ERROR">ERROR</option>
-          </select>
-          <input
-            type="number"
-            min={1}
-            max={2000}
+          </Select>
+          <Select
             value={limit}
-            onChange={e => setLimit(Number(e.target.value))}
-            style={{
-              width:90,backgroundColor:"#0c0f18",border:"1px solid #1e293b",borderRadius:6,
-              color:"#e2e8f0",padding:"6px 8px",fontFamily:"inherit",fontSize:11,
-            }}
-          />
-          <input
+            onChange={(e) => setLimit(Number(e.target.value))}
+            aria-label="Log entry limit"
+            className="w-auto"
+          >
+            {LIMIT_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                {n} entries
+              </option>
+            ))}
+          </Select>
+          <Input
             value={eventFilter}
-            onChange={e => setEventFilter(e.target.value)}
+            onChange={(e) => setEventFilter(e.target.value)}
             placeholder="event prefix, e.g. scan."
-            style={{
-              width:220,backgroundColor:"#0c0f18",border:"1px solid #1e293b",borderRadius:6,
-              color:"#e2e8f0",padding:"6px 8px",fontFamily:"inherit",fontSize:11,
-            }}
+            aria-label="Filter by event prefix"
+            className="w-52"
           />
-          <input
+          <Input
             value={textFilter}
-            onChange={e => setTextFilter(e.target.value)}
+            onChange={(e) => setTextFilter(e.target.value)}
             placeholder="search payload text"
-            style={{
-              width:220,backgroundColor:"#0c0f18",border:"1px solid #1e293b",borderRadius:6,
-              color:"#e2e8f0",padding:"6px 8px",fontFamily:"inherit",fontSize:11,
-            }}
+            aria-label="Search payload text"
+            className="w-52"
           />
-          <label style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#64748b"}}>
-            <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} />
+          <label className="flex items-center gap-1.5 text-[11px] text-muted select-none">
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+              className="accent-accent cursor-pointer"
+            />
             Auto refresh
           </label>
-          <button
-            onClick={loadLogs}
-            style={{
-              border:"1px solid #1e293b",background:"#0f172a",color:"#94a3b8",
-              borderRadius:6,padding:"6px 10px",cursor:"pointer",fontFamily:"inherit",fontSize:11,
-            }}
-          >Refresh</button>
+          <Button variant="secondary" size="sm" onClick={() => void logsQuery.refetch()}>
+            Refresh
+          </Button>
         </div>
       </div>
 
-      <div style={{
-        border:"1px solid #1e293b",borderRadius:10,backgroundColor:"#0a0e18",
-        overflow:"hidden",
-      }}>
-        <div style={{display:"grid",gridTemplateColumns:"170px 90px 180px 1fr",gap:8,padding:"10px 12px",borderBottom:"1px solid #1e293b",fontSize:10,color:"#475569",letterSpacing:1}}>
-          <span>TIME</span>
-          <span>LEVEL</span>
-          <span>EVENT</span>
-          <span>PAYLOAD</span>
+      <div className="flex-1 min-h-0 flex flex-col bg-panel border border-line rounded-lg overflow-hidden">
+        <div className="grid grid-cols-[170px_90px_180px_1fr] gap-2 px-3 py-2 border-b border-line text-[10px] font-semibold uppercase tracking-wider text-muted">
+          <span>Time</span>
+          <span>Level</span>
+          <span>Event</span>
+          <span>Payload</span>
         </div>
 
-        <div style={{maxHeight:"calc(100vh - 190px)",overflowY:"auto"}}>
-          {loading ? (
-            <div style={{padding:14,color:"#475569",fontSize:11}}>Loading...</div>
-          ) : fetchError ? (
-            <div style={{padding:14,color:"#f87171",fontSize:11}}>Error: {fetchError}</div>
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {logsQuery.isLoading ? (
+            <div className="flex items-center gap-2 px-3 py-4 text-xs text-muted">
+              <Spinner size={12} />
+              Loading...
+            </div>
+          ) : logsQuery.isError ? (
+            <div className="px-3 py-4 text-xs text-danger">
+              Error: {logsQuery.error instanceof Error ? logsQuery.error.message : "Failed to load logs"}
+            </div>
           ) : rows.length === 0 ? (
-            <div style={{padding:14,color:"#475569",fontSize:11}}>No log entries</div>
-          ) : rows.map((entry, idx) => {
-            const { ts, level, event, ...payload } = entry || {};
-            return (
-              <div key={`${entry.ts || ""}-${idx}`} style={{display:"grid",gridTemplateColumns:"170px 90px 180px 1fr",gap:8,padding:"8px 12px",borderBottom:"1px solid #0f172a",fontSize:10,alignItems:"start"}}>
-                <span style={{color:"#64748b",whiteSpace:"nowrap"}}>{ts || "-"}</span>
-                <span style={{color:lvlColor(level),fontWeight:600}}>{level || "-"}</span>
-                <span style={{color:"#94a3b8",wordBreak:"break-all"}}>{event || "-"}</span>
-                <span style={{color:"#7dd3fc",wordBreak:"break-word"}}>{JSON.stringify(payload)}</span>
-              </div>
-            );
-          })}
+            <EmptyState title="No log entries" />
+          ) : (
+            rows.map((entry: LogEntry, idx: number) => {
+              const { ts, level, event, ...payload } = entry || {};
+              return (
+                <div
+                  key={`${entry.ts || ""}-${idx}`}
+                  className="grid grid-cols-[170px_90px_180px_1fr] gap-2 px-3 py-2 border-b border-line last:border-0 text-[10px] items-start"
+                >
+                  <span className="text-muted whitespace-nowrap">{ts || "-"}</span>
+                  <span>
+                    <Badge tone={levelTone(level)}>{level || "-"}</Badge>
+                  </span>
+                  <span className="text-muted break-all">{event || "-"}</span>
+                  <span className="text-accent break-words font-mono">{JSON.stringify(payload)}</span>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
     </div>

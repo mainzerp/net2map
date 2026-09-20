@@ -1,8 +1,14 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    // Prefer TypeScript sources over .js/.jsx on basename collisions
+    // (defensive; the former Port.jsx/Port.tsx duplicate is removed).
+    extensions: [".mjs", ".mts", ".ts", ".tsx", ".js", ".jsx", ".json"],
+  },
   server: {
     port: 5173,
     proxy: {

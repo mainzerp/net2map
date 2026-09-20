@@ -8,6 +8,7 @@ const ROUTE_MAP: Record<string, string> = {
   "4": "/network",
   "5": "/logs",
   "6": "/settings",
+  "7": "/racks",
 };
 
 export interface KeyboardShortcutOptions {

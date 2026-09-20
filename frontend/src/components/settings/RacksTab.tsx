@@ -1,12 +1,18 @@
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
+import { useMutation } from "@tanstack/react-query";
 import { api, extractErrorMessage } from "../../api";
 import type { RackInfo, TopologyNode } from "../../types";
+import { queryKeys, useDevices, useInvalidateApi, useRacks } from "../../hooks/api";
+import { Button, Card, EmptyState, Input, Modal } from "../ui";
+import { ConfirmDeleteModal, DeviceAssignment, Field, TabLoading } from "./shared";
 
 // ── RacksTabContent ──────────────────────────────────────────────────────────
 interface RackForm {
   label: string;
   room: string;
   description: string;
+  height_u: number | string;
 }
 
 interface EditState {
@@ -18,183 +24,178 @@ interface RacksTabContentProps {
   newEntryTrigger: number;
 }
 
-const EMPTY_RACK_FORM: RackForm = { label: "", room: "", description: "" };
+const EMPTY_RACK_FORM: RackForm = { label: "", room: "", description: "", height_u: 42 };
 
 function RacksTabContent({ newEntryTrigger }: RacksTabContentProps) {
-  const [racks, setRacks]       = useState<RackInfo[]>([]);
-  const [devices, setDevices]   = useState<TopologyNode[]>([]);
-  const [loading, setLoading]   = useState<boolean>(true);
+  const { data: racks = [], isLoading } = useRacks();
+  const { data: devicesRaw } = useDevices();
+  const { invalidate } = useInvalidateApi();
+
+  const devices: TopologyNode[] = Array.isArray(devicesRaw) ? devicesRaw : [];
+
   const [editState, setEditState] = useState<EditState>({ id: null, open: false });
-  const [form, setForm]         = useState<RackForm>({ ...EMPTY_RACK_FORM });
-  const [err, setErr]           = useState<string>("");
+  const [form, setForm] = useState<RackForm>({ ...EMPTY_RACK_FORM });
+  const [err, setErr] = useState<string>("");
   const [assignSel, setAssignSel] = useState<Record<number, string>>({});
-  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<RackInfo | null>(null);
 
   useEffect(() => {
     if (newEntryTrigger > 0) { startNew(); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newEntryTrigger]);
 
-  const refreshAll = () => {
-    setLoading(true);
-    Promise.allSettled([api.get("/api/racks"), api.get("/api/devices")])
-      .then(([racksRes, topoRes]) => {
-        if (racksRes.status === "fulfilled") setRacks(racksRes.value);
-        else setRacks([]);
-        if (topoRes.status === "fulfilled") setDevices(topoRes.value || []);
-        else setDevices([]);
-        setLoading(false);
-      });
-  };
-  useEffect(() => { refreshAll(); }, []);
-
   const resetForm = () => { setForm({ ...EMPTY_RACK_FORM }); setEditState({ id: null, open: false }); setErr(""); };
   const startNew = () => { setForm({ ...EMPTY_RACK_FORM }); setEditState({ id: null, open: true }); setErr(""); };
-  const startEdit = (r: RackInfo) => { setEditState({ id: r.id, open: true }); setForm({ label: r.label, room: r.room, description: r.description ?? "" }); setErr(""); };
+  const startEdit = (r: RackInfo) => {
+    setEditState({ id: r.id, open: true });
+    setForm({ label: r.label, room: r.room, description: r.description ?? "", height_u: r.height_u ?? 42 });
+    setErr("");
+  };
 
-  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault(); setErr("");
-    try {
-      if (!form.label.trim()) { setErr("Label is required"); return; }
-      if (editState.id) { await api.put(`/api/racks/${editState.id}`, form); }
-      else {
-        const r = await api.post("/api/racks", form);
-        if (r.detail) { setErr(typeof r.detail === "string" ? r.detail : JSON.stringify(r.detail)); return; }
+  const invalidateRacks = () => {
+    invalidate(queryKeys.racks, queryKeys.devices, queryKeys.topology);
+  };
+
+  const saveMutation = useMutation({
+    mutationFn: async (values: { id: number | null; form: RackForm }) => {
+      const payload = {
+        label: values.form.label,
+        room: values.form.room,
+        description: values.form.description,
+        height_u: Math.max(6, Math.min(60, Number(values.form.height_u) || 42)),
+      };
+      if (values.id) {
+        await api.put(`/api/racks/${values.id}`, payload);
+      } else {
+        const r = await api.post("/api/racks", payload);
+        if (r.detail) throw new Error(typeof r.detail === "string" ? r.detail : JSON.stringify(r.detail));
       }
-      resetForm(); refreshAll();
-    } catch (ex) { setErr(extractErrorMessage(ex)); }
-  };
+    },
+    onSuccess: () => {
+      invalidateRacks();
+      resetForm();
+    },
+    onError: (ex) => setErr(extractErrorMessage(ex)),
+  });
 
-  const remove = (id: number) => setConfirmDeleteId(id);
-  const removeConfirmed = async (id: number) => {
-    await api.del(`/api/racks/${id}`); setConfirmDeleteId(null); refreshAll();
-  };
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => api.del(`/api/racks/${id}`),
+    onSuccess: () => {
+      invalidateRacks();
+      setDeleteTarget(null);
+    },
+  });
 
-  const assignDevice = async (rackId: number) => {
-    const devId = assignSel[rackId];
-    if (!devId) return;
-    await api.patch(`/api/topology/devices/${devId}/meta`, { rack_id: rackId });
-    api.invalidate("/api/topology", "/api/racks", "/api/devices", "/api/credentials");
-    setAssignSel(prev => ({ ...prev, [rackId]: "" }));
-    refreshAll();
-  };
+  const assignMutation = useMutation({
+    mutationFn: ({ devId, rackId }: { devId: string; rackId: number | null }) =>
+      api.patch(`/api/topology/devices/${devId}/meta`, { rack_id: rackId }),
+    onSuccess: (_data, vars) => {
+      invalidate(queryKeys.topology, queryKeys.racks, queryKeys.devices, queryKeys.credentials);
+      const rackId = vars.rackId;
+      if (rackId != null) setAssignSel((prev) => ({ ...prev, [rackId]: "" }));
+    },
+  });
 
-  const unassignDevice = async (devId: number) => {
-    await api.patch(`/api/topology/devices/${devId}/meta`, { rack_id: null });
-    api.invalidate("/api/topology", "/api/racks", "/api/devices", "/api/credentials");
-    refreshAll();
+  const submit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setErr("");
+    if (!form.label.trim()) { setErr("Label is required"); return; }
+    saveMutation.mutate({ id: editState.id, form });
   };
-
-  const inp: React.CSSProperties = { backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5, color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, lineHeight:1.3, boxSizing:"border-box", width:"100%" };
-  const lbl: React.CSSProperties = { fontSize:10, color:"#94a3b8", display:"block", userSelect:"none" };
 
   return (
-    <div style={{flex:1,overflowY:"auto",paddingTop:20}}>
+    <div className="flex-1 overflow-y-auto pt-5">
+      {/* New / edit rack dialog */}
+      <Modal open={editState.open} onClose={resetForm} title={editState.id ? "Edit Rack" : "New Rack"} width={480}>
+        <form onSubmit={submit}>
+          <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Label">
+                <Input required value={form.label} onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))} placeholder="e.g. Rack A" />
+              </Field>
+              <Field label="Room / location">
+                <Input value={form.room} onChange={(e) => setForm((f) => ({ ...f, room: e.target.value }))} placeholder="e.g. RZ-01" />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Height (U)">
+                <Input
+                  type="number"
+                  min={6}
+                  max={60}
+                  value={form.height_u}
+                  onChange={(e) => setForm((f) => ({ ...f, height_u: e.target.value }))}
+                />
+              </Field>
+              <Field label="Description">
+                <Input value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} placeholder="optional" />
+              </Field>
+            </div>
+            {err && <div className="text-[11px] text-danger">{err}</div>}
+            <div className="flex gap-2 mt-1">
+              <Button type="submit" variant="primary" className="flex-1" disabled={saveMutation.isPending}>
+                {saveMutation.isPending ? "Saving..." : editState.id ? "Save" : "Create rack"}
+              </Button>
+              <Button type="button" onClick={resetForm}>Cancel</Button>
+            </div>
+          </div>
+        </form>
+      </Modal>
 
-      {/* Modal overlay for new / edit form */}
-      {editState.open && (
-        <div
-          onClick={(e: React.MouseEvent<HTMLDivElement>) => { if (e.target === e.currentTarget) resetForm(); }}
-          style={{
-            position:"fixed", inset:0, zIndex:200,
-            backgroundColor:"rgba(2,8,23,0.75)",
-            display:"flex", alignItems:"center", justifyContent:"center",
-          }}
-        >
-          <form onSubmit={submit} style={{
-            width:480, maxHeight:"calc(100vh - 80px)", overflowY:"auto",
-            backgroundColor:"#0a0e18", border:"1px solid #1e293b", borderRadius:12,
-            padding:"20px", boxShadow:"0 20px 40px rgba(0,0,0,0.6)",
-          }}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-              <div style={{color:"#94a3b8",fontSize:10,fontWeight:700,letterSpacing:1}}>
-                {editState.id ? "EDIT RACK" : "NEW RACK"}
-              </div>
-              <button type="button" onClick={resetForm} style={{background:"none",border:"none",color:"#475569",cursor:"pointer",fontSize:16,lineHeight:1,padding:"0 2px"}}>{"\u2715"}</button>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              <div><label style={lbl}>Label</label>
-                <input required style={inp} value={form.label} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({...f, label:e.target.value}))} placeholder="e.g. Rack A" /></div>
-              <div><label style={lbl}>Room / location</label>
-                <input style={inp} value={form.room} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({...f, room:e.target.value}))} placeholder="e.g. RZ-01" /></div>
-            </div>
-            <div style={{marginTop:8}}><label style={lbl}>Description</label>
-              <input style={inp} value={form.description} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({...f, description:e.target.value}))} placeholder="optional" /></div>
-            {err && <div style={{ color:"#f87171", fontSize:11, marginTop:8 }}>{err}</div>}
-            <div style={{ display:"flex", gap:8, marginTop:14 }}>
-              <button type="submit" style={{flex:1,backgroundColor:"#083344",border:"1px solid #164e63",color:"#22d3ee",borderRadius:6,padding:"8px",cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:600}}>
-                {editState.id ? "Save" : "Create rack"}
-              </button>
-              <button type="button" onClick={resetForm} style={{border:"1px solid #1e293b",background:"none",color:"#64748b",borderRadius:6,padding:"8px 16px",cursor:"pointer",fontFamily:"inherit",fontSize:11}}>
-                Cancel
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+      <ConfirmDeleteModal
+        open={deleteTarget != null}
+        title="Delete Rack"
+        message={deleteTarget ? `Delete rack "${deleteTarget.label}"? Assigned switches are unassigned, not deleted.` : ""}
+        busy={deleteMutation.isPending}
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
 
       {/* Card grid listing */}
-      {loading ? (
-        <div style={{ color:"#475569", fontSize:11 }}>Loading...</div>
+      {isLoading ? (
+        <TabLoading />
       ) : racks.length === 0 ? (
-        <div style={{ color:"#475569", fontSize:11, textAlign:"center", marginTop:20 }}>No racks defined yet</div>
+        <EmptyState title="No racks defined yet" hint="Create a rack with + New Entry above." />
       ) : (
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(300px, 1fr))",gap:8}}>
-          {racks.map(rack => {
-            const assigned  = devices.filter(d => d.rack_id === rack.id);
-            const available = devices.filter(d => d.rack_id == null && !d.ignored);
-            const selVal    = assignSel[rack.id] || "";
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2">
+          {racks.map((rack) => {
+            const assigned = devices.filter((d) => d.rack_id === rack.id);
+            const available = devices.filter((d) => d.rack_id == null && !d.ignored);
+            const selVal = assignSel[rack.id] || "";
             return (
-              <div key={rack.id} style={{ display:"flex", flexDirection:"column", padding:"10px 12px", backgroundColor:"#0a0e18", border:"1px solid #1e293b", borderRadius:8 }}>
-                <div style={{ display:"flex", alignItems:"flex-start" }}>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ color:"#e2e8f0", fontWeight:600, fontSize:13 }}>{rack.label}</div>
+              <Card key={rack.id}>
+                <div className="flex items-start gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-primary font-semibold text-[13px] truncate">{rack.label}</span>
+                      <span className="text-[10px] text-muted">{rack.height_u ?? 42}U</span>
+                    </div>
                     {(rack.room || rack.description) && (
-                      <div style={{ color:"#475569", fontSize:10, marginTop:2 }}>
+                      <div className="text-muted text-[10px] mt-0.5">
                         {rack.room}{rack.room && rack.description ? " - " : ""}{rack.description}
                       </div>
                     )}
                   </div>
-                  <div style={{ display:"flex", gap:4, flexShrink:0 }}>
-                    <button onClick={() => startEdit(rack)} style={{ background:"none", border:"1px solid #1e293b", color:"#64748b", borderRadius:4, padding:"2px 8px", cursor:"pointer", fontSize:10, fontFamily:"'Inter', system-ui, sans-serif" }}>Edit</button>
-                    {confirmDeleteId === rack.id ? (
-                      <span style={{display:"flex",gap:4}}>
-                        <button style={{background:"#450a0a",border:"1px solid #7f1d1d",color:"#fca5a5",borderRadius:4,padding:"2px 8px",cursor:"pointer",fontSize:10,fontFamily:"'Inter', system-ui, sans-serif"}} onClick={()=>removeConfirmed(rack.id)}>Confirm</button>
-                        <button style={{background:"none",border:"1px solid #1e293b",color:"#64748b",borderRadius:4,padding:"2px 8px",cursor:"pointer",fontSize:10,fontFamily:"'Inter', system-ui, sans-serif"}} onClick={()=>setConfirmDeleteId(null)}>Cancel</button>
-                      </span>
-                    ) : (
-                      <button onClick={() => remove(rack.id)} style={{ background:"none", border:"1px solid #7f1d1d", color:"#f87171", borderRadius:4, padding:"2px 8px", cursor:"pointer", fontSize:10, fontFamily:"'Inter', system-ui, sans-serif" }}>Delete</button>
-                    )}
+                  <div className="flex gap-1.5 shrink-0 items-center">
+                    <Link
+                      to={`/racks?rack=${rack.id}`}
+                      className="text-accent text-[10px] hover:underline whitespace-nowrap"
+                    >
+                      Open elevation
+                    </Link>
+                    <Button size="sm" onClick={() => startEdit(rack)}>Edit</Button>
+                    <Button size="sm" variant="danger" onClick={() => setDeleteTarget(rack)}>Delete</Button>
                   </div>
                 </div>
-                <div style={{ marginTop:10, borderTop:"1px solid #0f172a", paddingTop:8 }}>
-                  <div style={{ color:"#475569", fontSize:10, letterSpacing:1, marginBottom:6 }}>
-                    ASSIGNED SWITCHES ({assigned.length})
-                  </div>
-                  {assigned.length > 0 && (
-                    <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginBottom:8 }}>
-                      {assigned.map(d => (
-                        <div key={d.id} style={{ backgroundColor:"#0c1a2e", border:"1px solid #1e3a5f", borderRadius:4, padding:"2px 6px 2px 8px", display:"flex", alignItems:"center", gap:4, fontSize:10 }}>
-                          <span style={{ color:"#7dd3fc" }}>{d.sys_name || d.ip}</span>
-                          <span style={{ color:"#334155", fontSize:10 }}>{d.ip}</span>
-                          <button onClick={() => unassignDevice(d.id)} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", padding:"0 2px", fontSize:11, lineHeight:1 }} title="Unassign">x</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div style={{ display:"flex", gap:4 }}>
-                    <select value={selVal} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setAssignSel(p => ({...p, [rack.id]:e.target.value}))}
-                      style={{ flex:1, backgroundColor:"#020817", border:"1px solid #1e293b", borderRadius:4, padding:"4px 6px", color:selVal?"#e2e8f0":"#475569", fontFamily:"'Inter', system-ui, sans-serif", fontSize:10 }}>
-                      <option value="">-- Assign switch --</option>
-                      {available.map(d => <option key={d.id} value={d.id}>{d.sys_name || d.ip} ({d.ip})</option>)}
-                    </select>
-                    <button onClick={() => assignDevice(rack.id)} disabled={!selVal}
-                      style={{ backgroundColor:selVal?"#083344":"#0a0e18", border:"1px solid #164e63", color:selVal?"#22d3ee":"#1e3a5f", borderRadius:4, padding:"4px 10px", cursor:selVal?"pointer":"not-allowed", fontFamily:"'Inter', system-ui, sans-serif", fontSize:10 }}>
-                      Assign
-                    </button>
-                  </div>
-                </div>
-              </div>
+                <DeviceAssignment
+                  assigned={assigned}
+                  available={available}
+                  selVal={selVal}
+                  onSelect={(val) => setAssignSel((p) => ({ ...p, [rack.id]: val }))}
+                  onAssign={() => assignMutation.mutate({ devId: selVal, rackId: rack.id })}
+                  onUnassign={(devId) => assignMutation.mutate({ devId: String(devId), rackId: null })}
+                />
+              </Card>
             );
           })}
         </div>

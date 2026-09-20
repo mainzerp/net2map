@@ -16,16 +16,17 @@ vi.mock("react-router-dom", async () => {
 });
 
 // Mock the api module
+const mockApiPost = vi.fn();
 vi.mock("../api", () => ({
   API: "",
   login: vi.fn(),
+  extractErrorMessage: (ex: unknown) => (ex instanceof Error ? ex.message : String(ex)),
+  api: { post: (...args: unknown[]) => mockApiPost(...args) },
 }));
 
 describe("LoginPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Reset fetch mock
-    globalThis.fetch = vi.fn();
   });
 
   it("renders the login form with username and password fields", () => {
@@ -39,13 +40,10 @@ describe("LoginPage", () => {
     const user = userEvent.setup();
     const { login } = await import("../api");
 
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        access_token: "jwt-token-123",
-        username: "admin",
-        role: "admin",
-      }),
+    mockApiPost.mockResolvedValueOnce({
+      access_token: "jwt-token-123",
+      username: "admin",
+      role: "admin",
     });
 
     renderWithRouter(<LoginPage />);
@@ -55,14 +53,11 @@ describe("LoginPage", () => {
     await user.click(screen.getByRole("button", { name: /sign in/i }));
 
     await waitFor(() => {
-      expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+      expect(mockApiPost).toHaveBeenCalledWith("/api/auth/login", {
+        username: "admin",
+        password: "pass123",
+      });
     });
-
-    const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(fetchCall[0]).toBe("/api/auth/login");
-    const body = JSON.parse(fetchCall[1].body);
-    expect(body.username).toBe("admin");
-    expect(body.password).toBe("pass123");
 
     await waitFor(() => {
       expect(login).toHaveBeenCalledWith("jwt-token-123", { username: "admin", role: "admin" });
@@ -73,11 +68,7 @@ describe("LoginPage", () => {
   it("displays error message on failed login", async () => {
     const user = userEvent.setup();
 
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: false,
-      status: 401,
-      json: async () => ({ detail: "Invalid credentials" }),
-    });
+    mockApiPost.mockRejectedValueOnce(new Error("HTTP 401: Invalid credentials"));
 
     renderWithRouter(<LoginPage />);
 

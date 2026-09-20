@@ -1,19 +1,14 @@
 import { useRef, useState } from "react";
 import { normPort } from "../api";
-import type { TopologyNode, TopologyLink, SwitchClass, SwitchModel } from "../types";
+import type { TopologyNode, TopologyLink, SwitchClass, SwitchModel, PortLinkEntry } from "../types";
 import Port from "./Port";
-
-interface PortLinkMapEntry {
-  link: TopologyLink;
-  role: string;
-}
 
 interface SwitchPanelProps {
   device: TopologyNode;
   otherRacks?: { id: number; label: string }[];
   onMove?: (device: TopologyNode, rackId: number) => void;
   onUpdateMeta?: (device: TopologyNode, patch: Record<string, unknown>) => void;
-  portLinkMap: Record<string, PortLinkMapEntry> | null;
+  portLinkMap: Record<string, PortLinkEntry> | null;
   selectedLink: TopologyLink | null;
   onPortClick: ((link: TopologyLink | null) => void) | null;
   linkColorMap?: Record<string, string>;
@@ -30,89 +25,71 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
   const panelRef = useRef<HTMLDivElement>(null);
   const activePorts = device.ports.filter(p => p.oper_status === 1);
   const pingStatus = (device.ping_status as string) || "unknown";
-  const statusColor = pingStatus === "online" ? "#22c55e" : pingStatus === "offline" ? "#f87171" : "#64748b";
+  const statusColor = pingStatus === "online" ? "var(--success)" : pingStatus === "offline" ? "var(--danger)" : "var(--muted)";
 
   return (
-    <div ref={panelRef} style={{
-      backgroundColor:"#0f172a", border:"1px solid #1e293b",
-      borderRadius:10, marginBottom:6, overflow:"visible", position:"relative",
-      boxShadow:"none",
-      transition:"all 0.15s",
-    }}>
-      <div style={{
-        display:"flex", alignItems:"center", justifyContent:"space-between",
-        padding:"10px 14px", userSelect:"none",
-      }}>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
+    <div ref={panelRef} className="bg-panel border border-line rounded-lg mb-1.5 overflow-visible relative transition-all">
+      <div className="flex items-center justify-between px-3.5 py-2.5 select-none">
+        <div className="flex items-center gap-2.5">
           <div
             title={pingStatus === "online"
               ? `ping online${device.ping_rtt_ms ? ` (${device.ping_rtt_ms} ms)` : ""}`
               : pingStatus === "offline" ? "ping offline" : "ping unknown"}
-            style={{width:8,height:8,borderRadius:"50%",backgroundColor:statusColor,boxShadow:`0 0 6px ${statusColor}`}}/>
+            style={{ backgroundColor: statusColor, boxShadow: `0 0 6px ${statusColor}` }}
+            className="w-2 h-2 rounded-full shrink-0"
+          />
           <div>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <span style={{color:"#e2e8f0",fontWeight:600,fontSize:14}}>{switchModel ? switchModel.name : (device.model || device.sys_name)}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-primary font-semibold text-sm">{switchModel ? switchModel.name : (device.model || device.sys_name)}</span>
               {switchClass && (
-                <span style={{
-                  fontSize:10, padding:"1px 6px", borderRadius:3,
-                  backgroundColor:`${switchClass.color}18`,
-                  border:`1px solid ${switchClass.color}44`,
-                  color: switchClass.color,
-                }}>{switchClass.label}</span>
+                <span
+                  className="text-[10px] px-1.5 py-px rounded border"
+                  style={{
+                    backgroundColor: `${switchClass.color}18`,
+                    borderColor: `${switchClass.color}44`,
+                    color: switchClass.color,
+                  }}
+                >{switchClass.label}</span>
               )}
             </div>
-            {switchModel && <div style={{color:"#94a3b8",fontSize:11}}>{device.sys_name}</div>}
-            <div style={{color:"#64748b",fontSize:12}}>
+            {switchModel && <div className="text-muted text-[11px]">{device.sys_name}</div>}
+            <div className="text-muted text-xs">
               {device.ip} - {activePorts.length}/{device.ports.length} ports active - {pingStatus}
               {pingStatus === "online" && device.ping_rtt_ms ? ` ${device.ping_rtt_ms}ms` : ""}
             </div>
           </div>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:6}}>
-          <div
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
             title="Switch details"
             onClick={e => { e.stopPropagation(); onShowDetail?.(device.id); }}
-            style={{
-              fontSize:10, color:"#94a3b8",
-              padding:"3px 8px", borderRadius:4,
-              border:"1px solid #334155",
-              backgroundColor:"transparent",
-              cursor:"pointer", userSelect:"none",
-              letterSpacing:"0.03em",
-            }}
-          >Details</div>
+            className="text-[10px] text-muted px-2 py-0.5 rounded border border-line-strong bg-transparent hover:text-accent hover:border-accent transition-colors cursor-pointer select-none tracking-wide"
+          >Details</button>
           {onMove && otherRacks.length > 0 && (
-            <div
+            <button
+              type="button"
               title="Change rack"
               onClick={e => { e.stopPropagation(); setShowMove(v => !v); }}
-              style={{
-                fontSize:11, color: showMove ? "#22d3ee" : "#475569",
-                padding:"2px 5px", borderRadius:4,
-                border:`1px solid ${showMove ? "#164e63" : "#1e293b"}`,
-                backgroundColor: showMove ? "#083344" : "transparent",
-                cursor:"pointer", userSelect:"none",
-              }}
-            >{"<>"}</div>
+              className={`text-[11px] px-1.5 py-0.5 rounded border cursor-pointer select-none transition-colors ${
+                showMove
+                  ? "text-accent border-accent bg-panel-2"
+                  : "text-muted border-line bg-transparent hover:text-primary"
+              }`}
+            >{"<>"}</button>
           )}
         </div>
       </div>
       {showMove && otherRacks.length > 0 && (
-        <div style={{
-          padding:"6px 14px 10px", borderBottom:"1px solid #1e293b",
-          backgroundColor:"#080d18",
-        }}>
-          <div style={{fontSize:10,color:"#475569",marginBottom:5}}>Assign to rack:</div>
-          <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+        <div className="px-3.5 pt-1.5 pb-2.5 border-b border-line bg-surface">
+          <div className="text-[10px] text-muted mb-1.5">Assign to rack:</div>
+          <div className="flex gap-1.5 flex-wrap">
             {otherRacks.map(r => (
               <button
                 key={r.id}
+                type="button"
                 onClick={() => { onMove!(device, r.id); setShowMove(false); }}
-                style={{
-                  fontSize:10, padding:"3px 10px", borderRadius:5,
-                  border:"1px solid #164e63", backgroundColor:"#083344",
-                  color:"#22d3ee", cursor:"pointer",
-                  fontFamily:"'Inter', system-ui, sans-serif",
-                }}
+                className="text-[10px] px-2.5 py-0.5 rounded border border-accent text-accent bg-panel-2 hover:bg-accent hover:text-white transition-colors cursor-pointer"
               >{r.label}</button>
             ))}
           </div>
@@ -120,7 +97,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
       )}
 
       {device.ports.length > 0 && (
-        <div style={{padding:"0 14px 12px"}}>
+        <div className="px-3.5 pb-3">
           {(() => {
             const sorted = [...device.ports].sort((a, b) => (a.if_index || 0) - (b.if_index || 0));
             const cutoff = device.total_ports || sorted.length;
@@ -137,8 +114,8 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
               const topRow   = oddPorts.slice(startIdx, endIdx);
               const botRow   = evenPorts.slice(startIdx, endIdx);
               rows.push(
-                <div key={row} style={{marginBottom: row < rowCount - 1 ? 6 : 0}}>
-                  <div style={{display:"flex",gap:2,alignItems:"flex-start"}}>
+                <div key={row} style={{ marginBottom: row < rowCount - 1 ? 6 : 0 }}>
+                  <div className="flex gap-0.5 items-start">
                     {topRow.map(port => {
                       const pKey = `${device.ip}:${normPort(port.if_descr ?? "")}`;
                       return (
@@ -150,7 +127,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
                       );
                     })}
                   </div>
-                  <div style={{display:"flex",gap:2,alignItems:"flex-start",marginTop:1}}>
+                  <div className="flex gap-0.5 items-start mt-px">
                     {botRow.map(port => {
                       const pKey = `${device.ip}:${normPort(port.if_descr ?? "")}`;
                       return (
@@ -167,16 +144,16 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
             }
             return rows;
           })()}
-          <div style={{display:"flex",gap:14,marginTop:9,fontSize:10,color:"#475569",flexWrap:"wrap"}}>
-            <span><span style={{color:"#22c55e"}}>|</span> 1G</span>
-            <span><span style={{color:"#22d3ee"}}>|</span> 10G+</span>
-            <span><span style={{color:"#f59e0b"}}>|</span> &lt;1G</span>
-            <span><span style={{color:"#1e293b"}}>|</span> inactive</span>
+          <div className="flex gap-3.5 mt-2.5 text-[10px] text-muted flex-wrap">
+            <span><span className="text-success">|</span> 1G</span>
+            <span><span className="text-accent">|</span> 10G+</span>
+            <span><span className="text-warning">|</span> &lt;1G</span>
+            <span><span className="text-panel-2">|</span> inactive</span>
           </div>
         </div>
       )}
       {device.ports.length === 0 && (
-        <div style={{padding:"8px 14px 12px",color:"#334155",fontSize:11}}>No ports found - run scan</div>
+        <div className="px-3.5 pt-2 pb-3 text-muted text-[11px]">No ports found - run scan</div>
       )}
     </div>
   );

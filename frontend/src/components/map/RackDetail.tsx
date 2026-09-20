@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { CABLE_COLORS, VENDOR_COLOR, VENDOR_ICON, buildPortLinkMap, normPort } from "../../api";
-import type { TopologyNode, TopologyLink, RackInfo, SwitchClass, SwitchModel } from "../../types";
+import { buildPortLinkMap, normPort } from "../../api";
+import { CABLE_COLORS, VENDOR_COLOR, VENDOR_ICON } from "../../theme/visual";
+import type { TopologyNode, TopologyLink, SwitchClass, SwitchModel } from "../../types";
 import SwitchPanel from "../SwitchPanel";
 
 interface RackDetailRack {
@@ -58,6 +59,16 @@ interface ClassSection {
 interface ExternalLink extends TopologyLink {
   remoteRack?: AllRackEntry;
 }
+
+const reorderBtnClass = (disabled: boolean) =>
+  `bg-transparent border border-line rounded w-[18px] h-[18px] text-[10px] leading-none p-0 flex items-center justify-center transition-colors ${
+    disabled ? "text-line cursor-default" : "text-muted hover:text-accent hover:border-accent cursor-pointer"
+  }`;
+
+const sectionReorderBtnClass = (disabled: boolean) =>
+  `bg-transparent border border-line rounded w-4 h-4 text-[9px] leading-none p-0 flex items-center justify-center transition-colors ${
+    disabled ? "text-line cursor-default" : "text-muted hover:text-accent hover:border-accent cursor-pointer"
+  }`;
 
 // ── RackDetail ───────────────────────────────────────────────────────────────
 function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks, deviceOrder, onReorder, onReorderClass, onClose, onRename, onMoveDevice, onUpdateDeviceMeta, rackPairColorMap, selectedLink, onLinkSelect, onShowDetail, highlightPortKey }: RackDetailProps) {
@@ -155,7 +166,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
           key,
           classId: d.class_id,
           label: classMap[d.class_id]?.label || `Class ${d.class_id}`,
-          color: classMap[d.class_id]?.color || "#22d3ee",
+          color: classMap[d.class_id]?.color || "var(--accent)",
           devices: [],
         };
       }
@@ -176,7 +187,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
         key: "unclassified",
         classId: null,
         label: "Other",
-        color: "#64748b",
+        color: "var(--muted)",
         devices: sortGroup(unclassified, "unclassified"),
       },
     ];
@@ -278,7 +289,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
     });
     return m;
   }, [allVisibleLinks, ipToRackId, rackPairColorMap]);
-  const selColor  = resolvedSelectedLink ? (linkColorMap[`${resolvedSelectedLink.local_ip}:${normPort(resolvedSelectedLink.local_port)}`] || "#22d3ee") : null;
+  const selColor  = resolvedSelectedLink ? (linkColorMap[`${resolvedSelectedLink.local_ip}:${normPort(resolvedSelectedLink.local_port)}`] || "var(--accent)") : null;
   const toggleLink = useCallback((l: TopologyLink | null) => {
     const p = resolvedSelectedLink;
     // Match the isSel logic below: a link counts as selected in either
@@ -317,8 +328,8 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
   }, [resolvedSelectedLink]);
 
   const renderGroup = (devices: TopologyNode[], groupKey: string) => devices.map((d, idx) => (
-    <div key={d.id} style={{display:"flex",alignItems:"flex-start",gap:5,marginBottom:4}}>
-      <div style={{display:"flex",flexDirection:"column",gap:2,paddingTop:8,flexShrink:0}}>
+    <div key={d.id} className="flex items-start gap-1.5 mb-1">
+      <div className="flex flex-col gap-0.5 pt-2 shrink-0">
         <button
           type="button"
           onPointerDown={e => {
@@ -328,14 +339,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
             onReorder?.(d.id, "up", groupKey);
           }}
           disabled={idx === 0}
-          style={{
-            background:"none", border:"1px solid #1e293b",
-            color: idx === 0 ? "#1e293b" : "#475569",
-            borderRadius:3, width:18, height:18,
-            cursor: idx === 0 ? "default" : "pointer",
-            fontSize:10, lineHeight:1, padding:0, display:"flex",
-            alignItems:"center", justifyContent:"center",
-          }}>^</button>
+          className={reorderBtnClass(idx === 0)}>^</button>
         <button
           type="button"
           onPointerDown={e => {
@@ -345,16 +349,9 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
             onReorder?.(d.id, "down", groupKey);
           }}
           disabled={idx === devices.length - 1}
-          style={{
-            background:"none", border:"1px solid #1e293b",
-            color: idx === devices.length - 1 ? "#1e293b" : "#475569",
-            borderRadius:3, width:18, height:18,
-            cursor: idx === devices.length - 1 ? "default" : "pointer",
-            fontSize:10, lineHeight:1, padding:0, display:"flex",
-            alignItems:"center", justifyContent:"center",
-          }}>v</button>
+          className={reorderBtnClass(idx === devices.length - 1)}>v</button>
       </div>
-      <div style={{flex:1,minWidth:0}}>
+      <div className="flex-1 min-w-0">
         <SwitchPanel device={d} otherRacks={otherRacks} onMove={onMoveDevice}
           onUpdateMeta={onUpdateDeviceMeta}
           portLinkMap={portLinkMap} selectedLink={resolvedSelectedLink}
@@ -372,72 +369,63 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
     const a = devByIp[l.local_ip], b = devByIp[l.remote_ip];
     const isSel = (resolvedSelectedLink?.local_ip===l.local_ip && resolvedSelectedLink?.local_port===l.local_port)
                || (resolvedSelectedLink?.remote_ip===l.local_ip && resolvedSelectedLink?.remote_port===l.local_port);
-    const bg = isSel ? `${accentColor}14` : "transparent";
     return (
       <div
         key={i}
         onClick={() => toggleLink(l)}
         style={{
-          display:"grid", gridTemplateColumns:"1fr 64px 1fr",
-          alignItems:"center", gap:0,
-          padding:"6px 12px",
-          borderBottom: "1px solid #0f172a",
           borderLeft: isSel ? `3px solid ${accentColor}` : "3px solid transparent",
-          backgroundColor: bg, cursor:"pointer",
-          fontSize:10, position:"relative",
-          transition:"background 0.15s",
-        }}>
-        <div style={{minWidth:0,paddingRight:6}}>
-          <div style={{
-            color: isSel ? accentColor : (VENDOR_COLOR[a?.vendor]||"#94a3b8"),
-            fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-          }}>{VENDOR_ICON[a?.vendor]||"[--]"} {a?.sys_name || l.local_ip}</div>
-          <div style={{color:"#64748b",fontSize:10,marginTop:1}}>{l.local_port}</div>
+          backgroundColor: isSel ? `${accentColor}14` : "transparent",
+        }}
+        className="grid grid-cols-[1fr_64px_1fr] items-center px-3 py-1.5 border-b border-line cursor-pointer text-[10px] relative transition-colors"
+      >
+        <div className="min-w-0 pr-1.5">
+          <div
+            style={{ color: isSel ? accentColor : (VENDOR_COLOR[a?.vendor] || "var(--muted)") }}
+            className="font-semibold overflow-hidden text-ellipsis whitespace-nowrap"
+          >{VENDOR_ICON[a?.vendor]||"[--]"} {a?.sys_name || l.local_ip}</div>
+          <div className="text-muted text-[10px] mt-px">{l.local_port}</div>
         </div>
-        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-          <div style={{
-            width:"100%", height: isSel ? 5 : 4, borderRadius:2,
-            background:`linear-gradient(90deg, ${accentColor}cc, ${accentColor})`,
-            boxShadow: isSel ? `0 0 10px ${accentColor}` : `0 0 6px ${accentColor}88`,
-          }}/>
-          <span style={{
-            fontSize:10, color:accentColor, fontWeight:700,
-            letterSpacing:"0.05em",
-          }}>{l.speed_label}</span>
+        <div className="flex flex-col items-center gap-0.5">
+          <div
+            className="w-full rounded-sm"
+            style={{
+              height: isSel ? 5 : 4,
+              background: `linear-gradient(90deg, ${accentColor}cc, ${accentColor})`,
+              boxShadow: isSel ? `0 0 10px ${accentColor}` : `0 0 6px ${accentColor}88`,
+            }}
+          />
+          <span
+            style={{ color: accentColor }}
+            className="text-[10px] font-bold tracking-wider"
+          >{l.speed_label}</span>
         </div>
-        <div style={{minWidth:0,paddingLeft:6,textAlign:"right"}}>
-          <div style={{
-            color: isSel ? accentColor : (VENDOR_COLOR[b?.vendor]||"#94a3b8"),
-            fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-          }}>{b?.sys_name || l.remote_ip} {VENDOR_ICON[b?.vendor]||"[--]"}</div>
-          <div style={{color:"#64748b",fontSize:10,marginTop:1}}>{l.remote_port}</div>
+        <div className="min-w-0 pl-1.5 text-right">
+          <div
+            style={{ color: isSel ? accentColor : (VENDOR_COLOR[b?.vendor] || "var(--muted)") }}
+            className="font-semibold overflow-hidden text-ellipsis whitespace-nowrap"
+          >{b?.sys_name || l.remote_ip} {VENDOR_ICON[b?.vendor]||"[--]"}</div>
+          <div className="text-muted text-[10px] mt-px">{l.remote_port}</div>
         </div>
       </div>
     );
   };
 
+  const sectionHeaderClass = "text-[10px] mb-1.5 tracking-widest uppercase flex items-center gap-2";
+
   return (
     <>
-    <div style={{
-      width:"100%", height:"100%",
-      backgroundColor:"#020817", borderLeft:"1px solid #1e293b",
-      display:"flex", flexDirection:"column",
-      fontFamily:"'Inter', system-ui, sans-serif",
-      animation:"slideIn 0.2s ease",
-    }}>
+    <div className="w-full h-full bg-surface border-l border-line flex flex-col animate-[slideIn_0.2s_ease]">
       <style>{`
         @keyframes slideIn{from{transform:translateX(100%)}to{transform:translateX(0)}}
         @keyframes dashFlow{to{stroke-dashoffset:-12}}
       `}</style>
 
       {/* Header */}
-      <div ref={panelHeaderRef} style={{
-        padding:"16px 20px", borderBottom:"1px solid #1e293b",
-        display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0,
-      }}>
-        <div style={{flex:1,minWidth:0}}>
+      <div ref={panelHeaderRef} className="px-5 py-4 border-b border-line flex items-center justify-between shrink-0">
+        <div className="flex-1 min-w-0">
           {editing && canRename ? (
-            <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <div className="flex items-center gap-1.5">
               <input
                 autoFocus value={nameInput}
                 onChange={e => setNameInput(e.target.value)}
@@ -445,56 +433,57 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
                   if (e.key === "Enter")  commitRename();
                   if (e.key === "Escape") { setNameInput(rack.label); setEditing(false); }
                 }}
-                style={{
-                  fontSize:15, fontWeight:700,
-                  background:"#0f172a", border:"1px solid #22d3ee",
-                  color:"#e2e8f0", borderRadius:5, padding:"3px 8px",
-                  fontFamily:"inherit", outline:"none", width:180,
-                }}
+                className="text-[15px] font-bold bg-panel-2 border border-accent text-primary rounded px-2 py-0.5 font-inherit outline-none w-44"
               />
-              <button onClick={commitRename} style={{background:"#083344",border:"1px solid #164e63",color:"#22d3ee",borderRadius:5,padding:"3px 8px",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>OK</button>
-              <button onClick={() => { setNameInput(rack.label); setEditing(false); }} style={{background:"none",border:"1px solid #1e293b",color:"#64748b",borderRadius:5,padding:"3px 8px",cursor:"pointer",fontSize:11}}>X</button>
+              <button
+                type="button"
+                onClick={commitRename}
+                className="bg-panel-2 border border-accent text-accent rounded px-2 py-0.5 cursor-pointer text-[11px]"
+              >OK</button>
+              <button
+                type="button"
+                onClick={() => { setNameInput(rack.label); setEditing(false); }}
+                className="bg-transparent border border-line text-muted rounded px-2 py-0.5 cursor-pointer text-[11px]"
+              >X</button>
             </div>
           ) : (
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <div style={{color:"#e2e8f0",fontWeight:700,fontSize:16}}>{rack.label}</div>
+            <div className="flex items-center gap-2">
+              <div className="text-primary font-bold text-base">{rack.label}</div>
               {canRename && (
                 <button
+                  type="button"
                   onClick={() => { setNameInput(rack.label); setEditing(true); }}
                   title="Rename rack"
-                  style={{background:"none",border:"1px solid #1e293b",color:"#475569",borderRadius:4,padding:"2px 6px",cursor:"pointer",fontSize:11}}
+                  className="bg-transparent border border-line text-muted rounded px-1.5 py-0.5 cursor-pointer text-[11px] hover:text-accent hover:border-accent transition-colors"
                 >Edit</button>
               )}
             </div>
           )}
-          <div style={{color:"#475569",fontSize:11,marginTop:2,display:"flex",gap:10}}>
+          <div className="text-muted text-[11px] mt-0.5 flex gap-2.5">
             <span>{rack.location}</span>
             <span>{activePorts}/{totalPorts} ports active</span>
           </div>
         </div>
-        <button onClick={onClose} style={{background:"none",border:"1px solid #1e293b",color:"#64748b",borderRadius:6,padding:"4px 10px",cursor:"pointer",fontSize:16,flexShrink:0}}>X</button>
+        <button
+          type="button"
+          onClick={onClose}
+          className="bg-transparent border border-line text-muted rounded-md px-2.5 py-1 cursor-pointer text-base shrink-0 hover:text-primary transition-colors"
+        >X</button>
       </div>
 
       {/* Content */}
-      <div ref={scrollRef} style={{flex:1,overflowY:"auto",overflowX:"auto",padding:"12px 20px"}}>
+      <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-auto px-5 py-3">
 
         {classSections.map((section, idx) => (
           <div key={section.key}>
-            <div style={{
-              fontSize:10,
-              color: section.color,
-              marginTop: idx === 0 ? 0 : 10,
-              marginBottom:6,
-              letterSpacing:"0.1em",
-              textTransform:"uppercase",
-              display:"flex",
-              alignItems:"center",
-              gap:8,
-            }}>
-              <span style={{flex:1,borderBottom:`1px solid ${section.color}44`,height:0,display:"inline-block"}}/>
+            <div
+              className={sectionHeaderClass}
+              style={{ color: section.color, marginTop: idx === 0 ? 0 : 10 }}
+            >
+              <span className="flex-1 h-0 inline-block" style={{ borderBottom: `1px solid ${section.color}44` }}/>
               {section.label} ({section.devices.length})
-              <span style={{flex:1,borderBottom:`1px solid ${section.color}44`,height:0,display:"inline-block"}}/>
-              <div style={{display:"flex",gap:2,marginLeft:4}}>
+              <span className="flex-1 h-0 inline-block" style={{ borderBottom: `1px solid ${section.color}44` }}/>
+              <div className="flex gap-0.5 ml-1">
                 <button
                   type="button"
                   onPointerDown={e => {
@@ -505,14 +494,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
                     onReorderClass?.(section.key, "up", sectionKeys);
                   }}
                   disabled={idx === 0}
-                  style={{
-                    background:"none", border:"1px solid #1e293b",
-                    color: idx === 0 ? "#1e293b" : "#475569",
-                    borderRadius:3, width:16, height:16,
-                    cursor: idx === 0 ? "default" : "pointer",
-                    fontSize:9, lineHeight:1, padding:0, display:"flex",
-                    alignItems:"center", justifyContent:"center",
-                  }}
+                  className={sectionReorderBtnClass(idx === 0)}
                 >^</button>
                 <button
                   type="button"
@@ -524,14 +506,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
                     onReorderClass?.(section.key, "down", sectionKeys);
                   }}
                   disabled={idx === classSections.length - 1}
-                  style={{
-                    background:"none", border:"1px solid #1e293b",
-                    color: idx === classSections.length - 1 ? "#1e293b" : "#475569",
-                    borderRadius:3, width:16, height:16,
-                    cursor: idx === classSections.length - 1 ? "default" : "pointer",
-                    fontSize:9, lineHeight:1, padding:0, display:"flex",
-                    alignItems:"center", justifyContent:"center",
-                  }}
+                  className={sectionReorderBtnClass(idx === classSections.length - 1)}
                 >v</button>
               </div>
             </div>
@@ -541,16 +516,12 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
 
         {uplinks.length > 0 && (
           <>
-            <div style={{
-              fontSize:10, color:"#4ade80", marginTop:16, marginBottom:6,
-              letterSpacing:"0.1em", textTransform:"uppercase",
-              display:"flex", alignItems:"center", gap:8,
-            }}>
-              <span style={{flex:1,borderBottom:"1px solid #14532d",height:0,display:"inline-block"}}/>
+            <div className={`${sectionHeaderClass} text-success mt-4`}>
+              <span className="flex-1 h-0 inline-block border-b border-success opacity-40"/>
               Uplinks ({uplinks.length})
-              <span style={{flex:1,borderBottom:"1px solid #14532d",height:0,display:"inline-block"}}/>
+              <span className="flex-1 h-0 inline-block border-b border-success opacity-40"/>
             </div>
-            <div style={{backgroundColor:"#080d18",border:"1px solid #1e293b",borderRadius:8,overflow:"hidden"}}>
+            <div className="bg-panel border border-line rounded-lg overflow-hidden">
               {uplinks.map((l, i) => renderLink(l, i, linkColorMap[`${l.local_ip}:${normPort(l.local_port)}`] || CABLE_COLORS[i % CABLE_COLORS.length]))}
             </div>
           </>
@@ -558,58 +529,48 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
 
         {trunks.length > 0 && (
           <>
-            <div style={{
-              fontSize:10, color:"#22d3ee", marginTop:12, marginBottom:6,
-              letterSpacing:"0.1em", textTransform:"uppercase",
-              display:"flex", alignItems:"center", gap:8,
-            }}>
-              <span style={{flex:1,borderBottom:"1px solid #164e63",height:0,display:"inline-block"}}/>
+            <div className={`${sectionHeaderClass} text-accent mt-3`}>
+              <span className="flex-1 h-0 inline-block border-b border-accent opacity-40"/>
               TOR Trunks ({trunks.length})
-              <span style={{flex:1,borderBottom:"1px solid #164e63",height:0,display:"inline-block"}}/>
+              <span className="flex-1 h-0 inline-block border-b border-accent opacity-40"/>
             </div>
-            <div style={{backgroundColor:"#080d18",border:"1px solid #1e293b",borderRadius:8,overflow:"hidden"}}>
-              {trunks.map((l, i) => renderLink(l, i, linkColorMap[`${l.local_ip}:${normPort(l.local_port)}`] || "#22d3ee"))}
+            <div className="bg-panel border border-line rounded-lg overflow-hidden">
+              {trunks.map((l, i) => renderLink(l, i, linkColorMap[`${l.local_ip}:${normPort(l.local_port)}`] || "var(--accent)"))}
             </div>
           </>
         )}
 
         {external.length > 0 && (
           <>
-            <div style={{
-              fontSize:10, color:"#818cf8", marginTop:16, marginBottom:6,
-              letterSpacing:"0.1em", textTransform:"uppercase",
-              display:"flex", alignItems:"center", gap:8,
-            }}>
-              <span style={{flex:1,borderBottom:"1px solid #312e81",height:0,display:"inline-block"}}/>
+            <div className={`${sectionHeaderClass} text-external mt-4`}>
+              <span className="flex-1 h-0 inline-block border-b border-external opacity-40"/>
               Inter-Rack ({external.length})
-              <span style={{flex:1,borderBottom:"1px solid #312e81",height:0,display:"inline-block"}}/>
+              <span className="flex-1 h-0 inline-block border-b border-external opacity-40"/>
             </div>
-            <div style={{backgroundColor:"#080d18",border:"1px solid #1e293b",borderRadius:8,overflow:"hidden"}}>
+            <div className="bg-panel border border-line rounded-lg overflow-hidden">
               {external.map((l, i) => {
                 const localDev = devByIp[l.local_ip];
                 const remoteLabel = l.remoteRack?.label || l.remote_ip;
-                const c = "#818cf8";
                 return (
-                  <div key={i} style={{
-                    display:"grid", gridTemplateColumns:"1fr 80px 1fr",
-                    alignItems:"center", gap:0,
-                    padding:"6px 12px", borderBottom:"1px solid #0f172a", fontSize:10,
-                  }}>
-                    <div style={{minWidth:0,paddingRight:6}}>
-                      <div style={{color:VENDOR_COLOR[localDev?.vendor]||"#94a3b8",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  <div key={i} className="grid grid-cols-[1fr_80px_1fr] items-center px-3 py-1.5 border-b border-line text-[10px]">
+                    <div className="min-w-0 pr-1.5">
+                      <div
+                        style={{ color: VENDOR_COLOR[localDev?.vendor] || "var(--muted)" }}
+                        className="font-semibold overflow-hidden text-ellipsis whitespace-nowrap"
+                      >
                         {VENDOR_ICON[localDev?.vendor]||"[--]"} {localDev?.sys_name || l.local_ip}
                       </div>
-                      <div style={{color:"#64748b",fontSize:10,marginTop:1}}>{l.local_port}</div>
+                      <div className="text-muted text-[10px] mt-px">{l.local_port}</div>
                     </div>
-                    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                      <div style={{width:"100%",height:3,borderRadius:2,background:`linear-gradient(90deg,${c}99,${c})`,boxShadow:`0 0 5px ${c}66`}}/>
-                      <span style={{fontSize:10,color:c,fontWeight:700,letterSpacing:"0.05em"}}>{l.speed_label}</span>
+                    <div className="flex flex-col items-center gap-0.5">
+                      <div className="w-full h-[3px] rounded-sm bg-external shadow-[0_0_5px_var(--external)]"/>
+                      <span className="text-[10px] text-external font-bold tracking-wider">{l.speed_label}</span>
                     </div>
-                    <div style={{minWidth:0,paddingLeft:6,textAlign:"right"}}>
-                      <div style={{color:"#818cf8",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    <div className="min-w-0 pl-1.5 text-right">
+                      <div className="text-external font-semibold overflow-hidden text-ellipsis whitespace-nowrap">
                         {remoteLabel}
                       </div>
-                      <div style={{color:"#64748b",fontSize:10,marginTop:1}}>{l.remote_port}</div>
+                      <div className="text-muted text-[10px] mt-px">{l.remote_port}</div>
                     </div>
                   </div>
                 );
@@ -619,30 +580,22 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
         )}
 
         {allIntraLinks.length > 0 && (
-          <div style={{
-            marginTop:14, padding:"8px 12px",
-            backgroundColor:"#0c0f18", borderRadius:8, border:"1px solid #1e293b",
-          }}>
-            <div style={{color:"#334155",fontSize:10,marginBottom:6,letterSpacing:1,textTransform:"uppercase"}}>Cable Map</div>
+          <div className="mt-3.5 px-3 py-2 bg-panel rounded-lg border border-line">
+            <div className="text-muted text-[10px] mb-1.5 tracking-widest uppercase">Cable Map</div>
             {allIntraLinks.map((l, i) => {
               const c = linkColorMap[`${l.local_ip}:${normPort(l.local_port)}`] || CABLE_COLORS[i % CABLE_COLORS.length];
               const isSel = resolvedSelectedLink?.local_ip===l.local_ip && resolvedSelectedLink?.local_port===l.local_port;
               return (
                 <div key={i} onClick={() => toggleLink(l)} style={{
-                  display:"flex", alignItems:"center", gap:8, marginBottom:4,
-                  cursor:"pointer", padding:"3px 6px", borderRadius:4,
                   backgroundColor: isSel ? `${c}14` : "transparent",
-                  transition:"background 0.15s",
-                }}>
-                  <div style={{width:24,height:2,backgroundColor:c,borderRadius:2,flexShrink:0}}/>
-                  <span style={{color:"#64748b",fontSize:10,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                }} className="flex items-center gap-2 mb-1 cursor-pointer px-1.5 py-0.5 rounded transition-colors">
+                  <div style={{ backgroundColor: c }} className="w-6 h-0.5 rounded-sm shrink-0"/>
+                  <span className="text-muted text-[10px] flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
                     {devByIp[l.local_ip]?.sys_name||l.local_ip} {l.local_port} {"<->"} {l.remote_port} {devByIp[l.remote_ip]?.sys_name||l.remote_ip}
                   </span>
                   <span style={{
-                    padding:"1px 5px", fontSize:10,
-                    backgroundColor:`${c}18`, border:`1px solid ${c}33`,
-                    borderRadius:3, color:c, flexShrink:0,
-                  }}>{l.speed_label}</span>
+                    backgroundColor: `${c}18`, border: `1px solid ${c}33`, color: c,
+                  }} className="px-1.5 py-px text-[10px] rounded shrink-0">{l.speed_label}</span>
                 </div>
               );
             })}
@@ -650,7 +603,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
         )}
       </div>
 
-      <div style={{padding:"8px 20px",borderTop:"1px solid #1e293b",fontSize:10,color:"#334155",textAlign:"center",flexShrink:0}}>
+      <div className="px-5 py-2 border-t border-line text-[10px] text-muted text-center shrink-0">
         Click a port (*) or cable map row to highlight a connection
       </div>
     </div>

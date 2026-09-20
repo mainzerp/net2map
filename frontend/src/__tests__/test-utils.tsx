@@ -4,20 +4,36 @@
 import React, { type ReactElement } from "react";
 import { render, type RenderOptions } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { vi } from "vitest";
 import { ToastProvider } from "../components/ToastProvider";
 
 /**
- * Render a component wrapped in MemoryRouter and ToastProvider for tests.
+ * Fresh React Query client per render: no retries, no cache reuse across tests.
+ */
+export function createTestQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, staleTime: 0, gcTime: 0 },
+    },
+  });
+}
+
+/**
+ * Render a component wrapped in QueryClientProvider, MemoryRouter and
+ * ToastProvider for tests.
  */
 export function renderWithRouter(
   ui: ReactElement,
-  { route = "/", ...options }: RenderOptions & { route?: string } = {},
+  { route = "/", queryClient, ...options }: RenderOptions & { route?: string; queryClient?: QueryClient } = {},
 ) {
+  const client = queryClient ?? createTestQueryClient();
   return render(
-    <MemoryRouter initialEntries={[route]}>
-      <ToastProvider>{ui}</ToastProvider>
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[route]}>
+        <ToastProvider>{ui}</ToastProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
     options,
   );
 }

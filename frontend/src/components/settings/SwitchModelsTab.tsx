@@ -1,6 +1,10 @@
 import { useState, useEffect } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { api, extractErrorMessage } from "../../api";
 import type { SwitchModel, TopologyNode } from "../../types";
+import { queryKeys, useDevices, useInvalidateApi, useSwitchModels } from "../../hooks/api";
+import { Badge, Button, Card, EmptyState, Input, Modal } from "../ui";
+import { ConfirmDeleteModal, DeviceAssignment, Field, TabLoading } from "./shared";
 
 // ── ModelsTabContent ────────────────────────────────────────────────────────
 interface ModelForm {
@@ -22,236 +26,200 @@ interface ModelsTabContentProps {
 const EMPTY_MODEL_FORM: ModelForm = { name: "", ports_per_row: 24, total_ports: "", description: "" };
 
 function ModelsTabContent({ newEntryTrigger }: ModelsTabContentProps) {
-  const [models, setModels]     = useState<SwitchModel[]>([]);
-  const [devices, setDevices]   = useState<TopologyNode[]>([]);
-  const [loading, setLoading]   = useState<boolean>(true);
+  const { data: models = [], isLoading } = useSwitchModels();
+  const { data: devicesRaw } = useDevices();
+  const { invalidate } = useInvalidateApi();
+
+  const devices: TopologyNode[] = Array.isArray(devicesRaw) ? devicesRaw : [];
+
   const [editState, setEditState] = useState<EditState>({ id: null, open: false });
-  const [form, setForm]         = useState<ModelForm>({ ...EMPTY_MODEL_FORM });
+  const [form, setForm] = useState<ModelForm>({ ...EMPTY_MODEL_FORM });
   const [cutoffEnabled, setCutoffEnabled] = useState<boolean>(false);
-  const [err, setErr]           = useState<string>("");
+  const [err, setErr] = useState<string>("");
   const [assignSel, setAssignSel] = useState<Record<number, string>>({});
-  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SwitchModel | null>(null);
 
   useEffect(() => {
     if (newEntryTrigger > 0) { startNew(); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newEntryTrigger]);
 
-  const refreshAll = () => {
-    setLoading(true);
-    Promise.allSettled([api.get("/api/switch-models"), api.get("/api/devices")])
-      .then(([modelsRes, topoRes]) => {
-        if (modelsRes.status === "fulfilled") setModels(modelsRes.value);
-        else setModels([]);
-        if (topoRes.status === "fulfilled") setDevices(topoRes.value || []);
-        else setDevices([]);
-        setLoading(false);
-      });
-  };
-  useEffect(() => { refreshAll(); }, []);
-
   const resetForm = () => { setForm({ ...EMPTY_MODEL_FORM }); setCutoffEnabled(false); setEditState({ id: null, open: false }); setErr(""); };
   const startNew = () => { setForm({ ...EMPTY_MODEL_FORM }); setCutoffEnabled(false); setEditState({ id: null, open: true }); setErr(""); };
   const startEdit = (sm: SwitchModel) => {
     setEditState({ id: sm.id, open: true });
-    setForm({ name: sm.name, ports_per_row: sm.ports_per_row, total_ports: sm.total_ports ?? "", description: (sm as SwitchModel & { description?: string }).description ?? "" });
+    setForm({
+      name: sm.name,
+      ports_per_row: sm.ports_per_row,
+      total_ports: sm.total_ports ?? "",
+      description: (sm as SwitchModel & { description?: string }).description ?? "",
+    });
     setCutoffEnabled(sm.total_ports != null);
     setErr("");
   };
 
-  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault(); setErr("");
-    try {
-      if (!String(form.name).trim()) { setErr("Name is required"); return; }
-      const ppr = parseInt(String(form.ports_per_row), 10);
-      if (isNaN(ppr) || ppr < 1) { setErr("Ports per row must be a positive number"); return; }
+  const saveMutation = useMutation({
+    mutationFn: async (values: { id: number | null; form: ModelForm; cutoff: boolean }) => {
+      const ppr = parseInt(String(values.form.ports_per_row), 10);
+      if (!String(values.form.name).trim()) throw new Error("Name is required");
+      if (isNaN(ppr) || ppr < 1) throw new Error("Ports per row must be a positive number");
       const payload = {
-        name: String(form.name).trim(),
+        name: String(values.form.name).trim(),
         ports_per_row: ppr,
-        total_ports: cutoffEnabled && form.total_ports !== "" ? parseInt(String(form.total_ports), 10) || null : null,
-        description: form.description,
+        total_ports: values.cutoff && values.form.total_ports !== "" ? parseInt(String(values.form.total_ports), 10) || null : null,
+        description: values.form.description,
       };
-      if (editState.id) { await api.put(`/api/switch-models/${editState.id}`, payload); }
-      else {
+      if (values.id) {
+        await api.put(`/api/switch-models/${values.id}`, payload);
+      } else {
         const r = await api.post("/api/switch-models", payload);
-        if (r.detail) { setErr(typeof r.detail === "string" ? r.detail : JSON.stringify(r.detail)); return; }
+        if (r.detail) throw new Error(typeof r.detail === "string" ? r.detail : JSON.stringify(r.detail));
       }
-      resetForm(); refreshAll();
-    } catch (ex) { setErr(extractErrorMessage(ex)); }
-  };
+    },
+    onSuccess: () => {
+      invalidate(queryKeys.switchModels);
+      resetForm();
+    },
+    onError: (ex) => setErr(extractErrorMessage(ex)),
+  });
 
-  const remove = (id: number) => setConfirmDeleteId(id);
-  const removeConfirmed = async (id: number) => {
-    await api.del(`/api/switch-models/${id}`); setConfirmDeleteId(null); refreshAll();
-  };
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => api.del(`/api/switch-models/${id}`),
+    onSuccess: () => {
+      invalidate(queryKeys.switchModels);
+      setDeleteTarget(null);
+    },
+  });
 
-  const assignDevice = async (modelId: number) => {
-    const devId = assignSel[modelId];
-    if (!devId) return;
-    await api.patch(`/api/topology/devices/${devId}/meta`, { model_id: modelId });
-    api.invalidate("/api/topology", "/api/devices", "/api/credentials");
-    setAssignSel(prev => ({ ...prev, [modelId]: "" }));
-    refreshAll();
-  };
+  const assignMutation = useMutation({
+    mutationFn: ({ devId, modelId }: { devId: string; modelId: number | null }) =>
+      api.patch(`/api/topology/devices/${devId}/meta`, { model_id: modelId }),
+    onSuccess: (_data, vars) => {
+      invalidate(queryKeys.topology, queryKeys.devices, queryKeys.credentials);
+      const modelId = vars.modelId;
+      if (modelId != null) setAssignSel((prev) => ({ ...prev, [modelId]: "" }));
+    },
+  });
 
-  const unassignDevice = async (devId: number) => {
-    await api.patch(`/api/topology/devices/${devId}/meta`, { model_id: null });
-    api.invalidate("/api/topology", "/api/devices", "/api/credentials");
-    refreshAll();
+  const submit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setErr("");
+    saveMutation.mutate({ id: editState.id, form, cutoff: cutoffEnabled });
   };
-
-  const inp: React.CSSProperties = { backgroundColor:"#0c0f18", border:"1px solid #1e293b", borderRadius:5, color:"#e2e8f0", padding:"5px 8px", fontFamily:"'Inter', system-ui, sans-serif", fontSize:11, lineHeight:1.3, boxSizing:"border-box", width:"100%" };
-  const lbl: React.CSSProperties = { fontSize:10, color:"#94a3b8", display:"block", userSelect:"none" };
 
   return (
-    <div style={{flex:1,overflowY:"auto",paddingTop:20}}>
-
-      {/* Modal overlay for new / edit form */}
-      {editState.open && (
-        <div
-          onClick={(e: React.MouseEvent<HTMLDivElement>) => { if (e.target === e.currentTarget) resetForm(); }}
-          style={{
-            position:"fixed", inset:0, zIndex:200,
-            backgroundColor:"rgba(2,8,23,0.75)",
-            display:"flex", alignItems:"center", justifyContent:"center",
-          }}
-        >
-          <form onSubmit={submit} style={{
-            width:520, maxHeight:"calc(100vh - 80px)", overflowY:"auto",
-            backgroundColor:"#0a0e18", border:"1px solid #1e293b", borderRadius:12,
-            padding:"20px", boxShadow:"0 20px 40px rgba(0,0,0,0.6)",
-          }}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-              <div style={{color:"#94a3b8",fontSize:10,fontWeight:700,letterSpacing:1}}>
-                {editState.id ? "EDIT MODEL" : "NEW MODEL"}
-              </div>
-              <button type="button" onClick={resetForm} style={{background:"none",border:"none",color:"#475569",cursor:"pointer",fontSize:16,lineHeight:1,padding:"0 2px"}}>{"\u2715"}</button>
+    <div className="flex-1 overflow-y-auto pt-5">
+      {/* New / edit model dialog */}
+      <Modal open={editState.open} onClose={resetForm} title={editState.id ? "Edit Model" : "New Model"} width={520}>
+        <form onSubmit={submit}>
+          <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-[2fr_1fr] gap-2">
+              <Field label="Name">
+                <Input required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Aruba CX 6300M-48" />
+              </Field>
+              <Field label="Ports per row">
+                <Input type="number" min="1" max="96" value={form.ports_per_row} onChange={(e) => setForm((f) => ({ ...f, ports_per_row: e.target.value }))} />
+              </Field>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:8}}>
-              <div><label style={lbl}>Name</label>
-                <input required style={inp} value={form.name} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({...f, name:e.target.value}))} placeholder="e.g. Aruba CX 6300M-48" /></div>
-              <div><label style={lbl}>Ports per row</label>
-                <input type="number" min="1" max="96" style={inp} value={form.ports_per_row} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({...f, ports_per_row:e.target.value}))} /></div>
-            </div>
-            <div style={{marginTop:8}}>
-              <label style={lbl} title="Ports beyond this count (sorted by index) are hidden. Use to suppress aggregation or uplink ports that appear as regular ports on some devices.">
-                Total ports (cutoff)
-              </label>
-              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                <div
-                  onClick={() => { setCutoffEnabled(v => !v); if (cutoffEnabled) setForm(f => ({...f, total_ports:""})); }}
-                  style={{
-                    width:32, height:18, borderRadius:9, cursor:"pointer", flexShrink:0,
-                    backgroundColor: cutoffEnabled ? "#0e7490" : "#1e293b",
-                    border: `1px solid ${cutoffEnabled ? "#22d3ee" : "#334155"}`,
-                    position:"relative", transition:"background 0.2s, border 0.2s",
-                  }}>
-                  <div style={{
-                    position:"absolute", top:2, left: cutoffEnabled ? 14 : 2,
-                    width:12, height:12, borderRadius:"50%",
-                    backgroundColor: cutoffEnabled ? "#22d3ee" : "#475569",
-                    transition:"left 0.2s, background 0.2s",
-                  }}/>
-                </div>
-                {cutoffEnabled && (
-                  <input
-                    type="number" min="1"
-                    style={{ ...inp, width:"auto", flex:1 }}
+            <div>
+              <div
+                className="text-[10px] text-muted select-none mb-1"
+                title="Ports beyond this count (sorted by index) are hidden. Use to suppress aggregation or uplink ports that appear as regular ports on some devices."
+              >Total ports (cutoff)</div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={cutoffEnabled}
+                  onClick={() => { setCutoffEnabled((v) => !v); if (cutoffEnabled) setForm((f) => ({ ...f, total_ports: "" })); }}
+                  className={`w-8 h-[18px] rounded-full cursor-pointer shrink-0 relative border transition-colors ${
+                    cutoffEnabled ? "bg-accent-strong border-accent" : "bg-panel-2 border-line-strong"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-[2px] w-3 h-3 rounded-full transition-all ${
+                      cutoffEnabled ? "left-[14px] bg-accent" : "left-[2px] bg-muted"
+                    }`}
+                  />
+                </button>
+                {cutoffEnabled ? (
+                  <Input
+                    type="number"
+                    min="1"
+                    className="flex-1"
                     value={form.total_ports}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({...f, total_ports:e.target.value}))}
+                    onChange={(e) => setForm((f) => ({ ...f, total_ports: e.target.value }))}
                     placeholder="e.g. 48"
                     autoFocus
                   />
-                )}
-                {!cutoffEnabled && (
-                  <span style={{ color:"#334155", fontSize:10 }}>disabled</span>
+                ) : (
+                  <span className="text-muted text-[10px]">disabled</span>
                 )}
               </div>
             </div>
-            <div style={{marginTop:8}}><label style={lbl}>Description</label>
-              <input style={inp} value={form.description} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({...f, description:e.target.value}))} placeholder="optional" /></div>
-            {err && <div style={{ color:"#f87171", fontSize:11, marginTop:8 }}>{err}</div>}
-            <div style={{ display:"flex", gap:8, marginTop:14 }}>
-              <button type="submit" style={{flex:1,backgroundColor:"#083344",border:"1px solid #164e63",color:"#22d3ee",borderRadius:6,padding:"8px",cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:600}}>
-                {editState.id ? "Save" : "Create model"}
-              </button>
-              <button type="button" onClick={resetForm} style={{border:"1px solid #1e293b",background:"none",color:"#64748b",borderRadius:6,padding:"8px 16px",cursor:"pointer",fontFamily:"inherit",fontSize:11}}>
-                Cancel
-              </button>
+            <Field label="Description">
+              <Input value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} placeholder="optional" />
+            </Field>
+            {err && <div className="text-[11px] text-danger">{err}</div>}
+            <div className="flex gap-2 mt-1">
+              <Button type="submit" variant="primary" className="flex-1" disabled={saveMutation.isPending}>
+                {saveMutation.isPending ? "Saving..." : editState.id ? "Save" : "Create model"}
+              </Button>
+              <Button type="button" onClick={resetForm}>Cancel</Button>
             </div>
-          </form>
-        </div>
-      )}
+          </div>
+        </form>
+      </Modal>
+
+      <ConfirmDeleteModal
+        open={deleteTarget != null}
+        title="Delete Model"
+        message={deleteTarget ? `Delete model "${deleteTarget.name}"? Assigned switches are unassigned, not deleted.` : ""}
+        busy={deleteMutation.isPending}
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
 
       {/* Card grid listing */}
-      {loading ? (
-        <div style={{ color:"#475569", fontSize:11 }}>Loading...</div>
+      {isLoading ? (
+        <TabLoading />
       ) : models.length === 0 ? (
-        <div style={{ color:"#475569", fontSize:11, textAlign:"center", marginTop:20 }}>No models defined yet</div>
+        <EmptyState title="No models defined yet" hint="Create a model with + New Entry above." />
       ) : (
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(300px, 1fr))",gap:8}}>
-          {models.map(sm => {
-            const assigned  = devices.filter(d => d.model_id === sm.id);
-            const available = devices.filter(d => d.model_id == null && !d.ignored);
-            const selVal    = assignSel[sm.id] || "";
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2">
+          {models.map((sm) => {
+            const assigned = devices.filter((d) => d.model_id === sm.id);
+            const available = devices.filter((d) => d.model_id == null && !d.ignored);
+            const selVal = assignSel[sm.id] || "";
             return (
-              <div key={sm.id} style={{ display:"flex", flexDirection:"column", padding:"10px 12px", backgroundColor:"#0a0e18", border:"1px solid #1e293b", borderRadius:8, position:"relative", overflow:"hidden" }}>
-                <div style={{ position:"absolute", top:0, left:0, width:3, bottom:0, backgroundColor:"#22d3ee", borderRadius:"8px 0 0 8px" }} />
-                <div style={{ marginLeft:12 }}>
-                  <div style={{ display:"flex", alignItems:"flex-start" }}>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                        <span style={{ color:"#e2e8f0", fontWeight:600, fontSize:13 }}>{sm.name}</span>
-                        <span style={{ color:"#22d3ee", fontSize:10, backgroundColor:"#083344", padding:"1px 6px", borderRadius:3, border:"1px solid #164e63" }}>
-                          {sm.ports_per_row} ports/row
-                        </span>
-                        {sm.total_ports != null && (
-                          <span style={{ color:"#64748b", fontSize:10 }}>{sm.total_ports} total</span>
-                        )}
-                      </div>
-                      {(sm as SwitchModel & { description?: string }).description && <div style={{ color:"#475569", fontSize:10, marginTop:2 }}>{(sm as SwitchModel & { description?: string }).description}</div>}
-                    </div>
-                    <div style={{ display:"flex", gap:4, flexShrink:0 }}>
-                      <button onClick={() => startEdit(sm)} style={{ background:"none", border:"1px solid #1e293b", color:"#64748b", borderRadius:4, padding:"2px 8px", cursor:"pointer", fontSize:10, fontFamily:"'Inter', system-ui, sans-serif" }}>Edit</button>
-                      {confirmDeleteId === sm.id ? (
-                        <span style={{display:"flex",gap:4}}>
-                          <button style={{background:"#450a0a",border:"1px solid #7f1d1d",color:"#fca5a5",borderRadius:4,padding:"2px 8px",cursor:"pointer",fontSize:10,fontFamily:"'Inter', system-ui, sans-serif"}} onClick={()=>removeConfirmed(sm.id)}>Confirm</button>
-                          <button style={{background:"none",border:"1px solid #1e293b",color:"#64748b",borderRadius:4,padding:"2px 8px",cursor:"pointer",fontSize:10,fontFamily:"'Inter', system-ui, sans-serif"}} onClick={()=>setConfirmDeleteId(null)}>Cancel</button>
-                        </span>
-                      ) : (
-                        <button onClick={() => remove(sm.id)} style={{ background:"none", border:"1px solid #7f1d1d", color:"#f87171", borderRadius:4, padding:"2px 8px", cursor:"pointer", fontSize:10, fontFamily:"'Inter', system-ui, sans-serif" }}>Delete</button>
+              <Card key={sm.id} className="border-l-2 border-l-accent">
+                <div className="flex items-start gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-primary font-semibold text-[13px] truncate">{sm.name}</span>
+                      <Badge tone="accent">{sm.ports_per_row} ports/row</Badge>
+                      {sm.total_ports != null && (
+                        <span className="text-muted text-[10px]">{sm.total_ports} total</span>
                       )}
                     </div>
-                  </div>
-                  <div style={{ marginTop:10, borderTop:"1px solid #0f172a", paddingTop:8 }}>
-                    <div style={{ color:"#475569", fontSize:10, letterSpacing:1, marginBottom:6 }}>
-                      ASSIGNED SWITCHES ({assigned.length})
-                    </div>
-                    {assigned.length > 0 && (
-                      <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginBottom:8 }}>
-                        {assigned.map(d => (
-                          <div key={d.id} style={{ backgroundColor:"#0c1a2e", border:"1px solid #1e3a5f", borderRadius:4, padding:"2px 6px 2px 8px", display:"flex", alignItems:"center", gap:4, fontSize:10 }}>
-                            <span style={{ color:"#7dd3fc" }}>{d.sys_name || d.ip}</span>
-                            <span style={{ color:"#334155", fontSize:10 }}>{d.ip}</span>
-                            <button onClick={() => unassignDevice(d.id)} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", padding:"0 2px", fontSize:11, lineHeight:1 }} title="Unassign">x</button>
-                          </div>
-                        ))}
-                      </div>
+                    {(sm as SwitchModel & { description?: string }).description && (
+                      <div className="text-muted text-[10px] mt-0.5">{(sm as SwitchModel & { description?: string }).description}</div>
                     )}
-                    <div style={{ display:"flex", gap:4 }}>
-                      <select value={selVal} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setAssignSel(p => ({...p, [sm.id]:e.target.value}))}
-                        style={{ flex:1, backgroundColor:"#020817", border:"1px solid #1e293b", borderRadius:4, padding:"4px 6px", color:selVal?"#e2e8f0":"#475569", fontFamily:"'Inter', system-ui, sans-serif", fontSize:10 }}>
-                        <option value="">-- Assign switch --</option>
-                        {available.map(d => <option key={d.id} value={d.id}>{d.sys_name || d.ip} ({d.ip})</option>)}
-                      </select>
-                      <button onClick={() => assignDevice(sm.id)} disabled={!selVal}
-                        style={{ backgroundColor:selVal?"#083344":"#0a0e18", border:"1px solid #164e63", color:selVal?"#22d3ee":"#1e3a5f", borderRadius:4, padding:"4px 10px", cursor:selVal?"pointer":"not-allowed", fontFamily:"'Inter', system-ui, sans-serif", fontSize:10 }}>
-                        Assign
-                      </button>
-                    </div>
+                  </div>
+                  <div className="flex gap-1.5 shrink-0">
+                    <Button size="sm" onClick={() => startEdit(sm)}>Edit</Button>
+                    <Button size="sm" variant="danger" onClick={() => setDeleteTarget(sm)}>Delete</Button>
                   </div>
                 </div>
-              </div>
+                <DeviceAssignment
+                  assigned={assigned}
+                  available={available}
+                  selVal={selVal}
+                  onSelect={(val) => setAssignSel((p) => ({ ...p, [sm.id]: val }))}
+                  onAssign={() => assignMutation.mutate({ devId: selVal, modelId: sm.id })}
+                  onUnassign={(devId) => assignMutation.mutate({ devId: String(devId), modelId: null })}
+                />
+              </Card>
             );
           })}
         </div>

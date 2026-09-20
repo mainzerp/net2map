@@ -23,68 +23,99 @@ const mockApiGet = vi.fn();
 vi.mock("../api", () => ({
   api: { get: (...args: unknown[]) => mockApiGet(...args) },
   API: "",
-  VENDOR_LABEL: {},
-  VENDOR_COLOR: {},
-  VENDOR_ICON: {},
+  extractErrorMessage: (ex: unknown) => (ex instanceof Error ? ex.message : String(ex)),
 }));
 
 // Must import after mocks are set up
 import DashboardPage from "../pages/DashboardPage";
+
+const topoData = {
+  nodes: [
+    {
+      id: 1, ip: "10.0.0.1", sys_name: "switch-1", hostname: "switch-1", vendor: "aruba_cx",
+      rack_id: 1, ignored: false, ping_status: "online",
+      ports: [{ oper_status: 1 }, { oper_status: 2 }],
+    },
+    {
+      id: 2, ip: "10.0.0.2", sys_name: "switch-2", hostname: "switch-2", vendor: "generic",
+      rack_id: 1, ignored: false, ping_status: "offline", last_seen: "2026-01-01T10:00:00Z",
+      ports: [{ oper_status: 1 }],
+    },
+  ],
+  links: [{ speed_label: "1G" }],
+  racks: [{ id: 1, label: "Rack-A", location: "Room 1", room: "Room 1" }],
+  classes: [],
+  models: [],
+};
+
+const statsData = {
+  device_count: 2,
+  port_count: 3,
+  port_up_count: 2,
+  rack_count: 1,
+};
+
+function mockApiSuccess() {
+  mockApiGet.mockImplementation((path: string) => {
+    if (path === "/api/topology") return Promise.resolve(topoData);
+    if (path === "/api/stats") return Promise.resolve(statsData);
+    if (path === "/api/endpoints") return Promise.resolve([]);
+    if (path.startsWith("/api/scan-runs")) return Promise.resolve([]);
+    return Promise.resolve({});
+  });
+}
 
 describe("DashboardPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("shows loading state initially", () => {
+  it("shows a loading skeleton initially", () => {
     // Make api.get return a promise that never resolves
     mockApiGet.mockReturnValue(new Promise(() => {}));
     renderWithRouter(<DashboardPage />);
-    expect(screen.getByText("Loading...")).toBeTruthy();
+    expect(screen.getByLabelText("Loading dashboard")).toBeTruthy();
   });
 
   it("renders stats after data loads", async () => {
-    const topoData = {
-      nodes: [
-        { ip: "10.0.0.1", sys_name: "switch-1", vendor: "aruba_cx", rack_id: 1, ports: [{ oper_status: 1 }, { oper_status: 2 }] },
-        { ip: "10.0.0.2", sys_name: "switch-2", vendor: "generic", rack_id: 1, ports: [{ oper_status: 1 }] },
-      ],
-      links: [{ speed_label: "1G" }],
-      racks: [{ id: 1, label: "Rack-A", location: "Room 1" }],
-      classes: [],
-      models: [],
-    };
-    const statsData = {
-      device_count: 2,
-      port_count: 3,
-      port_up_count: 2,
-      rack_count: 1,
-    };
-
-    mockApiGet.mockImplementation((path: string) => {
-      if (path === "/api/topology") return Promise.resolve(topoData);
-      if (path === "/api/stats") return Promise.resolve(statsData);
-      return Promise.resolve({});
-    });
-
+    mockApiSuccess();
     renderWithRouter(<DashboardPage />);
 
     await waitFor(() => {
-      expect(screen.queryByText("Loading...")).toBeNull();
+      expect(screen.getByText("Dashboard")).toBeTruthy();
     });
 
-    // Verify the Dashboard title renders
-    expect(screen.getByText("Dashboard")).toBeTruthy();
+    // Stat cards render with deep-link values ("Switches" also matches the
+    // rack table header, so allow multiple matches there)
+    expect(screen.getAllByText("Switches").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Ports").length).toBeGreaterThan(0);
+    expect(screen.getByText("Links")).toBeTruthy();
+    expect(screen.getByText("Racks")).toBeTruthy();
+    expect(screen.getByText("Endpoints")).toBeTruthy();
 
-    // Verify device count is displayed (may appear in multiple stat cards)
-    const allTwos = screen.getAllByText("2");
-    expect(allTwos.length).toBeGreaterThan(0);
+    // Rack overview renders the rack label
+    expect(screen.getByText("Rack-A")).toBeTruthy();
   });
 
-  it("shows error state when fetch fails", async () => {
+  it("lists offline devices in the attention card", async () => {
+    mockApiSuccess();
+    renderWithRouter(<DashboardPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Attention needed")).toBeTruthy();
+    });
+
+    // switch-2 is offline and shows up; the switches-down stat card shows 1
+    expect(screen.getByText("switch-2")).toBeTruthy();
+    expect(screen.getByText("Switches down")).toBeTruthy();
+  });
+
+  it("shows error state with retry when the topology fetch fails", async () => {
     mockApiGet.mockImplementation((path: string) => {
       if (path === "/api/topology") return Promise.reject(new Error("Network error"));
-      if (path === "/api/stats") return Promise.resolve(null);
+      if (path === "/api/stats") return Promise.resolve(statsData);
+      if (path === "/api/endpoints") return Promise.resolve([]);
+      if (path.startsWith("/api/scan-runs")) return Promise.resolve([]);
       return Promise.resolve({});
     });
 
@@ -93,5 +124,6 @@ describe("DashboardPage", () => {
     await waitFor(() => {
       expect(screen.getByText(/Network error/)).toBeTruthy();
     });
+    expect(screen.getByText("Retry")).toBeTruthy();
   });
 });

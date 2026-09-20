@@ -1,20 +1,27 @@
-import { useState, useEffect, useCallback } from "react";
+import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { api, extractErrorMessage } from "../api";
 import { useToast } from "./ToastProvider";
-import type { DeviceTableProps, RackInfo, SwitchClass, SwitchModel } from "../types";
+import { useDevices, useRacks, useInvalidateApi } from "../hooks/api";
+import { queryKeys } from "../hooks/api";
+import {
+  Badge,
+  Button,
+  Card,
+  DataTable,
+  Input,
+  Modal,
+  Select,
+  StatusDot,
+  type DataTableColumn,
+  type StatusDotStatus,
+} from "./ui";
+import { formatTimestamp } from "../utils/datetime";
+import type { DeviceTableProps, RackInfo, SwitchClass, SwitchModel, TopologyNode } from "../types";
 
-interface DeviceRecord {
-  id: number;
-  sys_name?: string;
-  ip: string;
-  mac?: string;
-  vendor?: string;
-  model?: string;
-  ignored: boolean;
-  rack_id?: number | null;
-  class_id?: number | null;
-  model_id?: number | null;
-}
+// /api/devices returns DeviceOut, which adds last_seen to the topology node shape.
+type DeviceRow = TopologyNode & { last_seen?: string | null };
 
 interface EditState {
   id: number | null;
@@ -27,60 +34,74 @@ interface FormState {
   model_id: number | null;
 }
 
-interface SortState {
-  column: string | null;
-  direction: "asc" | "desc" | null;
+const EMPTY_FORM: FormState = { rack_id: null, class_id: null, model_id: null };
+
+// Map the dashboard deep-link alias to the stored ping_status value.
+function normalizeStatusParam(raw: string): string {
+  if (raw === "down") return "offline";
+  return raw;
 }
 
-interface ColumnDef {
-  key: string;
-  label: string;
+function dotStatus(pingStatus: string | undefined): StatusDotStatus {
+  if (pingStatus === "online") return "up";
+  if (pingStatus === "offline") return "down";
+  return "unknown";
 }
 
 export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel, emptyMessage }: DeviceTableProps) {
-  const [devices, setDevices] = useState<DeviceRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const devicesQuery = useDevices();
+  const racksQuery = useRacks();
+  const classesQuery = useQuery<SwitchClass[]>({
+    queryKey: ["switch-classes"],
+    queryFn: () => api.get("/api/switch-classes"),
+  });
+  const modelsQuery = useQuery<SwitchModel[]>({
+    queryKey: ["switch-models"],
+    queryFn: () => api.get("/api/switch-models"),
+  });
+  const { invalidate } = useInvalidateApi();
+
   const [togglingId, setTogglingId] = useState<number | null>(null);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [selected, setSelected] = useState<Set<string | number>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
-  const [racks, setRacks] = useState<RackInfo[]>([]);
-  const [classes, setClasses] = useState<SwitchClass[]>([]);
-  const [models, setModels] = useState<SwitchModel[]>([]);
   const [editState, setEditState] = useState<EditState>({ id: null, open: false });
-  const [form, setForm] = useState<FormState>({ rack_id: null, class_id: null, model_id: null });
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [err, setErr] = useState("");
-  const [search, setSearch] = useState("");
-  const [sort, setSort] = useState<SortState>({ column: null, direction: null });
   const { addToast } = useToast();
 
-  const refresh = useCallback(() => {
-    setLoading(true);
-    Promise.allSettled([
-      api.get("/api/devices"),
-      api.get("/api/racks"),
-      api.get("/api/switch-classes"),
-      api.get("/api/switch-models"),
-    ]).then(([devRes, racksRes, classesRes, modelsRes]) => {
-      setDevices(devRes.status === "fulfilled" && Array.isArray(devRes.value) ? devRes.value : []);
-      setRacks(racksRes.status === "fulfilled" ? racksRes.value || [] : []);
-      setClasses(classesRes.status === "fulfilled" ? classesRes.value || [] : []);
-      setModels(modelsRes.status === "fulfilled" ? modelsRes.value || [] : []);
-      setLoading(false);
-    });
-  }, []);
+  // Filter state lives in the URL so dashboard deep links (?q=, ?status=) work.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const search = searchParams.get("q") ?? "";
+  const statusFilter = normalizeStatusParam(searchParams.get("status") ?? "");
 
-  useEffect(() => { refresh(); }, [refresh]);
-
-  const invalidateAll = () => {
-    api.invalidate("/api/topology", "/api/devices");
+  const setParam = (key: string, value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    setSearchParams(next, { replace: true });
   };
 
-  const toggleIgnored = async (dev: DeviceRecord) => {
+  const devices: DeviceRow[] = useMemo(
+    () => (Array.isArray(devicesQuery.data) ? (devicesQuery.data as DeviceRow[]) : []),
+    [devicesQuery.data],
+  );
+  const racks: RackInfo[] = useMemo(() => racksQuery.data ?? [], [racksQuery.data]);
+  const classes = useMemo(() => classesQuery.data ?? [], [classesQuery.data]);
+  const models = useMemo(() => modelsQuery.data ?? [], [modelsQuery.data]);
+
+  const rackMap = useMemo(() => Object.fromEntries(racks.map((r) => [r.id, r])), [racks]);
+  const classMap = useMemo(() => Object.fromEntries(classes.map((c) => [c.id, c])), [classes]);
+  const modelMap = useMemo(() => Object.fromEntries(models.map((m) => [m.id, m])), [models]);
+
+  const invalidateDeviceData = () => {
+    invalidate(queryKeys.topology, queryKeys.devices, queryKeys.stats);
+  };
+
+  const toggleIgnored = async (dev: DeviceRow) => {
     setTogglingId(dev.id);
     try {
       await api.patch(`/api/topology/devices/${dev.id}/meta`, { ignored: !dev.ignored });
-      invalidateAll();
-      refresh();
+      invalidateDeviceData();
     } catch (ex) {
       addToast(`Failed to update device: ${extractErrorMessage(ex)}`, "error");
     } finally {
@@ -88,23 +109,15 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
     }
   };
 
-  const toggleSelect = (id: number) => setSelected(prev => {
-    const next = new Set(prev);
-    next.has(id) ? next.delete(id) : next.add(id);
-    return next;
-  });
-
-  const selectAll = (devs: DeviceRecord[]) => setSelected(new Set(devs.map(d => d.id)));
-
   const bulkIgnore = async (ignored: boolean) => {
     setBulkLoading(true);
     try {
       await api.patch("/api/topology/devices/bulk-meta", {
-        device_ids: [...selected], ignored
+        device_ids: [...selected],
+        ignored,
       });
       setSelected(new Set());
-      invalidateAll();
-      refresh();
+      invalidateDeviceData();
     } catch (ex) {
       addToast(`Failed to update devices: ${extractErrorMessage(ex)}`, "error");
     } finally {
@@ -113,12 +126,12 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
   };
 
   const resetForm = () => {
-    setForm({ rack_id: null, class_id: null, model_id: null });
+    setForm(EMPTY_FORM);
     setEditState({ id: null, open: false });
     setErr("");
   };
 
-  const startEdit = (dev: DeviceRecord) => {
+  const startEdit = (dev: DeviceRow) => {
     setForm({
       rack_id: dev.rack_id ?? null,
       class_id: dev.class_id ?? null,
@@ -137,21 +150,15 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
         class_id: form.class_id,
         model_id: form.model_id,
       });
-      invalidateAll();
+      invalidateDeviceData();
       resetForm();
-      refresh();
     } catch (ex) {
       setErr(extractErrorMessage(ex));
     }
   };
 
-  const rackMap = Object.fromEntries(racks.map(r => [r.id, r]));
-  const classMap = Object.fromEntries(classes.map(c => [c.id, c]));
-  const modelMap = Object.fromEntries(models.map(m => [m.id, m]));
-
-  /* ---- Search ---- */
-  const getSearchableText = (dev: DeviceRecord) => {
-    const parts = [
+  const searchText = (dev: DeviceRow) =>
+    [
       dev.sys_name || "",
       dev.ip || "",
       dev.mac || "",
@@ -159,449 +166,317 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
       dev.class_id && classMap[dev.class_id] ? classMap[dev.class_id].label : "",
       dev.model_id && modelMap[dev.model_id] ? modelMap[dev.model_id].name : "",
       dev.vendor || "",
-    ];
-    return parts.join(" ").toLowerCase();
-  };
+      dev.location || "",
+    ]
+      .join(" ")
+      .toLowerCase();
 
-  const filtered = search
-    ? devices.filter(d => getSearchableText(d).includes(search.toLowerCase()))
+  // The status filter applies on top of the DataTable's built-in search.
+  const statusFiltered = statusFilter
+    ? devices.filter((d) => (d.ping_status ?? "unknown") === statusFilter)
     : devices;
+  const active = statusFiltered.filter((d) => !d.ignored);
+  const ignored = statusFiltered.filter((d) => d.ignored);
 
-  /* ---- Sort ---- */
-  const cycleSort = (column: string) => {
-    setSort(prev => {
-      if (prev.column !== column) return { column, direction: "asc" as const };
-      if (prev.direction === "asc") return { column, direction: "desc" as const };
-      return { column: null, direction: null };
-    });
-  };
-
-  const getSortValue = (dev: DeviceRecord, column: string): string => {
-    switch (column) {
-      case "name": return (dev.sys_name || dev.ip || "").toLowerCase();
-      case "ip": return dev.ip || "";
-      case "mac": return (dev.mac || "").toLowerCase();
-      case "rack": return (dev.rack_id && rackMap[dev.rack_id] ? rackMap[dev.rack_id].label : "").toLowerCase();
-      case "class": return (dev.class_id && classMap[dev.class_id] ? classMap[dev.class_id].label : "").toLowerCase();
-      case "model": return (dev.model_id && modelMap[dev.model_id] ? modelMap[dev.model_id].name : "").toLowerCase();
-      default: return "";
-    }
-  };
-
-  const sortDevices = (list: DeviceRecord[]): DeviceRecord[] => {
-    if (!sort.column) return list;
-    const sorted = [...list].sort((a, b) => {
-      const va = getSortValue(a, sort.column!);
-      const vb = getSortValue(b, sort.column!);
-      if (va < vb) return -1;
-      if (va > vb) return 1;
-      return 0;
-    });
-    return sort.direction === "desc" ? sorted.reverse() : sorted;
-  };
-
-  const active = filtered.filter(d => !d.ignored);
-  const ignored = filtered.filter(d => d.ignored);
-  const sortedActive = sortDevices(active);
-  const sortedIgnored = sortDevices(ignored);
-
-  /* ---- Styles ---- */
-  const sel: React.CSSProperties = {
-    backgroundColor: "#0c0f18", border: "1px solid #1e293b", borderRadius: 5,
-    color: "#e2e8f0", padding: "5px 8px",
-    fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11, lineHeight: 1.3,
-    boxSizing: "border-box", width: "100%", cursor: "pointer",
-  };
-
-  const tableStyle: React.CSSProperties = {
-    width: "100%",
-    borderCollapse: "collapse",
-    fontFamily: "'Inter', system-ui, sans-serif",
-    fontSize: 11,
-  };
-
-  const thBase: React.CSSProperties = {
-    position: "sticky",
-    top: 0,
-    backgroundColor: "#0a0e18",
-    color: "#64748b",
-    fontSize: 10,
-    fontWeight: 600,
-    letterSpacing: 0.5,
-    textAlign: "left",
-    padding: "7px 8px",
-    borderBottom: "1px solid #1e293b",
-    userSelect: "none",
-    whiteSpace: "nowrap",
-    zIndex: 1,
-  };
-
-  const tdBase: React.CSSProperties = {
-    padding: "6px 8px",
-    borderBottom: "1px solid #0f172a",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    maxWidth: 180,
-    verticalAlign: "middle",
-  };
-
-  const searchInputStyle: React.CSSProperties = {
-    backgroundColor: "#0c0f18",
-    border: "1px solid #1e293b",
-    borderRadius: 5,
-    color: "#e2e8f0",
-    padding: "6px 10px",
-    fontFamily: "'Inter', system-ui, sans-serif",
-    fontSize: 11,
-    width: 280,
-    outline: "none",
-    boxSizing: "border-box",
-  };
-
-  /* ---- Column defs ---- */
-  const allColumns: ColumnDef[] = [
-    { key: "name",  label: "Name" },
-    { key: "ip",    label: "IP" },
-    { key: "mac",   label: "MAC" },
-    { key: "rack",  label: "Rack" },
-    { key: "class", label: "Class" },
-    { key: "model", label: "Model" },
-  ];
-  const columns = allColumns;
-
-  const renderSortArrow = (colKey: string) => {
-    if (sort.column !== colKey) return null;
-    return (
-      <span style={{ marginLeft: 3, fontSize: 9, color: "#22d3ee" }}>
-        {sort.direction === "asc" ? "\u25B2" : "\u25BC"}
-      </span>
-    );
-  };
-
-  const renderHead = () => (
-    <thead>
-      <tr>
-        <th style={{ ...thBase, cursor: "default", width: 30 }} />
-        {columns.map(col => (
-          <th key={col.key} onClick={() => cycleSort(col.key)} style={{ ...thBase, cursor: "pointer" }}>
-            {col.label}{renderSortArrow(col.key)}
-          </th>
-        ))}
-        <th style={{ ...thBase, cursor: "default", textAlign: "right" }}>Actions</th>
-      </tr>
-    </thead>
-  );
-
-  const renderRow = (dev: DeviceRecord) => {
-    const isToggling = togglingId === dev.id;
-    return (
-      <tr key={dev.id} style={{ opacity: dev.ignored ? 0.45 : 1 }}>
-        <td style={tdBase}>
-          <input
-            type="checkbox"
-            checked={selected.has(dev.id)}
-            onChange={() => toggleSelect(dev.id)}
-            style={{ cursor: "pointer", accentColor: "#22d3ee" }}
-          />
-        </td>
-        <td style={{ ...tdBase, color: dev.ignored ? "#475569" : "#e2e8f0", fontWeight: 600, fontSize: 12, maxWidth: 220 }}>
-          {dev.sys_name || dev.ip}
-          {dev.vendor && (
-            <div style={{ color: "#475569", fontSize: 10, fontWeight: 400, marginTop: 1 }}>
-              {dev.vendor}{dev.model ? ` -- ${dev.model}` : ""}
+  const columns: DataTableColumn<DeviceRow>[] = [
+    {
+      key: "name",
+      header: "Name",
+      sortable: true,
+      sortValue: (d) => (d.sys_name || d.ip || "").toLowerCase(),
+      render: (d) => (
+        <div>
+          <div className={`font-semibold ${d.ignored ? "text-muted" : "text-primary"}`}>{d.sys_name || d.ip}</div>
+          {d.vendor && (
+            <div className="text-[10px] text-muted">
+              {d.vendor}
+              {d.model ? ` - ${d.model}` : ""}
             </div>
           )}
-        </td>
-        <td style={{ ...tdBase, color: "#94a3b8", fontFamily: "monospace", fontSize: 11 }}>
-          {dev.ip}
-        </td>
-        <td style={{ ...tdBase, color: "#64748b", fontFamily: "monospace" }}>
-          {dev.mac || ""}
-        </td>
-        <td style={tdBase}>
-          {(() => {
-            const rId = dev.rack_id || null;
-            if (!rId || !rackMap[rId]) return null;
-            return (
-              <span style={{
-                color: "#a78bfa", fontSize: 10,
-                backgroundColor: "#1e1035", padding: "1px 5px",
-                borderRadius: 3, border: "1px solid #3b1f7e",
-              }}>
-                {rackMap[rId].label}
-              </span>
-            );
-          })()}
-        </td>
-        <td style={tdBase}>
-          {dev.class_id && classMap[dev.class_id] && (
-            <span style={{
-              color: classMap[dev.class_id].color || "#38bdf8", fontSize: 10,
-              backgroundColor: "#0c1a2e", padding: "1px 5px",
-              borderRadius: 3, border: `1px solid ${classMap[dev.class_id].color || "#1e3a5f"}`,
-            }}>
-              {classMap[dev.class_id].label}
-            </span>
-          )}
-        </td>
-        <td style={tdBase}>
-          {dev.model_id && modelMap[dev.model_id] && (
-            <span style={{
-              color: "#fbbf24", fontSize: 10,
-              backgroundColor: "#1a1500", padding: "1px 5px",
-              borderRadius: 3, border: "1px solid #854d0e",
-            }}>
-              {modelMap[dev.model_id].name}
-            </span>
-          )}
-        </td>
-        <td style={{ ...tdBase, textAlign: "right", whiteSpace: "nowrap" }}>
-          <div style={{ display: "inline-flex", gap: 4 }}>
-            <button
-              onClick={() => startEdit(dev)}
-              style={{
-                backgroundColor: "#0c1a2e",
-                border: "1px solid #1e3a5f",
-                color: "#7dd3fc",
-                borderRadius: 5,
-                padding: "4px 10px",
-                cursor: "pointer",
-                fontFamily: "'Inter', system-ui, sans-serif",
-                fontSize: 10,
-                fontWeight: 600,
-              }}
-            >Edit</button>
-            <button
+        </div>
+      ),
+    },
+    {
+      key: "ip",
+      header: "IP",
+      sortable: true,
+      sortValue: (d) => d.ip || "",
+      render: (d) => <span className="font-mono text-muted">{d.ip}</span>,
+    },
+    {
+      key: "mac",
+      header: "MAC",
+      sortable: true,
+      sortValue: (d) => (d.mac || "").toLowerCase(),
+      render: (d) => <span className="font-mono text-muted">{d.mac || "-"}</span>,
+    },
+    {
+      key: "rack",
+      header: "Rack",
+      sortable: true,
+      sortValue: (d) => (d.rack_id && rackMap[d.rack_id] ? rackMap[d.rack_id].label : "").toLowerCase(),
+      render: (d) =>
+        d.rack_id && rackMap[d.rack_id] ? (
+          <Badge tone="accent">{rackMap[d.rack_id].label}</Badge>
+        ) : (
+          <span className="text-muted">-</span>
+        ),
+    },
+    {
+      key: "class",
+      header: "Class",
+      sortable: true,
+      sortValue: (d) => (d.class_id && classMap[d.class_id] ? classMap[d.class_id].label : "").toLowerCase(),
+      render: (d) => {
+        const cls = d.class_id ? classMap[d.class_id] : undefined;
+        if (!cls) return <span className="text-muted">-</span>;
+        // Class color is user-configured data, so it stays a dynamic inline value.
+        return (
+          <Badge className="bg-panel-2" style={cls.color ? { color: cls.color, borderColor: cls.color } : undefined}>
+            {cls.label}
+          </Badge>
+        );
+      },
+    },
+    {
+      key: "model",
+      header: "Model",
+      sortable: true,
+      sortValue: (d) => (d.model_id && modelMap[d.model_id] ? modelMap[d.model_id].name : "").toLowerCase(),
+      render: (d) =>
+        d.model_id && modelMap[d.model_id] ? (
+          <Badge tone="warning">{modelMap[d.model_id].name}</Badge>
+        ) : (
+          <span className="text-muted">-</span>
+        ),
+    },
+    {
+      key: "location",
+      header: "Location",
+      sortable: true,
+      sortValue: (d) => (d.location ?? "").toLowerCase(),
+      render: (d) => <span className="text-muted">{d.location || "-"}</span>,
+    },
+    {
+      key: "last_seen",
+      header: "Last Seen",
+      sortable: true,
+      sortValue: (d) => d.last_seen ?? "",
+      render: (d) => <span className="text-muted">{formatTimestamp(d.last_seen)}</span>,
+    },
+    {
+      key: "status",
+      header: "Status",
+      sortable: true,
+      sortValue: (d) => d.ping_status ?? "unknown",
+      render: (d) => (
+        <span className="inline-flex items-center gap-1.5 text-muted">
+          <StatusDot status={dotStatus(d.ping_status)} />
+          {d.ping_status ?? "unknown"}
+        </span>
+      ),
+    },
+    {
+      key: "actions",
+      header: "Actions",
+      align: "right",
+      render: (d) => {
+        const isToggling = togglingId === d.id;
+        return (
+          <div className="inline-flex gap-1.5">
+            <Button variant="secondary" size="sm" onClick={() => startEdit(d)}>
+              Edit
+            </Button>
+            <Button
+              variant={d.ignored ? "primary" : "danger"}
+              size="sm"
               disabled={isToggling}
-              onClick={() => toggleIgnored(dev)}
-              title={dev.ignored ? "Re-enable this device (scan + show on map)" : "Ignore this device (skip scan, hide from map)"}
-              style={{
-                backgroundColor: dev.ignored ? "#083344" : "#1a0a0a",
-                border: dev.ignored ? "1px solid #164e63" : "1px solid #7f1d1d",
-                color: dev.ignored ? "#22d3ee" : "#f87171",
-                borderRadius: 5,
-                padding: "4px 10px",
-                cursor: isToggling ? "not-allowed" : "pointer",
-                fontFamily: "'Inter', system-ui, sans-serif",
-                fontSize: 10,
-                fontWeight: 600,
-                opacity: isToggling ? 0.6 : 1,
-              }}
-            >{isToggling ? "..." : dev.ignored ? "Re-enable" : "Ignore"}</button>
+              onClick={() => toggleIgnored(d)}
+              title={d.ignored ? "Re-enable this device (scan + show on map)" : "Ignore this device (skip scan, hide from map)"}
+            >
+              {isToggling ? "..." : d.ignored ? "Re-enable" : "Ignore"}
+            </Button>
           </div>
-        </td>
-      </tr>
-    );
-  };
+        );
+      },
+    },
+  ];
 
-  const renderSection = (label: string, list: DeviceRecord[], borderColor: string, headerColor: string, allDevs: DeviceRecord[]) => (
-    <div style={{ backgroundColor: "#0a0e18", border: `1px solid ${borderColor}`, borderRadius: 8, overflow: "hidden" }}>
-      <div style={{
-        padding: "8px 12px", borderBottom: `1px solid ${borderColor}`,
-        color: headerColor, fontSize: 10, fontWeight: 700, letterSpacing: 1,
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-      }}>
-        <span>{label} ({list.length})</span>
-        {allDevs.length > 0 && (
-          <button
-            onClick={() => selectAll(allDevs)}
-            style={{
-              background: "none", border: `1px solid ${borderColor}`,
-              color: headerColor, borderRadius: 4, padding: "2px 8px",
-              cursor: "pointer", fontSize: 9, fontFamily: "'Inter', system-ui, sans-serif",
-            }}
-          >Select All</button>
-        )}
-      </div>
-      {list.length === 0 ? (
-        <div style={{ padding: "10px 12px", color: "#475569", fontSize: 11 }}>
-          All devices are currently ignored
-        </div>
-      ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table style={tableStyle}>
-            {renderHead()}
-            <tbody>
-              {list.map(renderRow)}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
+  const editDevice = devices.find((d) => d.id === editState.id);
 
   return (
-    <div style={{
-      padding: "24px 32px",
-      maxWidth: 1400,
-      margin: "0 auto",
-      fontFamily: "'Inter', system-ui, sans-serif",
-      color: "#94a3b8",
-    }}>
+    <div className="max-w-[1400px] mx-auto flex flex-col gap-4">
       {/* Page title */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 18 }}>{title}</div>
-        <div style={{ color: "#64748b", fontSize: 12, marginTop: 3 }}>{subtitle}</div>
-        <div style={{ height: 1, backgroundColor: "#0f172a", marginTop: 14 }} />
+      <div>
+        <h1 className="text-lg font-bold text-primary">{title}</h1>
+        <p className="text-xs text-muted mt-0.5">{subtitle}</p>
       </div>
 
-      {loading && (
-        <div style={{ color: "#475569", fontSize: 11, paddingTop: 20 }}>Loading...</div>
-      )}
-
-      {!loading && devices.length === 0 && (
-        <div style={{ color: "#475569", fontSize: 11, paddingTop: 20, textAlign: "center" }}>{emptyMessage}</div>
-      )}
-
-      {!loading && devices.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div style={{ color: "#475569", fontSize: 11 }}>
-            Ignored devices are excluded from scans and hidden from the topology map.
-            They remain in the database and can be re-enabled at any time.
+      {devicesQuery.isError ? (
+        <Card>
+          <div className="flex flex-col items-center gap-3 text-center">
+            <div className="text-sm text-danger">Failed to load devices: {extractErrorMessage(devicesQuery.error)}</div>
+            <Button variant="secondary" size="sm" onClick={() => void devicesQuery.refetch()}>
+              Retry
+            </Button>
           </div>
+        </Card>
+      ) : devicesQuery.isLoading ? (
+        <DataTable columns={columns} rows={[]} rowKey={(d: DeviceRow) => d.id} loading skeletonRows={6} />
+      ) : devices.length === 0 ? (
+        <Card>
+          <div className="text-center text-xs text-muted py-6">{emptyMessage}</div>
+        </Card>
+      ) : (
+        <>
+          <p className="text-[11px] text-muted">
+            Ignored devices are excluded from scans and hidden from the topology map. They remain in the database and can
+            be re-enabled at any time.
+          </p>
 
-          {/* Edit modal */}
-          {editState.open && (
-            <div
-              onClick={e => { if (e.target === e.currentTarget) resetForm(); }}
-              style={{
-                position: "fixed", inset: 0, zIndex: 200,
-                backgroundColor: "rgba(2,8,23,0.75)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}
-            >
-              <form onSubmit={submitEdit} style={{
-                width: 420, maxHeight: "calc(100vh - 80px)", overflowY: "auto",
-                backgroundColor: "#0a0e18", border: "1px solid #1e293b", borderRadius: 12,
-                padding: "20px", boxShadow: "0 20px 40px rgba(0,0,0,0.6)",
-              }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-                  <div style={{ color: "#94a3b8", fontSize: 10, letterSpacing: 1 }}>EDIT DEVICE</div>
-                  <button type="button" onClick={resetForm}
-                    style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 2px" }}>
-                    &#x2715;
-                  </button>
-                </div>
-                <div style={{ marginBottom: 12, padding: "8px 10px", backgroundColor: "#0c0f18", borderRadius: 6, border: "1px solid #1e293b" }}>
-                  <div style={{ color: "#e2e8f0", fontSize: 12, fontWeight: 600 }}>
-                    {(() => { const d = devices.find(d => d.id === editState.id); return d ? (d.sys_name || d.ip) : ""; })()}
-                  </div>
-                  <div style={{ color: "#475569", fontSize: 10 }}>
-                    {(() => { const d = devices.find(d => d.id === editState.id); return d?.ip || ""; })()}
-                  </div>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
-                  <label style={{ fontSize: 10, color: "#94a3b8", display: "block", userSelect: "none" }}>
-                    Rack
-                    <select
-                      value={form.rack_id ?? ""}
-                      onChange={e => setForm(p => ({ ...p, rack_id: e.target.value ? +e.target.value : null }))}
-                      style={{ ...sel, marginTop: 3 }}
-                    >
-                      <option value="">-- No rack --</option>
-                      {racks.map(r => (
-                        <option key={r.id} value={r.id}>{r.label}{(r as RackInfo & { room?: string }).room ? ` / ${(r as RackInfo & { room?: string }).room}` : ""}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label style={{ fontSize: 10, color: "#94a3b8", display: "block", userSelect: "none" }}>
-                      Class
-                      <select
-                        value={form.class_id ?? ""}
-                        onChange={e => setForm(p => ({ ...p, class_id: e.target.value ? +e.target.value : null }))}
-                        style={{ ...sel, marginTop: 3 }}
-                      >
-                        <option value="">-- No class --</option>
-                        {classes.map(c => (
-                          <option key={c.id} value={c.id}>{c.label}</option>
-                        ))}
-                      </select>
-                    </label>
-                  <label style={{ fontSize: 10, color: "#94a3b8", display: "block", userSelect: "none" }}>
-                      Model
-                      <select
-                        value={form.model_id ?? ""}
-                        onChange={e => setForm(p => ({ ...p, model_id: e.target.value ? +e.target.value : null }))}
-                        style={{ ...sel, marginTop: 3 }}
-                      >
-                        <option value="">-- No model --</option>
-                        {[...models].sort((a, b) => a.name.localeCompare(b.name)).map(m => (
-                          <option key={m.id} value={m.id}>{m.name}</option>
-                        ))}
-                      </select>
-                    </label>
-                </div>
-                {err && <div style={{ color: "#f87171", fontSize: 11, marginBottom: 8 }}>{err}</div>}
-                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                  <button type="button" onClick={resetForm}
-                    style={{ background: "none", border: "1px solid #1e293b", color: "#64748b", borderRadius: 5, padding: "5px 14px", cursor: "pointer", fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11 }}>
-                    Cancel
-                  </button>
-                  <button type="submit"
-                    style={{ backgroundColor: "#164e63", border: "1px solid #22d3ee", color: "#22d3ee", borderRadius: 5, padding: "5px 14px", cursor: "pointer", fontFamily: "'Inter', system-ui, sans-serif", fontSize: 11, fontWeight: 600 }}>
-                    Save
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
-
-          {/* Search */}
-          <div>
-            <input
-              type="text"
-              placeholder="Search devices..."
+          {/* Filter bar synced to URL query params */}
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
               value={search}
-              onChange={e => setSearch(e.target.value)}
-              style={searchInputStyle}
+              onChange={(e) => setParam("q", e.target.value)}
+              placeholder="Search devices..."
+              aria-label="Search devices"
+              className="max-w-xs"
             />
+            <Select
+              value={statusFilter}
+              onChange={(e) => setParam("status", e.target.value)}
+              aria-label="Filter by status"
+              className="w-auto"
+            >
+              <option value="">All statuses</option>
+              <option value="online">Online</option>
+              <option value="offline">Offline</option>
+              <option value="unknown">Unknown</option>
+            </Select>
           </div>
 
           {/* Bulk action toolbar */}
           {selected.size > 0 && (
-            <div style={{
-              display: "flex", alignItems: "center", gap: 8,
-              padding: "8px 12px", backgroundColor: "#0c1a2e",
-              border: "1px solid #1e3a5f", borderRadius: 8,
-            }}>
-              <span style={{ color: "#7dd3fc", fontSize: 11, fontWeight: 600 }}>{selected.size} selected</span>
-              <button
-                disabled={bulkLoading}
-                onClick={() => bulkIgnore(true)}
-                style={{
-                  backgroundColor: "#1a0a0a", border: "1px solid #7f1d1d", color: "#f87171",
-                  borderRadius: 5, padding: "4px 10px", cursor: bulkLoading ? "not-allowed" : "pointer",
-                  fontFamily: "'Inter', system-ui, sans-serif", fontSize: 10, fontWeight: 600,
-                }}
-              >Ignore Selected</button>
-              <button
-                disabled={bulkLoading}
-                onClick={() => bulkIgnore(false)}
-                style={{
-                  backgroundColor: "#083344", border: "1px solid #164e63", color: "#22d3ee",
-                  borderRadius: 5, padding: "4px 10px", cursor: bulkLoading ? "not-allowed" : "pointer",
-                  fontFamily: "'Inter', system-ui, sans-serif", fontSize: 10, fontWeight: 600,
-                }}
-              >Re-enable Selected</button>
-              <button
-                onClick={() => setSelected(new Set())}
-                style={{
-                  background: "none", border: "1px solid #1e293b", color: "#64748b",
-                  borderRadius: 5, padding: "4px 10px", cursor: "pointer",
-                  fontFamily: "'Inter', system-ui, sans-serif", fontSize: 10,
-                }}
-              >Clear</button>
+            <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-panel-2 border border-line-strong rounded-lg">
+              <span className="text-xs font-semibold text-accent">{selected.size} selected</span>
+              <Button variant="danger" size="sm" disabled={bulkLoading} onClick={() => bulkIgnore(true)}>
+                Ignore Selected
+              </Button>
+              <Button variant="primary" size="sm" disabled={bulkLoading} onClick={() => bulkIgnore(false)}>
+                Re-enable Selected
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+                Clear
+              </Button>
             </div>
           )}
 
-          {/* Active section */}
-          {renderSection(activeLabel, sortedActive, "#1e293b", "#94a3b8", active)}
+          {/* Active devices */}
+          <section className="flex flex-col gap-2">
+            <h2 className="text-[10px] font-bold tracking-widest text-muted">
+              {activeLabel} ({active.length})
+            </h2>
+            <DataTable
+              columns={columns}
+              rows={active}
+              rowKey={(d) => d.id}
+              selectable
+              selectedKeys={selected}
+              onSelectionChange={setSelected}
+              search={search}
+              searchText={searchText}
+              emptyTitle={search || statusFilter ? "No devices match your filters" : "All devices are currently ignored"}
+            />
+          </section>
 
-          {/* Ignored section */}
-          {sortedIgnored.length > 0 && renderSection(ignoredLabel, sortedIgnored, "#3f1515", "#f87171", ignored)}
-        </div>
+          {/* Ignored devices */}
+          {ignored.length > 0 && (
+            <section className="flex flex-col gap-2">
+              <h2 className="text-[10px] font-bold tracking-widest text-danger">
+                {ignoredLabel} ({ignored.length})
+              </h2>
+              <DataTable
+                columns={columns}
+                rows={ignored}
+                rowKey={(d) => d.id}
+                selectable
+                selectedKeys={selected}
+                onSelectionChange={setSelected}
+                search={search}
+                searchText={searchText}
+                rowClassName={() => "opacity-60"}
+                emptyTitle="No devices match your filters"
+              />
+            </section>
+          )}
+        </>
       )}
+
+      {/* Edit modal */}
+      <Modal open={editState.open} onClose={resetForm} title="Edit device" width={420}>
+        <form onSubmit={submitEdit} className="flex flex-col gap-3">
+          <div className="px-3 py-2 bg-panel-2 rounded-md border border-line">
+            <div className="text-xs font-semibold text-primary">{editDevice ? editDevice.sys_name || editDevice.ip : ""}</div>
+            <div className="text-[10px] text-muted">{editDevice?.ip || ""}</div>
+          </div>
+          <label className="block text-[11px] text-muted select-none">
+            Rack
+            <Select
+              className="mt-1"
+              value={form.rack_id ?? ""}
+              onChange={(e) => setForm((p) => ({ ...p, rack_id: e.target.value ? +e.target.value : null }))}
+            >
+              <option value="">-- No rack --</option>
+              {racks.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.label}
+                  {r.room ? ` / ${r.room}` : ""}
+                </option>
+              ))}
+            </Select>
+          </label>
+          <label className="block text-[11px] text-muted select-none">
+            Class
+            <Select
+              className="mt-1"
+              value={form.class_id ?? ""}
+              onChange={(e) => setForm((p) => ({ ...p, class_id: e.target.value ? +e.target.value : null }))}
+            >
+              <option value="">-- No class --</option>
+              {classes.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </Select>
+          </label>
+          <label className="block text-[11px] text-muted select-none">
+            Model
+            <Select
+              className="mt-1"
+              value={form.model_id ?? ""}
+              onChange={(e) => setForm((p) => ({ ...p, model_id: e.target.value ? +e.target.value : null }))}
+            >
+              <option value="">-- No model --</option>
+              {[...models].sort((a, b) => a.name.localeCompare(b.name)).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </Select>
+          </label>
+          {err && <div className="text-xs text-danger">{err}</div>}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={resetForm}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" size="sm">
+              Save
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

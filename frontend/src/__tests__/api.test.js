@@ -1,4 +1,5 @@
-import { speedLabel, normPort, buildPortLinkMap } from "../api";
+import { speedLabel } from "../theme/visual";
+import { normPort, buildPortLinkMap } from "../api";
 
 test("speedLabel returns correct tiers", () => {
   expect(speedLabel(100000)).toBe("100G");

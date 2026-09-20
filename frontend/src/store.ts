@@ -1,34 +1,18 @@
 import { create } from "zustand";
 import { api, API, _getAuthHeader } from "./api";
-import type { NetmapState, TopologyData, SelectedRack } from "./types";
+import type { NetmapState, SelectedRack } from "./types";
 
 const useNetmapStore = create<NetmapState>((set) => ({
   // ── Topology slice ───────────────────────────────────────────────────────
-  topology: { nodes: [], links: [], racks: [], classes: [], models: [] },
+  // Topology data itself lives in TanStack Query (hooks/api/useTopology.ts);
+  // the store only keeps the selection state.
   selectedRack: null,
-  loadError: null,
-
-  loadTopology: async (): Promise<TopologyData | null> => {
-    try {
-      const data: TopologyData = await api.get("/api/topology");
-      set({ topology: data, loadError: null });
-      return data;
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Failed to load topology";
-      set({ loadError: msg });
-      return null;
-    }
-  },
 
   setSelectedRack: (rackOrFn: SelectedRack | null | ((prev: SelectedRack | null) => SelectedRack | null)) => {
     set((state) => {
       const next = typeof rackOrFn === "function"
         ? rackOrFn(state.selectedRack)
         : rackOrFn;
-      try {
-        if (next) sessionStorage.setItem("selectedRackId", String(next.id));
-        else sessionStorage.removeItem("selectedRackId");
-      } catch { /* ignore */ }
       return { selectedRack: next };
     });
   },
@@ -36,27 +20,6 @@ const useNetmapStore = create<NetmapState>((set) => ({
   highlightPortKey: null,
   setHighlightPortKey: (key: string | null) => set({ highlightPortKey: key }),
   clearHighlightPortKey: () => set({ highlightPortKey: null }),
-
-  restoreSelectedRack: (data: TopologyData) => {
-    let savedId: string | null = null;
-    try { savedId = sessionStorage.getItem("selectedRackId"); } catch { /* ignore */ }
-    if (!savedId) return;
-    const id = Number(savedId);
-    const rack = (data.racks || []).find(r => r.id === id);
-    if (rack) {
-      const devices = data.nodes.filter(n => n.rack_id === id);
-      set({
-        selectedRack: {
-          id: rack.id,
-          label: rack.label,
-          location: rack.location || `${rack.label}${rack.room ? " / " + rack.room : ""}`,
-          devices,
-        },
-      });
-    } else {
-      try { sessionStorage.removeItem("selectedRackId"); } catch { /* ignore */ }
-    }
-  },
 
   // ── Map background slice ─────────────────────────────────────────────────
   bgUrl: null,
