@@ -19,18 +19,6 @@ import type { TopologyNode, TopologyLink, SelectedRack, FilterState, TopologyDat
 
 const EMPTY_TOPOLOGY: TopologyData = { nodes: [], links: [], racks: [], classes: [], models: [] };
 
-const EXPANDED_STORAGE_KEY = "netmap-expanded-racks";
-
-function loadExpandedRacks(): Set<number> {
-  try {
-    const raw = localStorage.getItem(EXPANDED_STORAGE_KEY);
-    if (!raw) return new Set();
-    const arr = JSON.parse(raw);
-    if (Array.isArray(arr)) return new Set(arr.map(Number).filter(Number.isFinite));
-  } catch { /* ignore */ }
-  return new Set();
-}
-
 // ── MapPage ──────────────────────────────────────────────────────────────────
 export default function MapPage() {
   // Live topology: 30s polling; the ETag in api.get keeps 304 responses cheap.
@@ -56,7 +44,6 @@ export default function MapPage() {
   const [selectedLink, setSelectedLink] = useState<TopologyLink | null>(null);
   const [selectedOutsideNode, setSelectedOutsideNode] = useState<TopologyNode | null>(null);
   const [detailSwitchId, setDetailSwitchId] = useState<number | null>(null);
-  const [expandedRackIds, setExpandedRackIds] = useState<Set<number>>(loadExpandedRacks);
 
   // When the active scan job finishes, refresh the topology immediately.
   const scanProgress = useScanProgress(activeScanJobId);
@@ -65,16 +52,6 @@ export default function MapPage() {
       invalidateTopology();
     }
   }, [scanProgress, invalidateTopology]);
-
-  const toggleExpand = useCallback((rackId: number) => {
-    setExpandedRackIds(prev => {
-      const next = new Set(prev);
-      if (next.has(rackId)) next.delete(rackId);
-      else next.add(rackId);
-      try { localStorage.setItem(EXPANDED_STORAGE_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
-      return next;
-    });
-  }, []);
 
   const selectedRackFull = useMemo(() => {
     if (!selectedRack) return null;
@@ -268,7 +245,6 @@ export default function MapPage() {
               selectedOutsideId={selectedOutsideNode?.id ?? null}
               onSelectRack={handleSelectRack}
               onSelectOutside={handleSelectOutside}
-              onShowDeviceDetail={setDetailSwitchId}
               onSearchSelect={handleSearchSelect}
               onRackPositionChange={saveRackPosition}
               onDevicePositionChange={saveDevicePosition}
@@ -281,8 +257,6 @@ export default function MapPage() {
               mapBgColor={mapBgColor}
               stats={linkStats}
               updatedAt={topologyQuery.dataUpdatedAt || null}
-              expandedRackIds={expandedRackIds}
-              onToggleExpand={toggleExpand}
             />
           </div>
           {topology.nodes.length === 0 && !topologyQuery.isPending && (

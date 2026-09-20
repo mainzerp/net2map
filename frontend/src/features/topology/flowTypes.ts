@@ -11,8 +11,6 @@ export type RackNodeData = {
   classColors: string[];
   activePorts: number;
   totalPorts: number;
-  expanded: boolean;
-  onToggleExpand: (rackId: number) => void;
 };
 export type RackFlowNode = Node<RackNodeData, "rack">;
 

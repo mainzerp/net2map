@@ -1,8 +1,8 @@
 // ── TopologyCanvas ───────────────────────────────────────────────────────────
 // React Flow (@xyflow/react) rebuild of the topology map. Racks render as
-// group nodes (collapsed box or expanded frame with member devices as child
-// nodes), unracked devices as standalone device nodes, and rack-pair links as
-// aggregated edges. Position conventions:
+// collapsed boxes (click opens the RackDetail panel), unracked devices as
+// standalone device nodes, and rack-pair links as aggregated floating edges.
+// Position conventions:
 //  - devices keep the legacy CENTER convention for map_x/map_y,
 //  - racks store TOP-LEFT (new; rack positions were never persisted before).
 // Positions round-trip through PATCH /api/topology/{devices,racks}/<id>/position.
@@ -51,8 +51,6 @@ import {
 import {
   RACK_COLLAPSED_SIZE,
   DEVICE_NODE_SIZE,
-  expandedRackSize,
-  gridSlotPosition,
   dagreLayout,
   offsetLayout,
   isUnpositioned,
@@ -90,7 +88,6 @@ interface TopologyCanvasProps {
   selectedOutsideId: number | null;
   onSelectRack: (rack: { id: number; label: string; location: string }) => void;
   onSelectOutside: (node: TopologyNode) => void;
-  onShowDeviceDetail: (deviceId: number) => void;
   onSearchSelect: (device: TopologyNode) => void;
   onRackPositionChange: (rackId: number, pos: { x: number; y: number }, devicePositions: DevicePositionPatch[]) => void;
   onDevicePositionChange: (deviceId: number, pos: { x: number; y: number }) => void;
@@ -103,8 +100,6 @@ interface TopologyCanvasProps {
   mapBgColor: string;
   stats: { switches: number; fast: number; gig: number };
   updatedAt: number | null;
-  expandedRackIds: Set<number>;
-  onToggleExpand: (rackId: number) => void;
 }
 
 function loadStoredViewport(): Viewport | null {
@@ -132,15 +127,19 @@ function deviceCenter(topLeft: { x: number; y: number }): { x: number; y: number
   return { x: topLeft.x + DEVICE_NODE_SIZE.width / 2, y: topLeft.y + DEVICE_NODE_SIZE.height / 2 };
 }
 
+function rackCenter(topLeft: { x: number; y: number }): { x: number; y: number } {
+  return { x: topLeft.x + RACK_COLLAPSED_SIZE.width / 2, y: topLeft.y + RACK_COLLAPSED_SIZE.height / 2 };
+}
+
 function TopologyCanvasInner(props: TopologyCanvasProps) {
   const {
     nodes, links, managedRacks, switchClasses, filters, onFilterChange,
     selectedRackId, selectedOutsideId,
-    onSelectRack, onSelectOutside, onShowDeviceDetail, onSearchSelect,
+    onSelectRack, onSelectOutside, onSearchSelect,
     onRackPositionChange, onDevicePositionChange, onAutoLayout,
     selectedLink, rackPairColorMap,
     mapBgUrl, mapBgOpacity, mapBgScale, mapBgColor,
-    stats, updatedAt, expandedRackIds, onToggleExpand,
+    stats, updatedAt,
   } = props;
 
   const rf = useReactFlow();
@@ -160,17 +159,15 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
     [nodes, switchClasses, filters],
   );
 
-  // Resolve top-level node positions: stored coordinates where available,
-  // dagre for everything unpositioned.
+  // Resolve node positions: stored coordinates where available, dagre for
+  // everything unpositioned.
   const graphModel = useMemo(() => {
     interface TopNode { id: string; width: number; height: number; x: number; y: number }
     const positioned: TopNode[] = [];
     const pending: TopNode[] = [];
 
     racks.forEach(rack => {
-      const size = expandedRackIds.has(rack.id)
-        ? expandedRackSize(rack.devices.length)
-        : RACK_COLLAPSED_SIZE;
+      const size = RACK_COLLAPSED_SIZE;
       const id = rackNodeId(rack.id);
       const rx = rack.rack.map_x;
       const ry = rack.rack.map_y;
@@ -229,7 +226,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
 
     const byId = new Map(positioned.map(p => [p.id, p]));
     return { positions: byId };
-  }, [racks, outsideNodes, expandedRackIds, nodes, managedRacks, switchClasses, links]);
+  }, [racks, outsideNodes, nodes, managedRacks, switchClasses, links]);
 
   // Aggregated inter-endpoint links for the canvas.
   const aggregated = useMemo(() => {
@@ -272,9 +269,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
 
       racks.forEach(rack => {
         const id = rackNodeId(rack.id);
-        const pos = graphModel.positions.get(id) || { x: 100, y: 100, width: RACK_COLLAPSED_SIZE.width, height: RACK_COLLAPSED_SIZE.height };
-        const expanded = expandedRackIds.has(rack.id);
-        const size = expanded ? expandedRackSize(rack.devices.length) : RACK_COLLAPSED_SIZE;
+        const pos = graphModel.positions.get(id) || { x: 100, y: 100 };
         const counts = rackPortCounts(rack.devices);
         const classIds = [...new Set(rack.devices.map(d => d.class_id).filter(Boolean))] as number[];
         const classColors = classIds.map(cid => classMap[cid]?.color).filter(Boolean) as string[];
@@ -288,34 +283,11 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
             classColors,
             activePorts: counts.active,
             totalPorts: counts.total,
-            expanded,
-            onToggleExpand,
           },
-          style: { width: size.width, height: size.height, zIndex: expanded ? -1 : 0 },
+          style: { width: RACK_COLLAPSED_SIZE.width, height: RACK_COLLAPSED_SIZE.height, zIndex: 0 },
           selected: prevSelected.has(id),
           deletable: false,
         });
-        if (expanded) {
-          rack.devices.forEach((d, i) => {
-            const childId = deviceNodeId(d.id);
-            next.push({
-              id: childId,
-              type: "device",
-              parentId: id,
-              extent: "parent",
-              draggable: false,
-              position: gridSlotPosition(i),
-              data: {
-                device: d,
-                classColor: d.class_id ? classMap[d.class_id]?.color || null : null,
-                inRack: true,
-              },
-              style: { width: DEVICE_NODE_SIZE.width, height: DEVICE_NODE_SIZE.height },
-              selected: prevSelected.has(childId),
-              deletable: false,
-            });
-          });
-        }
       });
 
       outsideNodes.forEach(node => {
@@ -360,7 +332,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
         };
       }),
     );
-  }, [graphModel, aggregated, activePairKey, racks, outsideNodes, classMap, expandedRackIds, onToggleExpand, rackPairColorMap, mapBgUrl, mapBgOpacity, mapBgScale, mapBgColor, setFlowNodes, setEdges]);
+  }, [graphModel, aggregated, activePairKey, racks, outsideNodes, classMap, rackPairColorMap, mapBgUrl, mapBgOpacity, mapBgScale, mapBgColor, setFlowNodes, setEdges]);
 
   // Center the viewport on a rack/outside node when its selection changes
   // (covers rack clicks, toolbar search and the highlightPortKey deep-link).
@@ -392,17 +364,18 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
       if (node.type === "rack") {
         const rack = racks.find(r => rackNodeId(r.id) === node.id);
         if (!rack) return;
-        // Persist the rack position plus absolute (center-convention)
-        // positions for every member device so both contracts round-trip.
-        const devicePositions: DevicePositionPatch[] = rack.devices.map((d, i) => {
-          const slot = gridSlotPosition(i);
-          const center = deviceCenter({ x: node.position.x + slot.x, y: node.position.y + slot.y });
-          return { id: d.id, x: Math.round(center.x), y: Math.round(center.y) };
-        });
+        // Persist the rack position plus the rack center (center convention)
+        // for every member device so both contracts round-trip.
+        const center = rackCenter(node.position);
+        const devicePositions: DevicePositionPatch[] = rack.devices.map(d => ({
+          id: d.id,
+          x: Math.round(center.x),
+          y: Math.round(center.y),
+        }));
         onRackPositionChange(rack.id, { x: Math.round(node.position.x), y: Math.round(node.position.y) }, devicePositions);
         return;
       }
-      if (node.type === "device" && !node.parentId) {
+      if (node.type === "device") {
         const deviceId = Number(node.id.slice("device:".length));
         const center = deviceCenter(node.position);
         onDevicePositionChange(deviceId, { x: Math.round(center.x), y: Math.round(center.y) });
@@ -421,16 +394,14 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
       if (node.type === "device") {
         const deviceId = Number(node.id.slice("device:".length));
         const device = nodes.find(n => n.id === deviceId);
-        if (!device) return;
-        if (node.parentId) onShowDeviceDetail(deviceId);
-        else onSelectOutside(device);
+        if (device) onSelectOutside(device);
       }
     },
-    [racks, nodes, onSelectRack, onSelectOutside, onShowDeviceDetail],
+    [racks, nodes, onSelectRack, onSelectOutside],
   );
 
   const handleAutoLayout = useCallback(() => {
-    const topLevel = flowNodes.filter(n => !n.parentId && n.type !== "mapBackground");
+    const topLevel = flowNodes.filter(n => n.type !== "mapBackground");
     const laid = dagreLayout(
       topLevel.map(n => ({
         id: n.id,
@@ -444,7 +415,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
     setFlowNodes(nds =>
       nds.map(n => {
         const pos = laid.get(n.id);
-        if (!pos || n.parentId) return n;
+        if (!pos) return n;
         return { ...n, position: pos };
       }),
     );
@@ -454,9 +425,8 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
         const rackId = Number(id.slice("rack:".length));
         assignment.racks[rackId] = { x: Math.round(pos.x), y: Math.round(pos.y) };
         const rack = racks.find(r => r.id === rackId);
-        rack?.devices.forEach((d, i) => {
-          const slot = gridSlotPosition(i);
-          const center = deviceCenter({ x: pos.x + slot.x, y: pos.y + slot.y });
+        const center = rackCenter(pos);
+        rack?.devices.forEach(d => {
           assignment.devices[d.id] = { x: Math.round(center.x), y: Math.round(center.y) };
         });
       } else if (id.startsWith("device:")) {

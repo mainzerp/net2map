@@ -128,7 +128,6 @@ const defaultProps = {
   selectedOutsideId: null,
   onSelectRack: () => {},
   onSelectOutside: () => {},
-  onShowDeviceDetail: () => {},
   onSearchSelect: () => {},
   onRackPositionChange: () => {},
   onDevicePositionChange: () => {},
@@ -141,8 +140,6 @@ const defaultProps = {
   mapBgColor: "var(--surface)",
   stats: { switches: 0, fast: 0, gig: 0 },
   updatedAt: null,
-  expandedRackIds: new Set<number>(),
-  onToggleExpand: () => {},
 };
 
 function rackNodeTexts(container: HTMLElement): string[] {

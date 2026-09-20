@@ -1,29 +1,43 @@
-import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from "@xyflow/react";
-import type { AggregatedFlowEdge } from "../flowTypes";
+import {
+  BaseEdge,
+  EdgeLabelRenderer,
+  getBezierPath,
+  useInternalNode,
+  type EdgeProps,
+} from "@xyflow/react";
+import { getBorderAnchor, nodeCenter } from "./floating";
+import type { AggregatedFlowEdge, TopoFlowNode } from "../flowTypes";
 
 // ── AggregatedEdge ───────────────────────────────────────────────────────────
-// One edge per endpoint pair (rack<->rack, rack<->device). The badge shows the
+// One edge per endpoint pair (rack<->rack, rack<->device, device<->device).
+// Both endpoints float: they anchor on the node border point facing the peer
+// (see floating.ts) instead of a fixed handle, so links leave a node from the
+// side the peer is on and track live while dragging. The badge shows the
 // aggregated link count and best speed, e.g. "3x 10G". An active edge is the
 // one whose pair contains the link currently selected in RackDetail.
 
 export default function AggregatedEdge({
   id,
-  sourceX,
-  sourceY,
-  targetX,
-  targetY,
-  sourcePosition,
-  targetPosition,
+  source,
+  target,
   data,
   selected,
 }: EdgeProps<AggregatedFlowEdge>) {
+  const sourceNode = useInternalNode<TopoFlowNode>(source);
+  const targetNode = useInternalNode<TopoFlowNode>(target);
+
+  if (!sourceNode || !targetNode) return null;
+
+  const sourceAnchor = getBorderAnchor(sourceNode, nodeCenter(targetNode));
+  const targetAnchor = getBorderAnchor(targetNode, nodeCenter(sourceNode));
+
   const [path, labelX, labelY] = getBezierPath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition,
-    targetPosition,
+    sourceX: sourceAnchor.x,
+    sourceY: sourceAnchor.y,
+    sourcePosition: sourceAnchor.position,
+    targetX: targetAnchor.x,
+    targetY: targetAnchor.y,
+    targetPosition: targetAnchor.position,
   });
 
   const active = !!data?.active || selected;

@@ -9,33 +9,6 @@ import dagre from "dagre";
 export const RACK_COLLAPSED_SIZE = { width: 176, height: 100 } as const;
 export const DEVICE_NODE_SIZE = { width: 216, height: 76 } as const;
 
-// Expanded rack: header strip plus a fixed grid of device cells.
-export const EXPANDED_COLS = 2;
-export const EXPANDED_HEADER = 48;
-export const EXPANDED_PAD = 12;
-export const EXPANDED_CELL_W = DEVICE_NODE_SIZE.width + 16;
-export const EXPANDED_CELL_H = DEVICE_NODE_SIZE.height + 16;
-
-export function expandedRackSize(deviceCount: number): { width: number; height: number } {
-  const rows = Math.max(1, Math.ceil(Math.max(1, deviceCount) / EXPANDED_COLS));
-  return {
-    width: EXPANDED_PAD * 2 + EXPANDED_COLS * EXPANDED_CELL_W,
-    height: EXPANDED_HEADER + EXPANDED_PAD + rows * EXPANDED_CELL_H + EXPANDED_PAD,
-  };
-}
-
-// Position of a member device inside an expanded rack group, relative to the
-// group's top-left corner. Also used to derive absolute device positions when
-// a collapsed rack is dragged.
-export function gridSlotPosition(index: number): { x: number; y: number } {
-  const col = index % EXPANDED_COLS;
-  const row = Math.floor(index / EXPANDED_COLS);
-  return {
-    x: EXPANDED_PAD + col * EXPANDED_CELL_W,
-    y: EXPANDED_HEADER + EXPANDED_PAD + row * EXPANDED_CELL_H,
-  };
-}
-
 export interface LayoutInputNode {
   id: string;
   width: number;
