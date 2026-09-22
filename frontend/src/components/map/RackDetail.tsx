@@ -331,7 +331,14 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
     computeLine();
     const el = scrollRef.current;
     if (el) el.addEventListener("scroll", computeLine, { passive: true });
-    return () => { if (el) el.removeEventListener("scroll", computeLine); };
+    window.addEventListener("resize", computeLine);
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(computeLine) : null;
+    if (el && ro) ro.observe(el);
+    return () => {
+      if (el) el.removeEventListener("scroll", computeLine);
+      window.removeEventListener("resize", computeLine);
+      ro?.disconnect();
+    };
   }, [resolvedSelectedLink]);
 
   const renderGroup = (devices: TopologyNode[], groupKey: string) => devices.map((d, idx) => (
