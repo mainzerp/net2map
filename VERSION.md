@@ -1,5 +1,47 @@
 # Version History
 
+## v2.1.0 -- Firmware-Spalte & Code-Review-Haertung
+
+**Type:** MINOR (neue Alembic-Migration 017, keine Breaking Changes)
+
+### Changes
+
+#### Features
+
+- Firmware-Version wird beim SNMP-Scan erfasst (entPhysicalSoftwareRev mit
+  entPhysicalFirmwareRev- und sysDescr-Parsing als Fallback) und als sortierbare,
+  durchsuchbare Spalte in der Geraetetabelle auf `/network` angezeigt
+- Migration 017: Backfill von `devices.firmware` NULLs plus Server-Default
+
+#### Fixes
+
+##### Backend
+
+- Token-Sperrungen (Logout, Revoke-all) laufen jetzt bis ueber das
+  Refresh-Fenster hinaus -- widerrufene Tokens koennen nicht mehr erneuert werden
+- Rollenwechsel, Deaktivierung, Passwort-Aenderung und Loeschen sperren alle
+  Sessions des betroffenen Users sofort
+- WebSocket-Authentifizierung verhaelt sich wie die HTTP-Auth (kein
+  Legacy-Token, sobald JWT konfiguriert ist)
+- Scan-Lock wird waehrend des Scans und der DB-Finalisierung erneuert;
+  Scan-Fortschritt wird live broadcastet statt erst am Ende
+- `/api/config/export` erfordert admin/operator; Import loest `profile_label`
+  und `device_ip` auf und meldet FK-Fehler als 400 statt 500
+- SNMP-Communities werden verschluesselt gespeichert wie die v3-Passwoerter
+- Rate-Limiting sieht die echte Client-IP hinter nginx (Proxy-Headers);
+  `CORS_ORIGIN` per Env konfigurierbar
+- `DeviceOut` serialisiert abgelaufene ORM-Objekte und NULL-Felder robust
+
+##### Frontend
+
+- Job-Polling behandelt `queued` als aktiven Status
+- Tabellen-Pagination bleibt bei Refetches erhalten
+- Settings-Formulare ueberschreiben ungespeicherte Eingaben nicht mehr
+- Karten-Hintergrund synchronisiert sich mit den Settings und nutzt Caching
+- IPv6-sichere `ip:port`-Schluessel; Drag-Positionen ueberstehen Refetches
+- Rack-Platzierungen werden auf die Rack-Hoehe begrenzt
+- Dev-Proxy leitet `/ws` weiter; CSP auf `'self'` verschaerft
+
 ## v2.0.0 -- Frontend-Rework & Rack-Elevation
 
 **Type:** MAJOR (Breaking: neuer API-Endpunkt `/api/racks/{id}/layout`, neue DB-Spalten via Migration 015, UI komplett neu aufgebaut)
