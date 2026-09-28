@@ -58,7 +58,10 @@ services:
     environment:
       DATABASE_URL: "postgresql://netmap:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres/netmap"
       REDIS_URL: "redis://redis:6379/0"
-      CORS_ORIGIN: "http://localhost:3000"
+      CORS_ORIGIN: "${CORS_ORIGIN:-http://localhost:3000}"
+      # Trusted proxies for X-Forwarded-For (rate limiting sees real client IPs).
+      # Defaults to "*" (any upstream) -- set to your reverse-proxy CIDR,
+      # e.g. UVICORN_FORWARDED_ALLOW_IPS: "172.16.0.0/12"
       SECRET_TOKEN: "${SECRET_TOKEN:?Set SECRET_TOKEN in .env}"
       JWT_SECRET: "${JWT_SECRET:-}"
       DEFAULT_ADMIN_PASSWORD: "${DEFAULT_ADMIN_PASSWORD:?Set DEFAULT_ADMIN_PASSWORD in .env}"

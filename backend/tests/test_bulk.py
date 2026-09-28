@@ -1,7 +1,7 @@
 """Tests for bulk import/export endpoints."""
 import json
 
-from database import Credential, SnmpProfile
+from database import Credential, Device, SnmpProfile
 
 # -- Bulk export tests ---------------------------------------------------------
 
@@ -311,3 +311,47 @@ def test_bulk_export_import_roundtrip_preserves_priorities(client, auth_headers,
     creds = db.query(Credential).filter(Credential.ip == "10.5.0.4").order_by(Credential.priority).all()
     assert len(creds) == 2
     assert [c.label for c in creds] == ["RT0", "RT1"]
+
+
+# -- FK reference resolution ---------------------------------------------------
+
+def test_bulk_export_includes_fk_references(client, auth_headers, db):
+    """Credential export rows carry profile_label and device_ip."""
+    prof = SnmpProfile(label="BkProf", community="pub")
+    dev = Device(ip="10.7.0.9", sys_name="sw-bk")
+    cred = Credential(label="BkCred", ip="10.7.0.9", profile=prof, device=dev)
+    db.add_all([prof, dev, cred])
+    db.commit()
+
+    r = client.get("/api/bulk-export/credentials?fmt=json", headers=auth_headers)
+    assert r.status_code == 200
+    rows = json.loads(r.json()["data"])
+    row = [c for c in rows if c["ip"] == "10.7.0.9"][0]
+    assert row["profile_label"] == "BkProf"
+    assert row["device_ip"] == "10.7.0.9"
+
+
+def test_bulk_import_resolves_fk_labels(client, auth_headers, db):
+    """Bulk credential import resolves profile_label/device_ip to local ids."""
+    prof = SnmpProfile(label="BkImpProf", community="pub")
+    dev = Device(ip="10.7.1.5", sys_name="sw-bki")
+    db.add_all([prof, dev])
+    db.commit()
+
+    import_data = json.dumps([
+        {"label": "BkImp", "ip": "10.7.1.5",
+         "profile_label": "BkImpProf", "device_ip": "10.7.1.5"},
+        {"label": "BkImpNoDev", "ip": "10.7.1.6", "profile_label": "Missing"},
+    ])
+    r = client.post("/api/bulk-import/credentials", json={
+        "format": "json", "data": import_data, "dry_run": False,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["inserted"] == 2
+
+    cred = db.query(Credential).filter(Credential.ip == "10.7.1.5").first()
+    assert cred.profile_id == prof.id
+    assert cred.device_id == dev.id
+    cred2 = db.query(Credential).filter(Credential.ip == "10.7.1.6").first()
+    assert cred2.profile_id is None
+    assert cred2.device_id is None

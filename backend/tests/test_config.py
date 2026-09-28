@@ -1,7 +1,7 @@
 """Tests for global config export/import endpoints."""
 import json
 
-from database import AppSetting, Credential, SnmpProfile
+from database import AppSetting, Credential, Device, SnmpProfile
 
 # -- Config export tests -------------------------------------------------------
 
@@ -270,3 +270,80 @@ def test_config_import_mask_keeps_values_on_update(client, auth_headers, db):
     assert cred.community == "keepme"
     assert cred.v3_auth_password == "keepauth"
     assert cred.v3_priv_password == "keeppriv"
+
+
+# -- Role guard and FK reference resolution ------------------------------------
+
+def test_config_export_requires_privileged_role(client, viewer_jwt_headers):
+    """Viewer role must not access the global config export."""
+    r = client.get("/api/config/export", headers=viewer_jwt_headers)
+    assert r.status_code == 403
+
+
+def test_config_export_includes_fk_references(client, auth_headers, db):
+    """Credential export rows carry profile_label and device_ip."""
+    prof = SnmpProfile(label="RefProf", community="pub")
+    dev = Device(ip="10.8.0.9", sys_name="sw-ref")
+    cred = Credential(label="RefCred", ip="10.8.0.9", profile=prof, device=dev)
+    db.add_all([prof, dev, cred])
+    db.commit()
+
+    r = client.get("/api/config/export", headers=auth_headers)
+    assert r.status_code == 200
+    payload = json.loads(r.json()["data"])
+    row = [c for c in payload["credentials"] if c["ip"] == "10.8.0.9"][0]
+    assert row["profile_label"] == "RefProf"
+    assert row["device_ip"] == "10.8.0.9"
+
+
+def test_config_import_resolves_fk_labels_over_raw_ids(client, auth_headers, db):
+    """profile_label/device_ip win over raw ids; unknown references -> None."""
+    prof = SnmpProfile(label="ImportProf", community="pub")
+    dev = Device(ip="10.8.1.5", sys_name="sw-imp")
+    db.add_all([prof, dev])
+    db.commit()
+
+    config_payload = json.dumps({
+        "settings": [],
+        "profiles": [],
+        "credentials": [
+            {"label": "FkCred", "ip": "10.8.1.5",
+             "profile_id": 999, "device_id": 999,
+             "profile_label": "ImportProf", "device_ip": "10.8.1.5"},
+            {"label": "FkCred2", "ip": "10.8.1.6",
+             "profile_id": 999, "profile_label": "NoSuchProfile"},
+        ],
+    })
+    r = client.post("/api/config/import", json={
+        "data": config_payload, "dry_run": False,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["inserted"]["credentials"] == 2
+
+    cred = db.query(Credential).filter(Credential.ip == "10.8.1.5").first()
+    assert cred.profile_id == prof.id
+    assert cred.device_id == dev.id
+    # Unknown label resolves to None rather than keeping the stale raw id
+    cred2 = db.query(Credential).filter(Credential.ip == "10.8.1.6").first()
+    assert cred2.profile_id is None
+
+
+def test_config_import_autolinks_device_by_ip(client, auth_headers, db):
+    """Without device_id/device_ip, import links the credential to the device
+    with the same IP, matching create_credential behaviour."""
+    db.add(Device(ip="10.8.2.7", sys_name="sw-auto"))
+    db.commit()
+
+    config_payload = json.dumps({
+        "settings": [],
+        "profiles": [],
+        "credentials": [{"label": "AutoCred", "ip": "10.8.2.7"}],
+    })
+    r = client.post("/api/config/import", json={
+        "data": config_payload, "dry_run": False,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+
+    cred = db.query(Credential).filter(Credential.ip == "10.8.2.7").first()
+    assert cred.device_id is not None
+    assert cred.device.sys_name == "sw-auto"

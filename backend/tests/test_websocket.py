@@ -10,12 +10,17 @@ from routers.ws import _authenticate_ws
 # T3c: WebSocket Tests (7 tests)
 # ---------------------------------------------------------------------------
 
-def _patch_cfg(**overrides):
-    """Return a patched config.settings with the given overrides."""
-    mock_cfg = MagicMock()
-    mock_cfg.jwt_secret = overrides.get("jwt_secret", "")
-    mock_cfg.secret_token = overrides.get("secret_token", "")
-    return patch("config.settings", mock_cfg)
+def _patch_cfg(jwt_secret="", secret_token=""):
+    """Patch the shared.auth module constants for a (jwt_secret, secret_token) pair.
+
+    Mirrors shared.auth semantics: JWT_SECRET falls back to SECRET_TOKEN, and
+    the legacy token is only honored when JWT_SECRET is unset.
+    """
+    return patch.multiple(
+        "shared.auth",
+        JWT_SECRET=jwt_secret or secret_token,
+        _LEGACY_TOKEN="" if jwt_secret else secret_token,
+    )
 
 
 class TestAuthenticateWs:
@@ -38,6 +43,14 @@ class TestAuthenticateWs:
         with _patch_cfg(jwt_secret="", secret_token="my-legacy-token"), \
              patch("shared.redis_client.get_redis", return_value=None):
             _authenticate_ws("my-legacy-token")
+
+    def test_legacy_token_rejected_when_jwt_secret_set(self):
+        """With JWT_SECRET configured, the legacy SECRET_TOKEN is not accepted."""
+        with _patch_cfg(jwt_secret="jwt-secret", secret_token="legacy-tok"), \
+             patch("shared.redis_client.get_redis", return_value=None):
+            with pytest.raises(WebSocketException) as exc:
+                _authenticate_ws("legacy-tok")
+            assert exc.value.code == 1008
 
     def test_invalid_token_raises(self):
         """A completely invalid token should raise WebSocketException."""

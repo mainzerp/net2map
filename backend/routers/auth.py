@@ -17,6 +17,7 @@ from shared.auth import (
     DUMMY_PASSWORD_HASH,
     JWT_ALGORITHM,
     JWT_SECRET,
+    REFRESH_GRACE_SECONDS,
     _is_user_revoked,
     blacklist_all_user_tokens,
     blacklist_token,
@@ -98,7 +99,7 @@ def refresh_token(request: Request, db: Session = Depends(get_db)):
             from datetime import datetime, timezone
             exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
             now = datetime.now(timezone.utc)
-            if (now - exp).total_seconds() > 3600:
+            if (now - exp).total_seconds() > REFRESH_GRACE_SECONDS:
                 api_error(401, "AUTH_EXPIRED", "Token expired beyond refresh window")
             jti = payload.get("jti")
             if jti and is_token_blacklisted(jti):
@@ -184,13 +185,25 @@ def update_user(user_id: int, body: UserUpdate, request: Request, db: Session = 
         or ("role" in updates and updates["role"] != "admin")
     )
     _guard_admin_lockout(request, db, user, removes_admin)
-    if "password" in updates:
+    old_role = user.role
+    password_changed = "password" in updates
+    if password_changed:
         updates["hashed_pw"] = hash_password(updates.pop("password"))
     for k, v in updates.items():
         setattr(user, k, v)
     db.commit()
     db.refresh(user)
-    log_audit(request, "update", "user", str(user_id), {"fields": list(body.model_dump(exclude_none=True).keys())})
+    details = {"fields": list(body.model_dump(exclude_none=True).keys())}
+    # Security-relevant changes must kill existing sessions: a deactivated
+    # user, a changed role (stale role claim), or a new password.
+    if (
+        ("is_active" in updates and updates["is_active"] is False)
+        or ("role" in updates and updates["role"] != old_role)
+        or password_changed
+    ):
+        blacklist_all_user_tokens(user.id)
+        details["sessions_revoked"] = True
+    log_audit(request, "update", "user", str(user_id), details)
     return user
 
 
@@ -202,9 +215,13 @@ def delete_user(user_id: int, request: Request, db: Session = Depends(get_db)):
     if not user:
         api_error(404, "USER_NOT_FOUND", "User not found")
     _guard_admin_lockout(request, db, user, removes_admin=True)
-    log_audit(request, "delete", "user", str(user_id), {"username": user.username})
+    username = user.username
     db.delete(user)
     db.commit()
+    # A deleted user must not keep working sessions (incl. the refresh window)
+    blacklist_all_user_tokens(user_id)
+    log_audit(request, "delete", "user", str(user_id),
+              {"username": username, "sessions_revoked": True})
 
 
 @router.post("/api/auth/logout")

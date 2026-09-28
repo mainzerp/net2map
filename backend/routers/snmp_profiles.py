@@ -40,6 +40,8 @@ def list_snmp_profiles(db: Session = Depends(get_db)):
 def create_snmp_profile(body: SnmpProfileCreate, request: Request, db: Session = Depends(get_db)):
     payload = body.model_dump()
     _normalize_mask_sentinels(payload)
+    if payload.get("community"):
+        payload["community"] = encrypt(payload["community"])
     if payload.get("v3_auth_password"):
         payload["v3_auth_password"] = encrypt(payload["v3_auth_password"])
     if payload.get("v3_priv_password"):
@@ -61,6 +63,8 @@ def update_snmp_profile(profile_id: int, body: SnmpProfileUpdate, request: Reque
     payload = body.model_dump(exclude_none=True)
     _strip_mask_sentinels(payload)
 
+    if "community" in payload and payload["community"]:
+        payload["community"] = encrypt(payload["community"])
     if "v3_auth_password" in payload and payload["v3_auth_password"]:
         payload["v3_auth_password"] = encrypt(payload["v3_auth_password"])
     if "v3_priv_password" in payload and payload["v3_priv_password"]:

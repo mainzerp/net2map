@@ -24,5 +24,8 @@ RUN chmod +x /entrypoint.sh
 
 # Default 1 worker. With Redis configured (REDIS_URL), multiple workers are safe.
 # Override via UVICORN_WORKERS env var (e.g. UVICORN_WORKERS=2).
+# --proxy-headers + --forwarded-allow-ips make uvicorn honor X-Forwarded-For from
+# the nginx reverse proxy so rate limiting sees real client IPs. Restrict the
+# trusted proxy range via UVICORN_FORWARDED_ALLOW_IPS (default "*" for compose).
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-1} --loop asyncio --timeout-keep-alive 75"]
+CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-1} --loop asyncio --timeout-keep-alive 75 --proxy-headers --forwarded-allow-ips \"${UVICORN_FORWARDED_ALLOW_IPS:-*}\""]

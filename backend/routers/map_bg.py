@@ -95,8 +95,9 @@ async def upload_map_background(request: Request, file: UploadFile = File(...)):
     if ext not in ALLOWED_EXTENSIONS:
         api_error(400, "UNSUPPORTED_FILE_TYPE", f"Unsupported file type '{ext}'. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}", field="file")
 
-    # Read and check size
-    contents = await file.read()
+    # Read bounded: at most MAX_FILE_SIZE + 1 bytes so an oversized upload is
+    # rejected without buffering the whole body in memory.
+    contents = await file.read(MAX_FILE_SIZE + 1)
     if len(contents) > MAX_FILE_SIZE:
         api_error(400, "FILE_TOO_LARGE", f"File too large. Maximum size is {MAX_FILE_SIZE // (1024*1024)} MB.", field="file")
 

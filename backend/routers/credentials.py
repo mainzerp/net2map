@@ -52,6 +52,8 @@ def create_credential(body: CredentialCreate, request: Request, db: Session = De
                   field="ip")
     data = body.model_dump()
     _normalize_mask_sentinels(data)
+    if data.get("community"):
+        data["community"] = encrypt(data["community"])
     if data.get("v3_auth_password"):
         data["v3_auth_password"] = encrypt(data["v3_auth_password"])
     if data.get("v3_priv_password"):
@@ -81,6 +83,8 @@ def update_credential(cred_id: int, body: CredentialUpdate, request: Request, db
         api_error(404, "CREDENTIAL_NOT_FOUND", "Credential not found")
     updates = body.model_dump(exclude_unset=True)
     _strip_mask_sentinels(updates)
+    if "community" in updates and updates["community"]:
+        updates["community"] = encrypt(updates["community"])
     if "v3_auth_password" in updates and updates["v3_auth_password"]:
         updates["v3_auth_password"] = encrypt(updates["v3_auth_password"])
     if "v3_priv_password" in updates and updates["v3_priv_password"]:

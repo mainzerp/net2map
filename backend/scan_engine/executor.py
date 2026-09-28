@@ -1,5 +1,6 @@
 """Core scan execution engine -- the async _execute_scan function."""
 import asyncio
+import contextlib
 import logging
 import re
 import time
@@ -141,7 +142,7 @@ async def _execute_scan_body(
                             "profile_id": p.id,
                             "profile_label": p.label,
                             "snmp_version": p.snmp_version,
-                            "community": p.community,
+                            "community": decrypt(p.community),
                             "v3_security_level": p.v3_security_level,
                             "v3_username": p.v3_username,
                             "v3_auth_protocol": p.v3_auth_protocol,
@@ -231,7 +232,7 @@ async def _execute_scan_body(
         return {
             "snmp_port": cred.snmp_port,
             "snmp_version": p.snmp_version if p else cred.snmp_version,
-            "community": p.community if p else cred.community,
+            "community": decrypt(p.community if p else cred.community),
             "v3_security_level": p.v3_security_level if p else cred.v3_security_level,
             "v3_username": p.v3_username if p else cred.v3_username,
             "v3_auth_protocol": p.v3_auth_protocol if p else cred.v3_auth_protocol,
@@ -379,14 +380,15 @@ async def _execute_scan_body(
     workers = max(1, min(int(configured_max_workers), max(len(scan_targets), 1)))
     sem = asyncio.Semaphore(workers)
 
-    results = await asyncio.gather(
-        *[_scan_target_async(t, sem) for t in scan_targets],
-        return_exceptions=False,
-    )
     total_targets = len(scan_targets)
     scanned_count = 0
     last_lock_renew = time.time()
-    for ip, label, data, error_msg, duration_ms, ping_ok, ping_rtt, is_probe, matched_profile_id in results:
+    # as_completed (not gather): progress broadcasts and scan-lock renewals
+    # must happen while the scan runs, not only after the slowest target
+    # finishes -- otherwise long scans lose the lock and progress stalls.
+    target_coros = [_scan_target_async(t, sem) for t in scan_targets]
+    for completed in asyncio.as_completed(target_coros):
+        ip, label, data, error_msg, duration_ms, ping_ok, ping_rtt, is_probe, matched_profile_id = await completed
         scanned_count += 1
         ping_by_ip[ip] = (ping_ok, ping_rtt)
         if data:
@@ -454,29 +456,47 @@ async def _execute_scan_body(
     if lock_token:
         renew_scan_lock(lock_token)
 
-    # The synchronous SQLAlchemy rebuild phase runs in a worker thread so the
-    # shared background event loop stays responsive for WebSocket broadcasts
-    # and other coroutines while ports/links/endpoints are rewritten.
-    result, dry_run_preview = await asyncio.to_thread(
-        _finalize_scan_db,
-        db,
-        dry_run=dry_run,
-        scan_mode=scan_mode,
-        corr=corr,
-        cancel_event=cancel_event,
-        switch_data=switch_data,
-        ping_by_ip=ping_by_ip,
-        range_found_ips=range_found_ips,
-        range_matched_profile=range_matched_profile,
-        range_no_profile_ips=range_no_profile_ips,
-        errors=errors,
-        status=status,
-        total_duration_ms=total_duration_ms,
-        scanned=len(scan_targets),
-        workers=workers,
-        switch_metrics=switch_metrics,
-        lock_token=lock_token,
-    )
+    async def _renew_scan_lock_until_done() -> None:
+        """Keep the distributed scan lock alive while the DB rebuild runs.
+
+        _finalize_scan_db can exceed the lock TTL on large rebuilds; without
+        periodic renewal another scan could acquire the lock mid-write.
+        """
+        while True:
+            await asyncio.sleep(_LOCK_RENEW_INTERVAL_SEC)
+            if lock_token:
+                renew_scan_lock(lock_token)
+
+    renew_task = asyncio.create_task(_renew_scan_lock_until_done()) if lock_token else None
+    try:
+        # The synchronous SQLAlchemy rebuild phase runs in a worker thread so the
+        # shared background event loop stays responsive for WebSocket broadcasts
+        # and other coroutines while ports/links/endpoints are rewritten.
+        result, dry_run_preview = await asyncio.to_thread(
+            _finalize_scan_db,
+            db,
+            dry_run=dry_run,
+            scan_mode=scan_mode,
+            corr=corr,
+            cancel_event=cancel_event,
+            switch_data=switch_data,
+            ping_by_ip=ping_by_ip,
+            range_found_ips=range_found_ips,
+            range_matched_profile=range_matched_profile,
+            range_no_profile_ips=range_no_profile_ips,
+            errors=errors,
+            status=status,
+            total_duration_ms=total_duration_ms,
+            scanned=len(scan_targets),
+            workers=workers,
+            switch_metrics=switch_metrics,
+            lock_token=lock_token,
+        )
+    finally:
+        if renew_task is not None:
+            renew_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await renew_task
 
     if dry_run:
         attach_dry_run_preview(result, dry_run_preview)
@@ -605,6 +625,8 @@ def _finalize_scan_db(
                 enabled=True,
                 profile_id=matched_prof.id if matched_prof else None,
                 snmp_version=(matched_prof.snmp_version if matched_prof else "v2c"),
+                # community is stored encrypted like the v3 passwords; the
+                # profile value is copied verbatim so it stays encrypted.
                 community=(matched_prof.community if matched_prof else "public"),
                 v3_security_level=(matched_prof.v3_security_level if matched_prof else "authPriv"),
                 v3_username=(matched_prof.v3_username if matched_prof else ""),

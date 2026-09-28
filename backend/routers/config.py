@@ -5,9 +5,10 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from database import AppSetting, Credential, SnmpProfile, get_db
+from database import AppSetting, Credential, Device, SnmpProfile, get_db
 from routers.bulk import _normalize_bool, _normalize_optional_int
 from schemas import (
     MASK_EXPORT,
@@ -26,7 +27,8 @@ router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
 
 
-@router.get("/api/config/export", response_model=GlobalConfigExportOut)
+@router.get("/api/config/export", response_model=GlobalConfigExportOut,
+            dependencies=[require_role("admin", "operator")])
 @limiter.limit("10/minute")
 def export_global_config(request: Request, db: Session = Depends(get_db)):
     payload = {
@@ -67,6 +69,10 @@ def export_global_config(request: Request, db: Session = Depends(get_db)):
                 "v3_priv_password": MASK_EXPORT if c.v3_priv_password else "",
                 "profile_id": c.profile_id,
                 "device_id": c.device_id,
+                # Human-readable FK references so an import can resolve them
+                # on a different database where raw ids differ.
+                "profile_label": c.profile.label if c.profile else None,
+                "device_ip": c.device.ip if c.device else None,
             }
             for c in db.query(Credential).order_by(Credential.id).all()
         ],
@@ -121,7 +127,13 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
                     normalized[key] = _normalize_optional_int(normalized.get(key))
             if "enabled" in normalized:
                 normalized["enabled"] = _normalize_bool(normalized.get("enabled"))
-            valid_credentials.append(CredentialCreate(**normalized).model_dump())
+            validated = CredentialCreate(**normalized).model_dump()
+            # FK references exported by newer versions are not schema fields;
+            # carry them through so the write phase can resolve them.
+            for alias in ("profile_label", "device_ip"):
+                if alias in normalized:
+                    validated[alias] = normalized[alias]
+            valid_credentials.append(validated)
         except Exception as exc:
             errors.append({"section": "credentials", "row": i, "message": str(exc)})
 
@@ -141,7 +153,7 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
         _MASKED_SECRET_FIELDS = ("v3_auth_password", "v3_priv_password", "community")
         for row in valid_profiles:
             masked_fields = {f for f in _MASKED_SECRET_FIELDS if row.get(f) in MASK_SENTINELS}
-            for pwd_field in ("v3_auth_password", "v3_priv_password"):
+            for pwd_field in _MASKED_SECRET_FIELDS:
                 if row.get(pwd_field) and pwd_field not in masked_fields:
                     row[pwd_field] = encrypt(row[pwd_field])
             existing = db.query(SnmpProfile).filter(SnmpProfile.label == row["label"]).first()
@@ -157,11 +169,24 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
                 db.add(SnmpProfile(**row))
                 inserted["profiles"] += 1
 
+        # Reference maps for resolving exported FK labels/ips; raw ids in the
+        # payload remain the fallback when no label/ip was provided.
+        profiles_by_label = {p.label: p.id for p in db.query(SnmpProfile).all()}
+        devices_by_ip = {d.ip: d.id for d in db.query(Device).all()}
         for row in valid_credentials:
+            profile_label = row.pop("profile_label", None)
+            device_ip = row.pop("device_ip", None)
             masked_fields = {f for f in _MASKED_SECRET_FIELDS if row.get(f) in MASK_SENTINELS}
-            for pwd_field in ("v3_auth_password", "v3_priv_password"):
+            for pwd_field in _MASKED_SECRET_FIELDS:
                 if row.get(pwd_field) and pwd_field not in masked_fields:
                     row[pwd_field] = encrypt(row[pwd_field])
+            if profile_label is not None and str(profile_label).strip():
+                row["profile_id"] = profiles_by_label.get(str(profile_label).strip())
+            if device_ip is not None and str(device_ip).strip():
+                row["device_id"] = devices_by_ip.get(str(device_ip).strip())
+            if row.get("device_id") is None:
+                # Same auto-link as create_credential: match the target IP
+                row["device_id"] = devices_by_ip.get(row["ip"])
             existing = db.query(Credential).filter(
                 Credential.ip == row["ip"], Credential.priority == row.get("priority", 0)
             ).first()
@@ -177,7 +202,11 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
                 db.add(Credential(**row))
                 inserted["credentials"] += 1
 
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            api_error(400, "IMPORT_INTEGRITY", "Import violated a database constraint (e.g. duplicate or dangling reference)")
 
     if not body.dry_run and not errors:
         log_audit(request, "import", "global_config", "", {

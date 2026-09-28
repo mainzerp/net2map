@@ -16,6 +16,11 @@ JWT_SECRET = settings.jwt_secret or settings.secret_token
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = settings.jwt_expiry_hours
 
+# How long past `exp` a token may still be refreshed (see /api/auth/refresh).
+# Blacklist/revocation entries must outlive this window, otherwise a revoked
+# token could still be exchanged for a fresh one during the grace period.
+REFRESH_GRACE_SECONDS = 3600
+
 # Backward compat: legacy single-token mode. Only honored when JWT_SECRET is
 # not set; once JWT auth is configured the static token must not grant access.
 if settings.jwt_secret and settings.secret_token:
@@ -65,7 +70,12 @@ def blacklist_token(jti: str, remaining_seconds: int) -> bool:
     if not r:
         return False
     try:
-        r.set(f"token_blacklist:{jti}", "1", ex=max(1, remaining_seconds))
+        r.set(
+            f"token_blacklist:{jti}", "1",
+            # TTL must cover the refresh grace window so a logged-out token
+            # cannot be refreshed after its blacklist entry expired.
+            ex=max(1, remaining_seconds) + REFRESH_GRACE_SECONDS,
+        )
         return True
     except Exception:
         _log.warning("Failed to blacklist token jti=%s", jti)
@@ -91,7 +101,11 @@ def blacklist_all_user_tokens(user_id: int) -> bool:
     if not r:
         return False
     try:
-        r.set(f"token_revoke_all:{user_id}", str(int(datetime.now(timezone.utc).timestamp())), ex=JWT_EXPIRY_HOURS * 3600)
+        r.set(
+            f"token_revoke_all:{user_id}",
+            str(int(datetime.now(timezone.utc).timestamp())),
+            ex=JWT_EXPIRY_HOURS * 3600 + REFRESH_GRACE_SECONDS,
+        )
         return True
     except Exception:
         return False
@@ -105,7 +119,9 @@ def _is_user_revoked(user_id: int, token_iat: int) -> bool:
         return False
     try:
         revoked_at = r.get(f"token_revoke_all:{user_id}")
-        if revoked_at and token_iat < int(revoked_at):
+        # <= is intentional: iat has 1-second granularity, so a token issued in
+        # the SAME second as the revocation must also count as revoked.
+        if revoked_at and token_iat <= int(revoked_at):
             return True
         return False
     except Exception:

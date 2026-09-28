@@ -21,19 +21,26 @@ _main_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
 async def broadcast_scan_update(data: dict) -> None:
-    """Send a scan progress update to all connected WebSocket clients."""
-    if not _clients:
+    """Send a scan progress update to all connected WebSocket clients.
+
+    The client set is snapshotted under the lock and sends happen outside it,
+    so one slow/dead client cannot block connects, disconnects or other sends.
+    """
+    async with _clients_lock:
+        clients = list(_clients)
+    if not clients:
         return
     message = json.dumps(data, default=str)
-    async with _clients_lock:
-        closed = []
-        for ws in _clients:
-            try:
-                await ws.send_text(message)
-            except Exception:
-                closed.append(ws)
-        for ws in closed:
-            _clients.discard(ws)
+    closed = []
+    for ws in clients:
+        try:
+            await ws.send_text(message)
+        except Exception:
+            closed.append(ws)
+    if closed:
+        async with _clients_lock:
+            for ws in closed:
+                _clients.discard(ws)
 
 
 def broadcast_scan_update_sync(data: dict) -> None:
@@ -144,11 +151,11 @@ def _authenticate_ws(token: str) -> None:
     checks as HTTP requests. If auth is disabled on the server, this is a
     no-op.
     """
-    from config import settings as _cfg
-    jwt_secret = _cfg.jwt_secret or _cfg.secret_token
-    legacy_token = _cfg.secret_token
+    # Same module-level values as the HTTP path: the legacy SECRET_TOKEN is
+    # only honored when JWT_SECRET is NOT configured (see shared.auth).
+    from shared.auth import _LEGACY_TOKEN, JWT_SECRET
 
-    if not jwt_secret and not legacy_token:
+    if not JWT_SECRET and not _LEGACY_TOKEN:
         return  # auth disabled
 
     if not token:
@@ -170,8 +177,9 @@ def _authenticate_ws(token: str) -> None:
         if ticket_data:
             return  # ticket valid
 
-    # Fallback: legacy single-token
-    if legacy_token and token == legacy_token:
+    # Legacy single-token -- empty unless JWT_SECRET is unset, so it is never
+    # an accepted credential once JWT auth is configured.
+    if _LEGACY_TOKEN and token == _LEGACY_TOKEN:
         return
 
     # Fallback: raw JWT (for clients that haven't migrated)
@@ -179,7 +187,7 @@ def _authenticate_ws(token: str) -> None:
         import jwt as pyjwt
 
         from shared.auth import _is_user_revoked, is_token_blacklisted
-        payload = pyjwt.decode(token, jwt_secret, algorithms=["HS256"])
+        payload = pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
 
         # Same revocation checks as the HTTP auth path
         jti = payload.get("jti")
