@@ -1,11 +1,15 @@
 """Tests for Pydantic schema validation."""
+from datetime import datetime, timezone
+
 import pytest
 from pydantic import ValidationError
 
+from database import Device, Port
 from schemas import (
     APIError,
     BulkEndpointUpdate,
     CredentialCreate,
+    DeviceOut,
     DnsSettingsUpdate,
     EndpointOut,
     EndpointPortInfo,
@@ -124,3 +128,45 @@ def test_bulk_endpoint_update():
     b = BulkEndpointUpdate(endpoint_ids=[1, 2, 3], ignored=True)
     assert len(b.endpoint_ids) == 3
     assert b.ignored is True
+
+
+# ── Device schemas ────────────────────────────────────────────────────────────
+
+def test_device_out_validates_expired_orm_object(db):
+    """An expired ORM Device still validates: attributes lazy-load on access."""
+    device = Device(ip="10.9.9.1", sys_name="sw-expired")
+    db.add(device)
+    db.commit()
+    db.add(Port(device_id=device.id, if_index=1, if_descr="eth1", oper_status=1))
+    db.commit()
+    db.expire(device)  # drop all loaded column state; access must lazy-load
+
+    out = DeviceOut.model_validate(device)
+    assert out.sys_name == "sw-expired"
+    assert out.firmware == ""
+    assert out.u_height == 1
+    assert len(out.ports) == 1
+    assert out.ports[0].if_descr == "eth1"
+
+
+def test_device_out_dict_null_firmware_coerces_to_empty():
+    """A dict payload with firmware=None is coerced to the field default ''."""
+    out = DeviceOut.model_validate({
+        "id": 1,
+        "sys_name": "sw1",
+        "ip": "10.9.9.2",
+        "firmware": None,
+        "last_seen": datetime.now(timezone.utc),
+    })
+    assert out.firmware == ""
+
+
+def test_device_out_required_field_still_required():
+    """None for a required field (no default) still fails validation."""
+    with pytest.raises(ValidationError):
+        DeviceOut.model_validate({
+            "id": 1,
+            "sys_name": None,
+            "ip": "10.9.9.3",
+            "last_seen": datetime.now(timezone.utc),
+        })

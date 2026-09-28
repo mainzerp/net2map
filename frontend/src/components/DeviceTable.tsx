@@ -166,17 +166,20 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
       dev.class_id && classMap[dev.class_id] ? classMap[dev.class_id].label : "",
       dev.model_id && modelMap[dev.model_id] ? modelMap[dev.model_id].name : "",
       dev.vendor || "",
+      dev.firmware || "",
       dev.location || "",
     ]
       .join(" ")
       .toLowerCase();
 
   // The status filter applies on top of the DataTable's built-in search.
-  const statusFiltered = statusFilter
-    ? devices.filter((d) => (d.ping_status ?? "unknown") === statusFilter)
-    : devices;
-  const active = statusFiltered.filter((d) => !d.ignored);
-  const ignored = statusFiltered.filter((d) => d.ignored);
+  // Memoized so the row array identity is stable across unrelated renders.
+  const statusFiltered = useMemo(
+    () => (statusFilter ? devices.filter((d) => (d.ping_status ?? "unknown") === statusFilter) : devices),
+    [devices, statusFilter],
+  );
+  const active = useMemo(() => statusFiltered.filter((d) => !d.ignored), [statusFiltered]);
+  const ignored = useMemo(() => statusFiltered.filter((d) => d.ignored), [statusFiltered]);
 
   const columns: DataTableColumn<DeviceRow>[] = [
     {
@@ -190,7 +193,7 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
           {d.vendor && (
             <div className="text-[10px] text-muted">
               {d.vendor}
-              {d.model || d.firmware ? ` - ${[d.model, d.firmware].filter(Boolean).join(" · ")}` : ""}
+              {d.model ? ` - ${d.model}` : ""}
             </div>
           )}
         </div>
@@ -249,6 +252,13 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
         ) : (
           <span className="text-muted">-</span>
         ),
+    },
+    {
+      key: "firmware",
+      header: "Firmware",
+      sortable: true,
+      sortValue: (d) => (d.firmware ?? "").toLowerCase(),
+      render: (d) => <span className="font-mono text-muted">{d.firmware || "-"}</span>,
     },
     {
       key: "location",

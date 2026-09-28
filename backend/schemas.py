@@ -3,7 +3,16 @@ import re
 from datetime import datetime
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
+from pydantic_core import PydanticUndefined
 
 # ─── Structured Error Response ────────────────────────────────────────────────
 
@@ -144,7 +153,7 @@ class RackOut(RackBase):
 class RackLayoutEntry(BaseModel):
     """Placement of one device in the rack elevation (1-based U space)."""
     device_id:       int
-    rack_u_position: int = Field(..., ge=1)
+    rack_u_position: int = Field(..., ge=1, le=48)
     u_height:        int = Field(..., ge=1, le=60)
 
 
@@ -385,6 +394,28 @@ class DeviceBase(BaseModel):
     enabled:   bool  = True
     vendor_override: bool = False
 
+    @field_validator("*", mode="before")
+    @classmethod
+    def _coerce_nulls(cls, v, info: ValidationInfo):
+        """Replace NULL column values with the field's declared default.
+
+        Field-level (not model-level) so it works for both dict input and
+        ORM objects validated via ``from_attributes``: attribute access is
+        left to Pydantic/SQLAlchemy, so expired ORM instances simply lazy-load
+        instead of failing on a ``__dict__`` that no longer holds the columns.
+        """
+        if v is not None:
+            return v
+        field = cls.model_fields.get(info.field_name)
+        if field is None:
+            return v
+        default = field.get_default(call_default_factory=True)
+        # Required fields have no default -- leave None to fail validation
+        # normally instead of silently inventing a value.
+        if default is PydanticUndefined:
+            return v
+        return default
+
 
 class DeviceOut(DeviceBase):
     model_config = ConfigDict(from_attributes=True, protected_namespaces=())
@@ -399,6 +430,13 @@ class DeviceOut(DeviceBase):
     u_height:      int = 1
     ports_per_row: Optional[int] = None   # resolved from switch_model
     total_ports:   Optional[int] = None   # port cutoff: ports beyond this index are hidden
+
+    @field_validator("u_height", mode="before")
+    @classmethod
+    def _default_u_height(cls, v):
+        # u_height is declared on DeviceOut (not DeviceBase); NULL must map
+        # to the 1U default rather than fail the int validation.
+        return 1 if v is None else v
 
 
 class RackPositionUpdate(BaseModel):
@@ -423,7 +461,7 @@ class DeviceMetaUpdate(BaseModel):
     ignored:  Optional[bool] = None
     label:    Optional[str] = None
     enabled:  Optional[bool] = None
-    rack_u_position: Optional[int] = Field(None, ge=1)
+    rack_u_position: Optional[int] = Field(None, ge=1, le=48)
     u_height: Optional[int] = Field(None, ge=1, le=60)
     # Explicit control over the manual-vendor flag; wins over the implicit
     # derivation from the vendor field when both are sent.

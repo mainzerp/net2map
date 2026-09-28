@@ -163,7 +163,7 @@ class Device(Base):
     ip           = Column(String, nullable=False, unique=True, index=True)
     sys_descr    = Column(Text, default="")
     model        = Column(String, default="")
-    firmware     = Column(String, default="")           # entPhysicalSoftwareRev / parsed from sysDescr
+    firmware     = Column(String, default="", server_default="")  # entPhysicalSoftwareRev / parsed from sysDescr
     vendor       = Column(String, default="")             # "aruba_cx" | "fs" | "generic"
     # True when vendor was set manually via the topology API; the scan engine
     # then keeps it instead of overwriting it with the auto-detected vendor.

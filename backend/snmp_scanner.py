@@ -96,8 +96,11 @@ OID_SYS_DESCR     = "1.3.6.1.2.1.1.1.0"
 OID_SYS_LOCATION  = "1.3.6.1.2.1.1.6.0"
 OID_SYS_OBJECT_ID = "1.3.6.1.2.1.1.2.0"
 
-# ENTITY-MIB entPhysicalSoftwareRev for the main chassis entry (index 1)
-OID_ENT_PHYSICAL_SOFTWARE_REV = "1.3.6.1.2.1.47.1.1.1.1.9.1"
+# ENTITY-MIB for the main chassis entry (index 1). Most switches report the
+# running OS image in entPhysicalSoftwareRev (.10); entPhysicalFirmwareRev (.9)
+# typically holds boot-ROM/CPLD firmware and is often empty.
+OID_ENT_PHYSICAL_SOFTWARE_REV = "1.3.6.1.2.1.47.1.1.1.1.10.1"
+OID_ENT_PHYSICAL_FIRMWARE_REV = "1.3.6.1.2.1.47.1.1.1.1.9.1"
 
 OID_IF_DESCR       = "1.3.6.1.2.1.2.2.1.2"     # ifDescr
 OID_IF_OPER_STATUS = "1.3.6.1.2.1.2.2.1.8"     # 1=up, 2=down
@@ -558,7 +561,7 @@ async def _scan_switch_inner(
         ip, snmp_port, auth,
         OID_SYS_NAME, OID_SYS_DESCR,
         OID_SYS_LOCATION, OID_SYS_OBJECT_ID,
-        OID_ENT_PHYSICAL_SOFTWARE_REV,
+        OID_ENT_PHYSICAL_SOFTWARE_REV, OID_ENT_PHYSICAL_FIRMWARE_REV,
         timeout=snmp_timeout,
         retries=snmp_retries,
         engine=engine,
@@ -567,15 +570,15 @@ async def _scan_switch_inner(
         log.warning("No SNMP response from %s", ip)
         return None
 
-    vals = list(scalars.values())
     sw = SwitchData(
         ip        = ip,
-        sys_name  = (vals[0] if len(vals) > 0 else "").strip(),
-        sys_descr = (vals[1] if len(vals) > 1 else "").strip(),
-        location  = (vals[2] if len(vals) > 2 else "").strip(),
-        firmware  = (vals[4] if len(vals) > 4 else "").strip(),
+        sys_name  = scalars.get(OID_SYS_NAME, "").strip(),
+        sys_descr = scalars.get(OID_SYS_DESCR, "").strip(),
+        location  = scalars.get(OID_SYS_LOCATION, "").strip(),
+        firmware  = (scalars.get(OID_ENT_PHYSICAL_SOFTWARE_REV)
+                     or scalars.get(OID_ENT_PHYSICAL_FIRMWARE_REV) or "").strip(),
     )
-    sys_oid = (vals[3] if len(vals) > 3 else "").strip()
+    sys_oid = scalars.get(OID_SYS_OBJECT_ID, "").strip()
 
     # -- 2. Vendor detection --------------------------------------------------
     sw.vendor = detect_vendor(sw.sys_descr, sys_oid)
