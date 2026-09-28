@@ -92,9 +92,12 @@ export function DataTable<T>({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(defaultPageSize);
 
+  // `rows` is deliberately not a dependency: callers may pass a freshly
+  // filtered array each render, which would reset the page on every repaint.
+  // Rows must be memoized upstream (useMemo) if identity stability matters.
   useEffect(() => {
     setPage(1);
-  }, [searchValue, pageSize, rows]);
+  }, [searchValue, pageSize]);
 
   const cycleSort = (key: string) => {
     if (sortKey !== key) {

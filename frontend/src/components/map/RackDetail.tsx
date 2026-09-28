@@ -317,8 +317,10 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
     const computeLine = () => {
       const fromKey = `${resolvedSelectedLink.local_ip}:${normPort(resolvedSelectedLink.local_port)}`;
       const toKey   = `${resolvedSelectedLink.remote_ip}:${normPort(resolvedSelectedLink.remote_port)}`;
-      const a = document.querySelector(`[data-pkey="${fromKey}"]`);
-      const b = document.querySelector(`[data-pkey="${toKey}"]`);
+      // Port names/IPs are user-controlled data -- escape before embedding
+      // them in a CSS attribute selector.
+      const a = document.querySelector(`[data-pkey="${CSS.escape(fromKey)}"]`);
+      const b = document.querySelector(`[data-pkey="${CSS.escape(toKey)}"]`);
       if (!a || !b) { setLinkLine(null); return; }
       const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
       const clipTop = panelHeaderRef.current?.getBoundingClientRect().bottom ?? 48;

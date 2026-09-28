@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, API, _getAuthHeader } from "../../api";
+import useNetmapStore from "../../store";
 import { queryKeys } from "./keys";
 
 // ── Map appearance settings (MapSettingsTab) ─────────────────────────────────
@@ -22,14 +23,16 @@ export function useMapSettings() {
 }
 
 // The background endpoint returns raw image bytes, not JSON, so availability
-// is probed with a bare fetch; the query data is the cache-busted image URL.
+// is probed with a bare fetch; the query data is the image URL versioned via
+// the store's bgVersion (bumped on successful upload/delete, so repeat
+// refetches reuse the cached image instead of busting it every time).
 export function useMapBackground() {
   return useQuery<string | null>({
     queryKey: queryKeys.mapBackground,
     queryFn: async () => {
       const res = await fetch(`${API}/api/map-background`, { headers: _getAuthHeader() });
       if (!res.ok) return null;
-      return `${API}/api/map-background?v=${Date.now()}`;
+      return `${API}/api/map-background?v=${useNetmapStore.getState().bgVersion}`;
     },
   });
 }

@@ -142,21 +142,22 @@ export default function RackElevation({ rack, nodes, readOnly = false }: RackEle
   const heightU = rackHeightU(rack);
   const bodyRef = useRef<HTMLDivElement>(null);
 
-  const placed = useMemo(
-    () =>
-      nodes.filter((n) => n.rack_id === rack.id && n.rack_u_position != null),
-    [nodes, rack.id],
-  );
+  // Placements are clamped/dropped when out of range (placementsFromNodes),
+  // so a device that cannot fit inside the rack lands in the tray instead of
+  // rendering a faceplate outside the frame.
+  const placements = useMemo(() => placementsFromNodes(nodes, rack.id, heightU), [nodes, rack.id, heightU]);
+  const placementById = useMemo(() => new Map(placements.map((p) => [p.deviceId, p])), [placements]);
+
+  const placed = useMemo(() => nodes.filter((n) => placementById.has(n.id)), [nodes, placementById]);
   const trayInRack = useMemo(
-    () => nodes.filter((n) => n.rack_id === rack.id && n.rack_u_position == null),
-    [nodes, rack.id],
+    () => nodes.filter((n) => n.rack_id === rack.id && !placementById.has(n.id)),
+    [nodes, rack.id, placementById],
   );
   const trayNoRack = useMemo(
     () => nodes.filter((n) => n.rack_id == null && !n.ignored),
     [nodes],
   );
 
-  const placements = useMemo(() => placementsFromNodes(nodes, rack.id), [nodes, rack.id]);
   const used = usedUnits(placements);
 
   const { moveDevice, assignDevice, setUHeight, saving } = useRackLayout(rack.id);
@@ -235,8 +236,9 @@ export default function RackElevation({ rack, nodes, readOnly = false }: RackEle
 
             {/* Placed devices */}
             {placed.map((device) => {
-              const uHeight = deviceUHeight(device);
-              const pos = device.rack_u_position as number;
+              const pl = placementById.get(device.id);
+              const uHeight = pl?.uHeight ?? deviceUHeight(device);
+              const pos = pl?.pos ?? (device.rack_u_position as number);
               return (
                 <div
                   key={device.id}

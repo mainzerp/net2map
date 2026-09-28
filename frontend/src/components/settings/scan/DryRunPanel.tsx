@@ -22,6 +22,10 @@ interface DryRunResult {
   preview: DryRunPreviewItem[];
 }
 
+// Job statuses that mean "still working" -- everything else (finished,
+// failed, cancelled, skipped, dry_run) ends the poll loop.
+const ACTIVE_JOB_STATUSES = new Set(["queued", "running"]);
+
 // Starts a discovery dry-run job and polls it until done. The polling is
 // bounded so a stuck job cannot leak polling forever.
 function DryRunPanel() {
@@ -77,7 +81,7 @@ function DryRunPanel() {
               preview,
             });
           }
-          if (st?.status && st.status !== "running") {
+          if (st?.status && !ACTIVE_JOB_STATUSES.has(st.status)) {
             stopDryRunPolling();
             setDryRunLoading(false);
           }

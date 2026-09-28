@@ -149,10 +149,25 @@ describe("rackLayout pure functions", () => {
   });
 
   it("placementsFromNodes picks up only positioned devices of the rack", () => {
-    const result = placementsFromNodes(TOPOLOGY.nodes, 1);
+    const result = placementsFromNodes(TOPOLOGY.nodes, 1, 12);
     expect(result).toEqual([
       { deviceId: 1, pos: 1, uHeight: 2 },
       { deviceId: 2, pos: 5, uHeight: 1 }, // undefined u_height defaults to 1
+    ]);
+  });
+
+  it("placementsFromNodes clamps oversize heights and drops out-of-range positions", () => {
+    const nodes = [
+      makeNode({ id: 5, rack_id: 1, rack_u_position: 1, u_height: 48 }), // clamped to the 12U rack
+      makeNode({ id: 6, rack_id: 1, rack_u_position: 20 }), // starts above the rack
+      makeNode({ id: 7, rack_id: 1, rack_u_position: 0 }), // below U1
+      makeNode({ id: 8, rack_id: 1, rack_u_position: -3 }), // negative
+      makeNode({ id: 9, rack_id: 1, rack_u_position: 11, u_height: 2 }), // 11-12 fits exactly
+      makeNode({ id: 10, rack_id: 1, rack_u_position: 12, u_height: 2 }), // 12-13 exceeds the top
+    ];
+    expect(placementsFromNodes(nodes, 1, 12)).toEqual([
+      { deviceId: 5, pos: 1, uHeight: 12 },
+      { deviceId: 9, pos: 11, uHeight: 2 },
     ]);
   });
 

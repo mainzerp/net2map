@@ -92,23 +92,33 @@ export function extractErrorMessage(ex: unknown): string {
   return 'An unexpected error occurred';
 }
 
-export async function refreshTokenIfNeeded(): Promise<void> {
-  if (!isTokenExpiringSoon(30)) return;
-  const token = getStoredToken();
-  if (!token) return;
-  try {
-    const r = await fetch(`${API}/api/auth/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
-    });
-    if (!r.ok) return;  // refresh failed -- let normal 401 handling take over
-    const data = await r.json();
-    if (data.access_token) {
-      login(data.access_token, { username: data.username, role: data.role });
+// In-flight refresh dedupe: N parallel requests near token expiry must share
+// a single POST /api/auth/refresh (the endpoint is rate-limited).
+let _refreshPromise: Promise<void> | null = null;
+
+export function refreshTokenIfNeeded(): Promise<void> {
+  if (!isTokenExpiringSoon(30)) return Promise.resolve();
+  if (!getStoredToken()) return Promise.resolve();
+  if (_refreshPromise) return _refreshPromise;
+  _refreshPromise = (async () => {
+    try {
+      const token = getStoredToken();
+      const r = await fetch(`${API}/api/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+      });
+      if (!r.ok) return;  // refresh failed -- let normal 401 handling take over
+      const data = await r.json();
+      if (data.access_token) {
+        login(data.access_token, { username: data.username, role: data.role });
+      }
+    } catch (_) {
+      // Silently fail -- next API call will trigger 401 redirect if truly expired
     }
-  } catch (_) {
-    // Silently fail -- next API call will trigger 401 redirect if truly expired
-  }
+  })().finally(() => {
+    _refreshPromise = null;
+  });
+  return _refreshPromise;
 }
 
 // ── Soft-navigate callback (set by App.tsx) ──────────────────────────────────

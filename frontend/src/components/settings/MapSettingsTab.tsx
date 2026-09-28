@@ -1,6 +1,7 @@
 import React, { useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, API, _getAuthHeader, extractErrorMessage } from "../../api";
+import useNetmapStore from "../../store";
 import { queryKeys, useInvalidateApi, useMapBackground, useMapSettings, type MapSettings } from "../../hooks/api";
 import { useToast } from "../ToastProvider";
 import { debounce } from "../../utils/debounce";
@@ -8,9 +9,9 @@ import { Button, Card } from "../ui";
 import { SectionHeader, TabError, TabLoading } from "./shared";
 
 // ── MapSettingsTabContent ───────────────────────────────────────────────────
-// Self-sufficient tab: reads/writes /api/map-settings and /api/map-background
-// through React Query hooks. The zustand store's map background state is owned
-// elsewhere and intentionally not touched here.
+// Reads/writes /api/map-settings and /api/map-background through React Query
+// hooks. Successful mutations also refresh the zustand store so an open map
+// sees new background image/opacity/color immediately.
 function MapSettingsTabContent() {
   const { data: settings, isLoading: settingsLoading, error: settingsError } = useMapSettings();
   const { data: bgUrl, error: bgError } = useMapBackground();
@@ -33,7 +34,11 @@ function MapSettingsTabContent() {
 
   const settingsMutation = useMutation({
     mutationFn: (patch: Record<string, unknown>) => api.put("/api/map-settings", patch),
-    onSuccess: () => invalidate(queryKeys.mapSettings),
+    onSuccess: () => {
+      invalidate(queryKeys.mapSettings);
+      // Keep the live map store in step with the saved opacity/scale/color.
+      useNetmapStore.getState().loadMapSettings();
+    },
     onError: (ex) => addToast(`Failed to save map settings: ${extractErrorMessage(ex)}`, "error"),
   });
 
@@ -59,13 +64,25 @@ function MapSettingsTabContent() {
         throw new Error(msg);
       }
     },
-    onSuccess: () => invalidate(queryKeys.mapBackground),
+    onSuccess: () => {
+      // Bump the image version first so the refetched preview URL and the
+      // store reload both bypass the browser cache for the new image.
+      const store = useNetmapStore.getState();
+      store.bumpMapBackgroundVersion();
+      store.loadMapBackground();
+      invalidate(queryKeys.mapBackground);
+    },
     onError: (ex) => addToast(`Upload failed: ${extractErrorMessage(ex)}`, "error"),
   });
 
   const removeMutation = useMutation({
     mutationFn: () => api.del("/api/map-background"),
-    onSuccess: () => invalidate(queryKeys.mapBackground),
+    onSuccess: () => {
+      const store = useNetmapStore.getState();
+      store.bumpMapBackgroundVersion();
+      store.loadMapBackground();
+      invalidate(queryKeys.mapBackground);
+    },
     onError: (ex) => addToast(`Remove failed: ${extractErrorMessage(ex)}`, "error"),
   });
 

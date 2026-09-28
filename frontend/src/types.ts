@@ -131,6 +131,10 @@ export interface NetmapState {
   bgOpacity: number;
   bgScale: number;
   bgColor: string;
+  // Cache-bust token for /api/map-background URLs: stable per session so the
+  // image stays cached, bumped on successful upload/delete mutations.
+  bgVersion: number;
+  bumpMapBackgroundVersion: () => void;
   loadMapBackground: () => void;
   loadMapSettings: () => void;
 

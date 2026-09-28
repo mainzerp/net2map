@@ -157,7 +157,15 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
           )}
         </div>
       )}
-      {showModal && <PortDetailModal port={port} switchIp={portKey.split(":")[0]} onClose={() => setShowModal(false)} />}
+      {showModal && (
+        <PortDetailModal
+          port={port}
+          // portKey is "<ip>:<port>" -- split on the LAST colon so IPv6
+          // addresses (which contain colons) survive.
+          switchIp={portKey.slice(0, Math.max(0, portKey.lastIndexOf(":")))}
+          onClose={() => setShowModal(false)}
+        />
+      )}
     </>
   );
 }

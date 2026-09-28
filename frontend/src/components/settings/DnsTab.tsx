@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { api, extractErrorMessage } from "../../api";
 import { queryKeys, useDnsServers, useInvalidateApi } from "../../hooks/api";
@@ -13,9 +13,13 @@ function DnsSettingsTabContent() {
   const [err, setErr] = useState<string>("");
   const [ok, setOk] = useState<string>("");
 
-  // Sync the textarea once the saved server list arrives.
+  // Hydrate the textarea once when the saved server list first arrives;
+  // later refetches must not clobber unsaved edits.
+  const hydratedRef = useRef(false);
   useEffect(() => {
-    if (!isLoading) setServersText(servers.join("\n"));
+    if (isLoading || hydratedRef.current) return;
+    hydratedRef.current = true;
+    setServersText(servers.join("\n"));
   }, [isLoading, servers]);
 
   const saveMutation = useMutation({

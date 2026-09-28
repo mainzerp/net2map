@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { api, extractErrorMessage } from "../../../api";
 import { queryKeys, useInvalidateApi, useScanRuns } from "../../../hooks/api";
+import { useToast } from "../../ToastProvider";
 import { Button, Card, EmptyState } from "../../ui";
 import { SectionHeader, TabLoading } from "../shared";
 import { fmtDuration, fmtTs } from "./format";
@@ -24,6 +25,10 @@ interface SwitchMetric {
   success: boolean;
 }
 
+// Job statuses that mean "still working" -- everything else (finished,
+// failed, cancelled, skipped, dry_run) ends the poll loop.
+const ACTIVE_JOB_STATUSES = new Set(["queued", "running"]);
+
 // Run-scan action with job polling, the latest result panel, and the
 // persisted scan run history.
 function ScanRunHistory() {
@@ -32,7 +37,9 @@ function ScanRunHistory() {
   const [scanning, setScanning] = useState<boolean>(false);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { addToast } = useToast();
 
   const stopPolling = () => {
     if (pollRef.current) {
@@ -51,7 +58,8 @@ function ScanRunHistory() {
         if (st?.result) {
           setScanResult(st.result);
         }
-        if (st?.status && st.status !== "running") {
+        if (st?.status) setJobStatus(st.status);
+        if (st?.status && !ACTIVE_JOB_STATUSES.has(st.status)) {
           setScanning(false);
           setActiveJobId(null);
           stopPolling();
@@ -70,6 +78,7 @@ function ScanRunHistory() {
       const job: { job_id?: string } = await api.post("/api/scan/jobs", {});
       if (!job?.job_id) throw new Error("Scan job could not be created");
       setActiveJobId(job.job_id);
+      setJobStatus("queued");
       startPolling(job.job_id);
     } catch (e) {
       setScanning(false);
@@ -79,7 +88,12 @@ function ScanRunHistory() {
 
   const cancelScan = async () => {
     if (!activeJobId) return;
-    await api.post(`/api/scan/jobs/${activeJobId}/cancel`, {});
+    try {
+      await api.post(`/api/scan/jobs/${activeJobId}/cancel`, {});
+    } catch (e) {
+      // Keep polling: a failed cancel leaves the job running.
+      addToast(`Cancel failed: ${extractErrorMessage(e)}`, "error");
+    }
   };
 
   const statBlock = (label: string, value: number | string, colorClass: string) => (
@@ -104,7 +118,8 @@ function ScanRunHistory() {
           )}
           {scanning && (
             <span className="text-muted text-[10px]">
-              Job {activeJobId ? activeJobId.slice(0, 8) : "-"} is running...
+              Job {activeJobId ? activeJobId.slice(0, 8) : "-"}{" "}
+              {jobStatus === "running" ? "is running..." : "is queued..."}
             </span>
           )}
         </div>

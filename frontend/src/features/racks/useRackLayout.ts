@@ -14,6 +14,7 @@ import {
   computeDropTarget,
   deviceUHeight,
   placementsFromNodes,
+  rackHeightU,
   type DropTarget,
 } from "./rackLayout";
 
@@ -78,7 +79,8 @@ export function useRackLayout(rackId: number) {
       uHeight: number;
     }) => {
       const data = queryClient.getQueryData<TopologyData>(queryKeys.topology);
-      const placements = placementsFromNodes(data?.nodes ?? [], rackId).map((p) =>
+      const rack = data?.racks.find((r) => r.id === rackId);
+      const placements = placementsFromNodes(data?.nodes ?? [], rackId, rackHeightU(rack ?? {})).map((p) =>
         p.deviceId === device.id ? { ...p, pos, uHeight } : p,
       );
       if (!placements.some((p) => p.deviceId === device.id)) {
@@ -126,13 +128,29 @@ export function useRackLayout(rackId: number) {
     onSettled,
   });
 
-  return {
-    moveDevice: (device: TopologyNode, pos: number, uHeight: number) =>
+  // Stable callback identities: React Query's `mutate` is bound to a
+  // persistent observer, so these wrappers do not change between renders and
+  // useRackDrag does not re-register its window listeners every render.
+  const moveDevice = useCallback(
+    (device: TopologyNode, pos: number, uHeight: number) =>
       moveMutation.mutate({ device, pos, uHeight }),
-    assignDevice: (device: TopologyNode, pos: number, uHeight: number) =>
+    [moveMutation.mutate],
+  );
+  const assignDevice = useCallback(
+    (device: TopologyNode, pos: number, uHeight: number) =>
       assignMutation.mutate({ device, pos, uHeight }),
-    setUHeight: (device: TopologyNode, uHeight: number) =>
+    [assignMutation.mutate],
+  );
+  const setUHeight = useCallback(
+    (device: TopologyNode, uHeight: number) =>
       heightMutation.mutate({ device, uHeight }),
+    [heightMutation.mutate],
+  );
+
+  return {
+    moveDevice,
+    assignDevice,
+    setUHeight,
     saving: moveMutation.isPending || assignMutation.isPending || heightMutation.isPending,
   };
 }
@@ -181,7 +199,7 @@ export function useRackDrag({ rackId, heightU, nodes, bodyRef, readOnly, onDrop 
   useEffect(() => {
     if (!drag) return;
 
-    const placements = placementsFromNodes(nodes, rackId);
+    const placements = placementsFromNodes(nodes, rackId, heightU);
 
     function onMove(e: PointerEvent) {
       const body = bodyRef.current;

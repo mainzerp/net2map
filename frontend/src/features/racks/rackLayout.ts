@@ -87,10 +87,20 @@ export function buildLayoutEntries(placements: Placement[]): RackLayoutEntry[] {
 }
 
 // Placements of all devices currently positioned in the given rack.
-export function placementsFromNodes(nodes: TopologyNode[], rackId: number): Placement[] {
+// Defensive clamping for out-of-range data (the backend now validates
+// u_height and rack_u_position as 1..48, but stale rows may exist):
+// u_height is clamped to the rack height and placements that still cannot
+// fit inside the rack are dropped so no faceplate renders outside the frame.
+export function placementsFromNodes(nodes: TopologyNode[], rackId: number, heightU: number): Placement[] {
+  const h = Math.max(1, heightU);
   return nodes
     .filter((n) => n.rack_id === rackId && n.rack_u_position != null)
-    .map((n) => ({ deviceId: n.id, pos: n.rack_u_position as number, uHeight: deviceUHeight(n) }));
+    .map((n) => ({
+      deviceId: n.id,
+      pos: n.rack_u_position as number,
+      uHeight: Math.min(deviceUHeight(n), h),
+    }))
+    .filter((p) => p.pos >= 1 && p.pos + p.uHeight - 1 <= h);
 }
 
 // Number of rack units occupied by placed devices.

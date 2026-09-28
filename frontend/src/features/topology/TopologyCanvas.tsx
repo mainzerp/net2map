@@ -147,6 +147,10 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState<TopoFlowNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<AggregatedFlowEdge>([]);
   const [initialViewport] = useState<Viewport | null>(loadStoredViewport);
+  // Node ids whose dragged position was sent to the backend but may not be
+  // reflected in the polled topology yet; the rebuild keeps their canvas
+  // position until the server catches up.
+  const pendingPositionRef = useRef<Set<string>>(new Set());
 
   const classMap = useMemo(
     () => Object.fromEntries((switchClasses || []).map(c => [c.id, c])),
@@ -250,9 +254,33 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
   // Rebuild flow nodes/edges whenever the model changes. Selection flags are
   // carried over from the previous node state.
   useEffect(() => {
+    // Collected inside the updater, applied afterwards so the updater itself
+    // stays free of side effects (it can be double-invoked under StrictMode).
+    const caughtUp: string[] = [];
     setFlowNodes(prev => {
+      const prevById = new Map(prev.map(n => [n.id, n]));
       const prevSelected = new Set(prev.filter(n => n.selected).map(n => n.id));
+      const pending = pendingPositionRef.current;
       const next: TopoFlowNode[] = [];
+
+      // A rebuild must not fight an in-progress drag or an in-flight position
+      // PATCH: keep the canvas position while the node is dragging, and while
+      // it is pending keep it until the server reports the same position
+      // (meaning the PATCH landed). A PATCH that failed leaves the marker
+      // set, so the node never snaps back to stale server coordinates.
+      const resolvePosition = (id: string, serverPos: { x: number; y: number }): { x: number; y: number } => {
+        const p = prevById.get(id);
+        if (!p) return serverPos;
+        if (p.dragging) return p.position;
+        if (pending.has(id)) {
+          if (Math.abs(serverPos.x - p.position.x) <= 1 && Math.abs(serverPos.y - p.position.y) <= 1) {
+            caughtUp.push(id);
+          } else {
+            return p.position;
+          }
+        }
+        return serverPos;
+      };
 
       if (mapBgUrl) {
         next.push({
@@ -269,7 +297,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
 
       racks.forEach(rack => {
         const id = rackNodeId(rack.id);
-        const pos = graphModel.positions.get(id) || { x: 100, y: 100 };
+        const pos = resolvePosition(id, graphModel.positions.get(id) || { x: 100, y: 100 });
         const counts = rackPortCounts(rack.devices);
         const classIds = [...new Set(rack.devices.map(d => d.class_id).filter(Boolean))] as number[];
         const classColors = classIds.map(cid => classMap[cid]?.color).filter(Boolean) as string[];
@@ -292,7 +320,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
 
       outsideNodes.forEach(node => {
         const id = deviceNodeId(node.id);
-        const pos = graphModel.positions.get(id) || { x: 100, y: 100 };
+        const pos = resolvePosition(id, graphModel.positions.get(id) || { x: 100, y: 100 });
         next.push({
           id,
           type: "device",
@@ -310,6 +338,8 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
 
       return next;
     });
+    // Drop pending markers for nodes whose PATCHed position has landed.
+    caughtUp.forEach(id => pendingPositionRef.current.delete(id));
 
     setEdges(
       aggregated.map(l => {
@@ -361,6 +391,11 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
 
   const handleNodeDragStop = useCallback(
     (_event: MouseEvent | TouchEvent, node: TopoFlowNode) => {
+      // Mark the node so the next poll-driven rebuild does not snap it back
+      // before the position PATCH is persisted.
+      if (node.type === "rack" || node.type === "device") {
+        pendingPositionRef.current.add(node.id);
+      }
       if (node.type === "rack") {
         const rack = racks.find(r => rackNodeId(r.id) === node.id);
         if (!rack) return;
@@ -421,6 +456,8 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
     );
 
     laid.forEach((pos, id) => {
+      // Same protection as manual drags: auto-layout PATCHes are in flight.
+      pendingPositionRef.current.add(id);
       if (id.startsWith("rack:")) {
         const rackId = Number(id.slice("rack:".length));
         assignment.racks[rackId] = { x: Math.round(pos.x), y: Math.round(pos.y) };

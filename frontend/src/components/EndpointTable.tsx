@@ -82,8 +82,9 @@ export default function EndpointTable() {
       .join(" ")
       .toLowerCase();
 
-  const active = endpoints.filter((e) => !e.ignored);
-  const ignored = endpoints.filter((e) => e.ignored);
+  // Memoized so the row array identity is stable across unrelated renders.
+  const active = useMemo(() => endpoints.filter((e) => !e.ignored), [endpoints]);
+  const ignored = useMemo(() => endpoints.filter((e) => e.ignored), [endpoints]);
 
   const columns: DataTableColumn<Endpoint>[] = [
     {

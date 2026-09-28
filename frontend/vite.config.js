@@ -17,6 +17,12 @@ export default defineConfig({
         target: "http://localhost:8000",
         changeOrigin: true,
       },
+      // WebSocket endpoint (scan progress) needs the ws upgrade flag
+      "/ws": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
   build: {

@@ -20,7 +20,7 @@ export function filterEndpointsForPort(
   port: PortInfo,
 ): Endpoint[] {
   if (!switchIp) return [];
-  const portName = normPort(port.if_descr ?? port.name ?? "");
+  const portName = normPort(port.if_descr || port.name || "");
   return endpoints.filter((ep) =>
     ep.found_on.some(
       (f) =>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { api, extractErrorMessage } from "../../../api";
 import { queryKeys, useAppSettings, useInvalidateApi, useScanSettings } from "../../../hooks/api";
@@ -24,9 +24,12 @@ function ScanEngineConfig() {
 
   const settingsLoading = scanLoading || appLoading;
 
-  // Sync local form state once both settings queries have arrived.
+  // Hydrate local form state once when both settings queries first arrive;
+  // later refetches must not clobber unsaved edits.
+  const hydratedRef = useRef(false);
   useEffect(() => {
-    if (scanLoading || appLoading) return;
+    if (scanLoading || appLoading || hydratedRef.current) return;
+    hydratedRef.current = true;
     if (scanSettings?.max_workers != null) setScanWorkers(Number(scanSettings.max_workers));
     if (scanSettings?.snmp_timeout != null) setSnmpTimeout(Number(scanSettings.snmp_timeout));
     if (scanSettings?.snmp_retries != null) setSnmpRetries(Number(scanSettings.snmp_retries));
@@ -44,26 +47,36 @@ function ScanEngineConfig() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const payload = {
+      const normalized = {
         max_workers: Math.max(1, Math.min(128, Number(scanWorkers) || 1)),
         snmp_timeout: Math.max(1, Math.min(30, Number(snmpTimeout) || 3)),
         snmp_retries: Math.max(0, Math.min(10, Number(snmpRetries) || 1)),
+        discovery_interval_sec: Math.max(0, Math.min(86400, Number(discoveryIntervalSec) || 0)),
+        link_update_interval_sec: Math.max(0, Math.min(3600, Number(linkUpdateIntervalSec) || 0)),
+        mac_update_interval_sec: Math.max(0, Math.min(3600, Number(macUpdateIntervalSec) || 0)),
       };
 
-      const nextDiscoveryInterval = Math.max(0, Math.min(86400, Number(discoveryIntervalSec) || 0));
-      const nextLinksInterval = Math.max(0, Math.min(3600, Number(linkUpdateIntervalSec) || 0));
-      const nextMacsInterval = Math.max(0, Math.min(3600, Number(macUpdateIntervalSec) || 0));
-
-      const result = await api.put("/api/scan-settings", payload);
-      await api.put("/api/settings/discovery_interval_sec", { value: String(nextDiscoveryInterval) });
-      await api.put("/api/settings/link_update_interval_sec", { value: String(nextLinksInterval) });
-      await api.put("/api/settings/mac_update_interval_sec", { value: String(nextMacsInterval) });
+      await api.put("/api/scan-settings", {
+        max_workers: normalized.max_workers,
+        snmp_timeout: normalized.snmp_timeout,
+        snmp_retries: normalized.snmp_retries,
+      });
+      await api.put("/api/settings/discovery_interval_sec", { value: String(normalized.discovery_interval_sec) });
+      await api.put("/api/settings/link_update_interval_sec", { value: String(normalized.link_update_interval_sec) });
+      await api.put("/api/settings/mac_update_interval_sec", { value: String(normalized.mac_update_interval_sec) });
       // Intentional migration sync: the backend still reads the legacy
       // port_update_interval_sec key as a fallback, so keep it in step.
-      await api.put("/api/settings/port_update_interval_sec", { value: String(nextMacsInterval) });
-      return result;
+      await api.put("/api/settings/port_update_interval_sec", { value: String(normalized.mac_update_interval_sec) });
+      return normalized;
     },
-    onSuccess: () => {
+    onSuccess: (normalized) => {
+      // Re-sync the form with the clamped values that were actually saved.
+      setScanWorkers(normalized.max_workers);
+      setSnmpTimeout(normalized.snmp_timeout);
+      setSnmpRetries(normalized.snmp_retries);
+      setDiscoveryIntervalSec(normalized.discovery_interval_sec);
+      setLinkUpdateIntervalSec(normalized.link_update_interval_sec);
+      setMacUpdateIntervalSec(normalized.mac_update_interval_sec);
       invalidate(queryKeys.scanSettings, queryKeys.appSettings);
     },
     onError: (ex) => setSettingsError(extractErrorMessage(ex)),

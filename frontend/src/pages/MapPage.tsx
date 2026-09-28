@@ -63,7 +63,9 @@ export default function MapPage() {
   // Auto-select rack and clear highlight when navigating from Devices/Network page
   useEffect(() => {
     if (!highlightPortKey || !topology.nodes.length) return;
-    const colonIdx = highlightPortKey.indexOf(":");
+    // Key format is "<ip>:<port>" -- split on the LAST colon so IPv6
+    // addresses (which contain colons) survive.
+    const colonIdx = highlightPortKey.lastIndexOf(":");
     if (colonIdx < 0) return;
     const switchIp = highlightPortKey.slice(0, colonIdx);
     const node = topology.nodes.find(n => n.ip === switchIp);
@@ -285,10 +287,10 @@ export default function MapPage() {
               highlightPortKey={highlightPortKey}
               deviceOrder={selectedRackOrders}
               onReorder={(deviceId: number, dir: "up" | "down", groupKey: string) =>
-                reorderDevice(deviceId, dir, groupKey, selectedDetail.id as number, selectedDetail.devices)
+                reorderDevice(deviceId, dir, groupKey, selectedRack?.id ?? null, selectedDetail.devices)
               }
               onReorderClass={(sectionKey: string, dir: "up" | "down", sectionKeys: string[]) =>
-                reorderClassSection(sectionKey, dir, selectedDetail.id as number, sectionKeys)
+                reorderClassSection(sectionKey, dir, selectedRack?.id ?? null, sectionKeys)
               }
               onClose={() => {
                 setSelectedRack(null);

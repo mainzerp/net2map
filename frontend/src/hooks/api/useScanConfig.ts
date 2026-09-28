@@ -66,7 +66,9 @@ export function useDiscoveryRanges() {
 
 export function useScanRuns(limit: number = 20) {
   return useQuery<ScanRunEntry[]>({
-    queryKey: queryKeys.scanRuns,
+    // The limit is part of the fetch, so it must be part of the key;
+    // prefix-based invalidation on queryKeys.scanRuns still matches.
+    queryKey: [...queryKeys.scanRuns, limit],
     queryFn: async () => {
       const data: unknown = await api.get(`/api/scan-runs?limit=${limit}`);
       return Array.isArray(data) ? (data as ScanRunEntry[]) : [];

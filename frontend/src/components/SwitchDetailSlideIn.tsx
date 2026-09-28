@@ -84,10 +84,14 @@ export default function SwitchDetailSlideIn({ deviceId, nodes, topologyLinks, ra
         va = (Array.isArray(va) ? va : []).length;
         vb = (Array.isArray(vb) ? vb : []).length;
       }
-      if (typeof va === "string" && typeof vb === "string")
-        return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
-      const na = (va as number) ?? 0;
-      const nb = (vb as number) ?? 0;
+      // Mixed or missing values would otherwise produce NaN comparisons.
+      if (typeof va === "string" || typeof vb === "string") {
+        const sa = String(va ?? "");
+        const sb = String(vb ?? "");
+        return sortAsc ? sa.localeCompare(sb) : sb.localeCompare(sa);
+      }
+      const na = Number(va) || 0;
+      const nb = Number(vb) || 0;
       return sortAsc ? na - nb : nb - na;
     });
     return list;
@@ -171,7 +175,7 @@ export default function SwitchDetailSlideIn({ deviceId, nodes, topologyLinks, ra
                 </thead>
                 <tbody>
                   {sortedPorts.map(port => {
-                    const pKey = `${device.ip}:${normPort(port.if_descr || "")}`;
+                    const pKey = `${device.ip}:${normPort(port.if_descr || port.name || "")}`;
                     const cableColor = linkColorMap[pKey];
                     return (
                       <tr key={port.id} style={{

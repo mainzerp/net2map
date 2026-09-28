@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { api, API, _getAuthHeader } from "./api";
 import type { NetmapState, SelectedRack } from "./types";
 
-const useNetmapStore = create<NetmapState>((set) => ({
+const useNetmapStore = create<NetmapState>((set, get) => ({
   // ── Topology slice ───────────────────────────────────────────────────────
   // Topology data itself lives in TanStack Query (hooks/api/useTopology.ts);
   // the store only keeps the selection state.
@@ -27,6 +27,11 @@ const useNetmapStore = create<NetmapState>((set) => ({
   bgOpacity: 0.3,
   bgScale: 1,
   bgColor: "#020817",
+  // Session-scoped image version: repeat mounts reuse the cached image, and
+  // upload/delete mutations bump it so the new URL bypasses the cache.
+  bgVersion: Date.now(),
+
+  bumpMapBackgroundVersion: () => set(s => ({ bgVersion: s.bgVersion + 1 })),
 
   loadMapBackground: () => {
     // Single existence check (aborted before the body downloads), then one
@@ -35,7 +40,7 @@ const useNetmapStore = create<NetmapState>((set) => ({
       .then(r => {
         if (!r.ok) throw new Error();
         r.body?.cancel().catch(() => {});
-        const url = `${API}/api/map-background?v=${Date.now()}`;
+        const url = `${API}/api/map-background?v=${get().bgVersion}`;
         const img = new Image();
         img.onload = () => set({ bgUrl: url, bgNat: { w: img.naturalWidth, h: img.naturalHeight } });
         // On decode/load failure clear bgUrl too, otherwise the grid falls away

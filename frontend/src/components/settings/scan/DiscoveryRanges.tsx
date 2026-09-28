@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { api, extractErrorMessage } from "../../../api";
 import { queryKeys, useDiscoveryRanges, useInvalidateApi } from "../../../hooks/api";
@@ -14,12 +14,14 @@ function DiscoveryRanges() {
   const [rangesDraft, setRangesDraft] = useState<string[]>([]);
   const [rangesError, setRangesError] = useState<string>("");
 
-  // Sync the textarea and chip draft once the saved ranges arrive.
+  // Hydrate the textarea and chip draft once when the saved ranges first
+  // arrive; later refetches must not clobber unsaved edits.
+  const hydratedRef = useRef(false);
   useEffect(() => {
-    if (!isLoading) {
-      setRangesInput(savedRanges.join("\n"));
-      setRangesDraft(savedRanges);
-    }
+    if (isLoading || hydratedRef.current) return;
+    hydratedRef.current = true;
+    setRangesInput(savedRanges.join("\n"));
+    setRangesDraft(savedRanges);
   }, [isLoading, savedRanges]);
 
   const saveMutation = useMutation({

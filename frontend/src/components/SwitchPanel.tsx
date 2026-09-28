@@ -121,7 +121,10 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
                 <div key={row} style={{ marginBottom: row < rowCount - 1 ? 6 : 0 }}>
                   <div className="flex gap-0.5 items-start">
                     {topRow.map(port => {
-                      const pKey = `${device.ip}:${normPort(port.if_descr ?? "")}`;
+                      // Port key matches the link-side normPort(local_port):
+                      // fall back to port.name when if_descr is empty so the
+                      // key does not collapse to bare "<ip>:".
+                      const pKey = `${device.ip}:${normPort(port.if_descr || port.name || "")}`;
                       return (
                         <Port key={port.id} port={port} portKey={pKey}
                           portLinkMap={portLinkMap} selectedLink={selectedLink}
@@ -133,7 +136,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
                   </div>
                   <div className="flex gap-0.5 items-start mt-px">
                     {botRow.map(port => {
-                      const pKey = `${device.ip}:${normPort(port.if_descr ?? "")}`;
+                      const pKey = `${device.ip}:${normPort(port.if_descr || port.name || "")}`;
                       return (
                         <Port key={port.id} port={port} portKey={pKey}
                           portLinkMap={portLinkMap} selectedLink={selectedLink}
