@@ -21,6 +21,8 @@ env/
 
 # Python test cache
 .pytest_cache/
+.coverage
+.coverage.*
 
 # Node / frontend
 node_modules/

@@ -39,14 +39,41 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
+- Code review fixes (session 2026-09-28) · priority: P1 · area: full-stack
+  Backend: refresh-window revocation gap closed (TTL + REFRESH_GRACE_SECONDS,
+  <= comparison), session revocation on role/deactivate/delete, WS legacy-token
+  acceptance aligned with HTTP, scan lock renewed via as_completed + renew task
+  during finalize, config export role gate, import resolves profile_label/
+  device_ip, community strings encrypted at rest, DeviceBase validator replaced
+  by field_validator (expired ORM safe), map-bg bounded read, schema bounds.
+  Frontend: poll treats "queued" as active, DataTable pagination reset fixed,
+  settings forms hydrate-once, map-bg two-impl sync, IPv6 last-colon split,
+  drag-safe topology rebuild, useScanRuns limit key, rack clamp, vite ws proxy,
+  CSP tightened, refresh-promise dedupe, CSS.escape, comparator NaN, cancel
+  error toast, port-key fallback, reorder guard, bg version cache-bust.
+  Overlaps the "Remediate 2026-09 deep code review" backlog card.
+  Verify: backend 390 tests + ruff green, frontend 56 tests + tsc clean; user
+  should sanity-check login/logout, a real scan run and the /network table.
+  User verification pending.
+- Rack link highlight on window resize · priority: P3 · area: frontend
+  RackDetail now recomputes the selected-link overlay line on window resize and
+  panel box changes (resize listener + ResizeObserver in the link-line effect,
+  src/components/map/RackDetail.tsx).
+  Verify: select a rack-internal link on the map, resize the browser window —
+  the highlight line must follow the ports. User verification pending.
 - Firmware version scanning · priority: P2 · area: full-stack
-  SNMP scan now collects firmware/software version per device: ENTITY-MIB OID
-  entPhysicalSoftwareRev with vendor-specific sysDescr parsing as fallback
-  (extract_version in backend/scanners). New devices.firmware column (migration
-  016), exposed via DeviceOut, shown in SwitchDetailSlideIn and DeviceTable.
-  Verify: run alembic upgrade + a real scan against the live network; firmware
-  appears in the device detail slide-in and device table. User verification
-  pending.
+  SNMP scan now collects firmware/software version per device: ENTITY-MIB
+  entPhysicalSoftwareRev (.10) with entPhysicalFirmwareRev (.9) and
+  vendor-specific sysDescr parsing (extract_version in backend/scanners) as
+  fallbacks. New devices.firmware column (migration 016; 017 backfills NULLs
+  and adds a server default), DeviceBase._coerce_nulls guards DeviceOut
+  serialization against legacy NULLs. Shown in SwitchDetailSlideIn and as a
+  dedicated sortable Firmware column in DeviceTable on the /network page
+  (also searchable via the table search box).
+  Verify: stack rebuilt locally (port 3100, migration 017 applied, /api/topology
+  returns 200 with firmware populated for UniFi devices); run a real scan —
+  firmware should appear in the device detail slide-in and the Firmware
+  column on /network. User verification pending.
 - Responsive/mobile layout · priority: P2 · area: frontend
   Implemented in the v2.0.0 frontend rework: collapsible sidebar, mobile drawer,
   fluid grids instead of fixed pixel widths.
