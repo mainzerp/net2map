@@ -1,5 +1,17 @@
 # Version History
 
+## v2.1.1 -- Offline-Erkennung bei Totalausfall
+
+**Type:** PATCH
+
+### Fixes
+
+- Geraete, die waehrend eines Scans weder auf Ping noch auf SNMP antworten,
+  werden jetzt als `offline` markiert. Bisher blieb `ping_status` bei einem
+  Totalausfall ewig auf `online` stehen, weil das Geraet nicht mehr im
+  Update-Set des Scans auftauchte (`last_ping` wurde ebenfalls nicht
+  aktualisiert)
+
 ## v2.1.0 -- Firmware-Spalte & Code-Review-Haertung
 
 **Type:** MINOR (neue Alembic-Migration 017, keine Breaking Changes)
