@@ -648,10 +648,15 @@ def _finalize_scan_db(
 
     # ── Device upsert ─────────────────────────────────────────────────────────
     discovered_ips = set(switch_data.keys()) | {ip for ip, (ok, _) in ping_by_ip.items() if ok}
-    devices_by_ip: Dict[str, Device] = {}
-    if discovered_ips:
-        devices_by_ip = {d.ip: d for d in db.query(Device).filter(Device.ip.in_(list(discovered_ips))).all()}
     existing_ips = {row[0] for row in db.query(Device.ip).all()}
+    # Known devices that answered neither ping nor SNMP must still be marked
+    # offline -- otherwise ping_status stays stuck on the last good result.
+    update_ips = discovered_ips | (
+        {ip for ip, (ok, _) in ping_by_ip.items() if not ok} & existing_ips
+    )
+    devices_by_ip: Dict[str, Device] = {}
+    if update_ips:
+        devices_by_ip = {d.ip: d for d in db.query(Device).filter(Device.ip.in_(list(update_ips))).all()}
     new_ips = [ip for ip in discovered_ips if ip not in existing_ips]
     all_ips_ordered = list(existing_ips) + new_ips
     layout = auto_layout(all_ips_ordered)
@@ -663,7 +668,7 @@ def _finalize_scan_db(
     # Manual vendor overrides (devices whose vendor_override flag is set)
     vendor_overrides: Dict[str, str] = {}
 
-    for ip in discovered_ips:
+    for ip in update_ips:
         sw = switch_data.get(ip)
         ping_ok, ping_rtt = ping_by_ip.get(ip, (False, 0))
         ping_status = "online" if ping_ok else "offline"
