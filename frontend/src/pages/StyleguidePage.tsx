@@ -28,7 +28,7 @@ const TOKEN_GROUPS: { title: string; tokens: string[] }[] = [
     title: "Status",
     tokens: ["success", "success-soft", "warning", "warning-soft", "danger", "danger-soft"],
   },
-  { title: "Data and highlight", tokens: ["external", "port-highlight"] },
+  { title: "Data and highlight", tokens: ["external", "port-highlight", "scrim"] },
   { title: "Sidebar", tokens: ["sidebar", "sidebar-hover", "sidebar-muted", "sidebar-text"] },
 ];
 

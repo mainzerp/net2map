@@ -215,7 +215,7 @@ export default function EndpointTable() {
 
           {/* Bulk action toolbar */}
           {selected.size > 0 && (
-            <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-panel-2 border border-line-strong rounded-lg">
+            <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-panel-2 border border-line-strong rounded-card">
               <span className="text-xs font-semibold text-accent">{selected.size} selected</span>
               <Button variant="danger" size="sm" disabled={bulkLoading} onClick={() => bulkIgnore(true)}>
                 Ignore Selected

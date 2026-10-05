@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Activity } from "lucide-react";
 import { Button, Input } from "../../components/ui";
 import type { FilterState, RackInfo, SwitchClass, TopologyNode } from "../../types";
 
@@ -14,8 +15,16 @@ interface MapToolbarProps {
   filters: FilterState;
   onFilterChange: (updater: FilterState | ((prev: FilterState) => FilterState)) => void;
   onSearchSelect: (device: TopologyNode) => void;
-  onAutoLayout: () => void;
+  // Omitted when a floor-plan background is set: nodes are placed by hand on
+  // the uploaded map, and a re-layout would discard that arrangement.
+  onAutoLayout?: () => void;
   onResetZoom: () => void;
+  // Animated flow overlay on active links (persisted by TopologyCanvas).
+  flowEnabled?: boolean;
+  // When set, the toggle still records the preference but explains why no
+  // animation is visible (e.g. prefers-reduced-motion).
+  flowDisabledReason?: string;
+  onToggleFlow?: () => void;
   stats: { switches: number; fast: number; gig: number };
   updatedAt: number | null;
 }
@@ -38,6 +47,9 @@ export default function MapToolbar({
   onSearchSelect,
   onAutoLayout,
   onResetZoom,
+  flowEnabled = false,
+  flowDisabledReason,
+  onToggleFlow,
   stats,
   updatedAt,
 }: MapToolbarProps) {
@@ -208,12 +220,26 @@ export default function MapToolbar({
 
       {/* Actions + staleness */}
       <div className="ml-auto flex items-center gap-2 flex-wrap">
-        <span className="text-[10px] text-muted" title="Topology data freshness">
+        <span className="text-[10px] text-muted tabular-nums" title="Topology data freshness">
           updated {formatAge(updatedAt, now)}
         </span>
-        <Button size="sm" variant="secondary" onClick={onAutoLayout} title="Re-layout all nodes and persist positions">
-          Auto-Layout
-        </Button>
+        {onToggleFlow && (
+          <button
+            type="button"
+            aria-pressed={flowEnabled}
+            onClick={onToggleFlow}
+            title={flowDisabledReason ?? "Animate traffic flow on active links"}
+            className={`${chipClass(flowEnabled)} inline-flex items-center gap-1`}
+          >
+            <Activity size={11} strokeWidth={1.75} aria-hidden="true" />
+            Flow
+          </button>
+        )}
+        {onAutoLayout && (
+          <Button size="sm" variant="secondary" onClick={onAutoLayout} title="Re-layout all nodes and persist positions">
+            Auto-Layout
+          </Button>
+        )}
         <Button size="sm" variant="ghost" onClick={onResetZoom} title="Reset zoom and pan">
           Reset Zoom
         </Button>

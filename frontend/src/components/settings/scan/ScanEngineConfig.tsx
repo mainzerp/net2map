@@ -135,7 +135,7 @@ function ScanEngineConfig() {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="p-3 rounded-lg bg-surface border border-line flex flex-col gap-2">
+      <div className="p-3 rounded-card bg-surface border border-line flex flex-col gap-2">
         <SectionHeader>GENERAL ENGINE SETTINGS</SectionHeader>
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-muted text-[10px]">Parallel Workers (Hosts)</span>
@@ -150,7 +150,7 @@ function ScanEngineConfig() {
         </div>
       </div>
 
-      <div className="p-3 rounded-lg bg-surface border border-line flex flex-col gap-2">
+      <div className="p-3 rounded-card bg-surface border border-line flex flex-col gap-2">
         <SectionHeader>DISCOVERY SETTINGS</SectionHeader>
         {intervalInput(
           "Discovery Full Scan Interval (sec)",
@@ -161,7 +161,7 @@ function ScanEngineConfig() {
         )}
       </div>
 
-      <div className="p-3 rounded-lg bg-surface border border-line flex flex-col gap-2">
+      <div className="p-3 rounded-card bg-surface border border-line flex flex-col gap-2">
         <SectionHeader>LINK / NEIGHBOR UPDATE SETTINGS</SectionHeader>
         {intervalInput(
           "LLDP Link Poll Interval (sec)",
@@ -172,7 +172,7 @@ function ScanEngineConfig() {
         )}
       </div>
 
-      <div className="p-3 rounded-lg bg-surface border border-line flex flex-col gap-2">
+      <div className="p-3 rounded-card bg-surface border border-line flex flex-col gap-2">
         <SectionHeader>MAC AT PORT UPDATE SETTINGS</SectionHeader>
         {intervalInput(
           "MAC Poll Interval (sec)",

@@ -3,7 +3,24 @@ import { api, API, _getAuthHeader } from "./api";
 import type { NetmapState, SelectedRack } from "./types";
 import { resolveMapBgColor } from "./theme/mapBackground";
 
-const useNetmapStore = create<NetmapState>((set, get) => ({
+// Map focus slice ("Show on map" / toolbar search). Kept local to the store
+// module so the shared NetmapState type in types.ts stays untouched.
+export interface MapFocusSlice {
+  // Device the topology canvas should center on; cleared by the canvas once
+  // the viewport animation has been issued.
+  focusDeviceId: number | null;
+  setFocusDevice: (id: number | null) => void;
+  clearFocusDevice: () => void;
+}
+
+export type NetmapStoreState = NetmapState & MapFocusSlice;
+
+const useNetmapStore = create<NetmapStoreState>((set, get) => ({
+  // ── Map focus slice ──────────────────────────────────────────────────────
+  focusDeviceId: null,
+  setFocusDevice: (id: number | null) => set({ focusDeviceId: id }),
+  clearFocusDevice: () => set({ focusDeviceId: null }),
+
   // ── Topology slice ───────────────────────────────────────────────────────
   // Topology data itself lives in TanStack Query (hooks/api/useTopology.ts);
   // the store only keeps the selection state.

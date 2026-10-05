@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, extractErrorMessage } from "../api";
 import useNetmapStore from "../store";
@@ -36,6 +36,7 @@ export default function MapPage() {
   const highlightPortKey = useNetmapStore(s => s.highlightPortKey);
   const clearHighlightPortKey = useNetmapStore(s => s.clearHighlightPortKey);
   const activeScanJobId = useNetmapStore(s => s.activeScanJobId);
+  const setFocusDevice = useNetmapStore(s => s.setFocusDevice);
   const { invalidateTopology } = useInvalidateApi();
   const { rackOrders, reorderDevice, reorderClassSection } = useRackOrders();
   const { addToast } = useToast();
@@ -53,6 +54,53 @@ export default function MapPage() {
       invalidateTopology();
     }
   }, [scanProgress, invalidateTopology]);
+
+  // Scan sweep overlay on the canvas while the job runs.
+  const scanOverlay = useMemo(() => {
+    if (!activeScanJobId || scanProgress?.type === "scan_complete") return undefined;
+    const total = scanProgress?.total ?? 0;
+    const scanned = scanProgress?.scanned ?? scanProgress?.completed ?? 0;
+    const known = scanProgress?.type === "scan_progress" && total > 0;
+    return {
+      active: true,
+      progress: known ? scanned / total : null,
+      label: known ? `Scanning ${scanned} of ${total} devices` : "Scan starting",
+    };
+  }, [activeScanJobId, scanProgress]);
+
+  // Devices touched by the scan get a brief accent ring: keep each reported
+  // latest_ip for a few seconds.
+  const [scanPulseIps, setScanPulseIps] = useState<string[]>([]);
+  const latestScanIp = scanProgress?.type === "scan_progress" ? scanProgress.latest_ip : undefined;
+  const pulseTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  useEffect(() => {
+    if (!latestScanIp) return;
+    setScanPulseIps(prev => (prev.includes(latestScanIp) ? prev : [...prev.slice(-7), latestScanIp]));
+    // One timer per IP (restarted if the IP repeats); deliberately not
+    // cleared when the next IP arrives so every ring fades on its own.
+    const timers = pulseTimersRef.current;
+    const existing = timers.get(latestScanIp);
+    if (existing) clearTimeout(existing);
+    timers.set(latestScanIp, setTimeout(() => {
+      timers.delete(latestScanIp);
+      setScanPulseIps(prev => prev.filter(ip => ip !== latestScanIp));
+    }, 2500));
+  }, [latestScanIp]);
+  useEffect(() => {
+    const timers = pulseTimersRef.current;
+    if (!activeScanJobId) {
+      timers.forEach(t => clearTimeout(t));
+      timers.clear();
+      setScanPulseIps([]);
+    }
+  }, [activeScanJobId]);
+  useEffect(() => {
+    const timers = pulseTimersRef.current;
+    return () => {
+      timers.forEach(t => clearTimeout(t));
+      timers.clear();
+    };
+  }, []);
 
   const selectedRackFull = useMemo(() => {
     if (!selectedRack) return null;
@@ -96,6 +144,8 @@ export default function MapPage() {
   // Toolbar search: racked devices select (and center) their rack, unracked
   // devices select the outside node -- same targets as clicking the canvas.
   const handleSearchSelect = (device: TopologyNode) => {
+    // Pan and zoom to the device (or its rack node), like "Show on map".
+    setFocusDevice(device.id);
     if (device.rack_id != null) {
       const rack = (topology.racks || []).find(r => r.id === device.rack_id);
       if (rack) {
@@ -261,6 +311,8 @@ export default function MapPage() {
               mapBgColor={mapBgColor}
               stats={linkStats}
               updatedAt={topologyQuery.dataUpdatedAt || null}
+              scan={scanOverlay}
+              scanPulseIps={scanPulseIps}
             />
           </div>
           {topology.nodes.length === 0 && !topologyQuery.isPending && (

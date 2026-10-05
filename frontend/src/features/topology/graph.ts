@@ -11,7 +11,7 @@ import type {
   SwitchClass,
   FilterState,
 } from "../../types";
-import { CABLE_COLORS, speedColor } from "../../theme/visual";
+import { CABLE_COLORS, speedColor, speedLabelToMbps } from "../../theme/visual";
 
 export interface MapRack {
   id: number;
@@ -43,15 +43,6 @@ const SPEED_ORDER: Record<string, number> = {
   "100M": 1,
 };
 
-const SPEED_LABEL_MBPS: Record<string, number> = {
-  "100G": 100000,
-  "40G": 40000,
-  "25G": 25000,
-  "10G": 10000,
-  "1G": 1000,
-  "100M": 100,
-};
-
 // Canvas node id helpers -------------------------------------------------------
 
 export function rackNodeId(rackId: number | string): string {
@@ -71,7 +62,7 @@ export function endpointToNodeId(endpoint: EndpointId): string {
 // Color fallbacks --------------------------------------------------------------
 
 export function speedFallbackColor(label: string | undefined): string {
-  const mbps = SPEED_LABEL_MBPS[label || ""] || 0;
+  const mbps = speedLabelToMbps(label);
   return mbps ? speedColor(mbps) : "var(--line-strong)";
 }
 
@@ -195,6 +186,44 @@ export function buildAggregatedLinks(
     );
     return { ...g, count: unique.length, speed: best?.speed_label };
   });
+}
+
+// Link status -------------------------------------------------------------------
+// Links carry no state of their own; derive it from the local (or remote) port
+// oper_status when the port can be matched by name, otherwise from device
+// reachability. A discovered link with a known speed and no contrary evidence
+// counts as up; with neither port data nor speed it is unknown.
+
+export type LinkStatus = "up" | "down" | "unknown";
+
+const normPortId = (s: string | undefined | null): string => (s || "").trim().toLowerCase();
+
+function portOperStatus(device: TopologyNode | undefined, port: string): number | null {
+  if (!device) return null;
+  const key = normPortId(port);
+  if (!key) return null;
+  const match = (device.ports || []).find(
+    p => normPortId(p.name) === key || normPortId(p.port_id) === key || normPortId(p.if_descr) === key,
+  );
+  return match ? match.oper_status : null;
+}
+
+export function linkStatus(link: TopologyLink, nodesByIp: Map<string, TopologyNode>): LinkStatus {
+  const local = nodesByIp.get(link.local_ip);
+  const remote = nodesByIp.get(link.remote_ip);
+  const localOper = portOperStatus(local, link.local_port);
+  const oper = localOper ?? portOperStatus(remote, link.remote_port);
+  if (oper != null) return oper === 1 ? "up" : "down";
+  if (local?.ping_status === "offline" || remote?.ping_status === "offline") return "down";
+  return link.speed_label ? "up" : "unknown";
+}
+
+// Aggregate: up when any member link is up, down when all known members are
+// down, unknown otherwise.
+export function aggregateLinkStatus(statuses: LinkStatus[]): LinkStatus {
+  if (statuses.some(s => s === "up")) return "up";
+  if (statuses.length > 0 && statuses.every(s => s === "down")) return "down";
+  return "unknown";
 }
 
 // Rack-pair color map (ported from MapPage; keys use the legacy endpoint ids) ---

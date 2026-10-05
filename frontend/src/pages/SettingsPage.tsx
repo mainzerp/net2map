@@ -95,7 +95,7 @@ export default function SettingsPage() {
                 key={itemTab}
                 to={`/settings/${itemTab}`}
                 className={({ isActive }) =>
-                  `flex items-center gap-2.5 px-3 py-2.5 rounded-lg w-full text-left no-underline border transition-colors ${
+                  `flex items-center gap-2.5 px-3 py-2.5 rounded-control w-full text-left no-underline border transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
                     isActive
                       ? "bg-panel-2 border-line-strong"
                       : "bg-transparent border-transparent hover:bg-panel-2"
@@ -133,7 +133,7 @@ export default function SettingsPage() {
             {NEW_ENTRY_TABS.has(tab) && (
               <button
                 onClick={() => setNewEntryTrigger(t => t + 1)}
-                className="bg-panel-2 border border-line-strong text-accent rounded-md px-4 py-1.5 cursor-pointer text-[11px] font-semibold hover:border-accent transition-colors"
+                className="bg-panel-2 border border-line-strong text-accent rounded-control px-4 py-1.5 cursor-pointer text-[11px] font-semibold hover:border-accent transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
               >+ New Entry</button>
             )}
           </div>

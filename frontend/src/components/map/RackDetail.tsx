@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { buildPortLinkMap, normPort } from "../../api";
-import { CABLE_COLORS, VENDOR_COLOR, VENDOR_ICON } from "../../theme/visual";
+import { CABLE_COLORS } from "../../theme/visual";
+import VendorBadge from "./VendorBadge";
 import type { TopologyNode, TopologyLink, SwitchClass, SwitchModel } from "../../types";
 import SwitchPanel from "../SwitchPanel";
 import { splitDevicesForRackPanel, uBadgeLabel } from "./rackPanelOrder";
@@ -412,9 +413,9 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
       >
         <div className="min-w-0 pr-1.5">
           <div
-            style={{ color: isSel ? accentColor : (VENDOR_COLOR[a?.vendor] || "var(--muted)") }}
-            className="font-semibold overflow-hidden text-ellipsis whitespace-nowrap"
-          >{VENDOR_ICON[a?.vendor]||"[--]"} {a?.sys_name || l.local_ip}</div>
+            style={isSel ? { color: accentColor } : undefined}
+            className={`font-semibold flex items-center gap-1 min-w-0 ${isSel ? "" : "text-primary"}`}
+          ><VendorBadge vendor={a?.vendor} /><span className="truncate">{a?.sys_name || l.local_ip}</span></div>
           <div className="text-muted text-[10px] mt-px">{l.local_port}</div>
         </div>
         <div className="flex flex-col items-center gap-0.5">
@@ -433,9 +434,9 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
         </div>
         <div className="min-w-0 pl-1.5 text-right">
           <div
-            style={{ color: isSel ? accentColor : (VENDOR_COLOR[b?.vendor] || "var(--muted)") }}
-            className="font-semibold overflow-hidden text-ellipsis whitespace-nowrap"
-          >{b?.sys_name || l.remote_ip} {VENDOR_ICON[b?.vendor]||"[--]"}</div>
+            style={isSel ? { color: accentColor } : undefined}
+            className={`font-semibold flex items-center justify-end gap-1 min-w-0 ${isSel ? "" : "text-primary"}`}
+          ><span className="truncate">{b?.sys_name || l.remote_ip}</span><VendorBadge vendor={b?.vendor} /></div>
           <div className="text-muted text-[10px] mt-px">{l.remote_port}</div>
         </div>
       </div>
@@ -609,11 +610,9 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
                 return (
                   <div key={i} className="grid grid-cols-[1fr_80px_1fr] items-center px-3 py-1.5 border-b border-line text-[10px]">
                     <div className="min-w-0 pr-1.5">
-                      <div
-                        style={{ color: VENDOR_COLOR[localDev?.vendor] || "var(--muted)" }}
-                        className="font-semibold overflow-hidden text-ellipsis whitespace-nowrap"
-                      >
-                        {VENDOR_ICON[localDev?.vendor]||"[--]"} {localDev?.sys_name || l.local_ip}
+                      <div className="font-semibold flex items-center gap-1 min-w-0 text-primary">
+                        <VendorBadge vendor={localDev?.vendor} />
+                        <span className="truncate">{localDev?.sys_name || l.local_ip}</span>
                       </div>
                       <div className="text-muted text-[10px] mt-px">{l.local_port}</div>
                     </div>

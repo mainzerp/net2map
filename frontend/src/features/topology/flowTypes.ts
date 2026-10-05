@@ -4,6 +4,7 @@
 
 import type { Node, Edge } from "@xyflow/react";
 import type { TopologyNode, RackInfo } from "../../types";
+import type { LinkStatus } from "./graph";
 
 export type RackNodeData = {
   rack: RackInfo;
@@ -35,5 +36,6 @@ export type AggregatedEdgeData = {
   color: string;
   width: number;
   active: boolean;
+  status: LinkStatus;
 };
 export type AggregatedFlowEdge = Edge<AggregatedEdgeData, "aggregated">;

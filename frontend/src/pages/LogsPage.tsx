@@ -115,7 +115,7 @@ export default function LogsPage() {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 flex flex-col bg-panel border border-line rounded-lg overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-col bg-panel border border-line rounded-card overflow-hidden">
         <div className="grid grid-cols-[170px_90px_180px_1fr] gap-2 px-3 py-2 border-b border-line text-[10px] font-semibold uppercase tracking-wider text-muted">
           <span>Time</span>
           <span>Level</span>

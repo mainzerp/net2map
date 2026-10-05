@@ -149,7 +149,7 @@ function SnmpProfilesTabContent({ newEntryTrigger }: SnmpProfilesTabContentProps
               </Field>
             )}
             {isV3 && (
-              <div className="p-3 rounded-lg bg-panel-2 border border-line-strong flex flex-col gap-3">
+              <div className="p-3 rounded-card bg-panel-2 border border-line-strong flex flex-col gap-3">
                 <Field label="Security Level">
                   <Select value={F.v3_security_level} onChange={(e) => set("v3_security_level", e.target.value)}>
                     {SEC_LEVELS.map((l) => <option key={l}>{l}</option>)}

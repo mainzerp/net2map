@@ -30,7 +30,7 @@ export function TabLoading({ label = "Loading..." }: { label?: string }) {
 
 export function TabError({ message }: { message: string }) {
   return (
-    <div className="px-3 py-2 mb-2 rounded-md border border-danger bg-panel-2 text-danger text-[11px]">
+    <div className="px-3 py-2 mb-2 rounded-control border border-danger bg-danger-soft text-danger text-[11px]">
       {message}
     </div>
   );

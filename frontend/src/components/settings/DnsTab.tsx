@@ -60,7 +60,7 @@ function DnsSettingsTabContent() {
               value={serversText}
               onChange={(e) => setServersText(e.target.value)}
               placeholder={"One DNS server IP per line, e.g.\n10.0.0.10\n1.1.1.1"}
-              className="w-full min-h-[140px] resize-y px-2.5 py-2 rounded-md bg-panel-2 text-primary text-xs border border-line-strong outline-none transition-colors placeholder:text-muted focus:border-accent"
+              className="w-full min-h-[140px] resize-y px-2.5 py-2 rounded-control bg-panel-2 text-primary text-xs border border-line-strong outline-none transition-colors placeholder:text-muted focus:border-accent focus:outline-solid focus:outline-2 focus:outline-offset-2 focus:outline-accent"
             />
             <div className="text-muted text-[10px]">
               Accepted formats: IPv4 and IPv6. You can also separate values by comma.

@@ -113,7 +113,7 @@ function DryRunPanel() {
         )}
       </div>
       {dryRunResult && (
-        <div className="mt-1 p-3 rounded-lg bg-panel-2 border border-line-strong">
+        <div className="mt-1 p-3 rounded-card bg-panel-2 border border-line-strong">
           <div className="text-muted text-[10px] font-bold tracking-[1px] mb-2 select-none">
             DRY RUN RESULT - {dryRunResult.found ?? 0} host(s) found, {dryRunResult.scanned ?? 0} probed
             {dryRunResult.total_duration_ms != null ? ` - ${(dryRunResult.total_duration_ms / 1000).toFixed(1)}s` : ""}

@@ -1,4 +1,4 @@
-import { VENDOR_COLOR, VENDOR_ICON, VENDOR_LABEL, speedColor } from "../../theme/visual";
+import { VENDOR_COLOR, VENDOR_LABEL, speedColor } from "../../theme/visual";
 
 // One compact panel with slim segmented bars for the vendor mix and the
 // link-speed mix, colored with the harmonized data palette from theme/visual.
@@ -100,12 +100,9 @@ export function DistributionPanel({ vendors, switchTotal, speeds, linkTotal }: D
       key: vendor,
       count,
       color: VENDOR_COLOR[vendor] ?? "var(--muted)",
-      label: (
-        <span className="inline-flex items-center gap-1.5">
-          {VENDOR_LABEL[vendor] || vendor}
-          <span className="text-[9px] font-semibold text-muted font-mono">{VENDOR_ICON[vendor] || "[--]"}</span>
-        </span>
-      ),
+      // Full vendor name only: the legend swatch already carries the vendor
+      // color, so the former ASCII tag ([AX], [FS], ...) was redundant.
+      label: VENDOR_LABEL[vendor] || vendor,
     }));
 
   const speedSegments: Segment[] = Object.entries(speeds)

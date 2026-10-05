@@ -157,7 +157,7 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
   let rowIndex = -1;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-sidebar/50 px-4 pt-[12vh]" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-scrim px-4 pt-[12vh]" onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"

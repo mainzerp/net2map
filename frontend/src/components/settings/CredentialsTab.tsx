@@ -228,7 +228,7 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
                   </Field>
                 )}
                 {isV3 && (
-                  <div className="p-3 rounded-lg bg-panel-2 border border-line-strong flex flex-col gap-3">
+                  <div className="p-3 rounded-card bg-panel-2 border border-line-strong flex flex-col gap-3">
                     <div className="grid grid-cols-2 gap-2">
                       <Field label="Username *">
                         <Input required={isV3} value={F.v3_username} onChange={(e) => set("v3_username", e.target.value)} placeholder="netmonitor" />

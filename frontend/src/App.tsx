@@ -301,7 +301,7 @@ export default function App() {
       {/* Mobile drawer */}
       {drawerOpen && (
         <div className="md:hidden fixed inset-0 z-40">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setDrawerOpen(false)} />
+          <div className="absolute inset-0 bg-scrim" onClick={() => setDrawerOpen(false)} />
           <aside ref={drawerRef} id="mobile-navigation" role="dialog" aria-modal="true" aria-label="Navigation" className="absolute left-0 top-0 bottom-0 w-56 bg-sidebar text-sidebar-text flex flex-col py-3 overflow-y-auto shadow-raised">
             <div className="flex items-center gap-2 px-4 pb-3">
               <BrandMark className="text-sidebar-text" />

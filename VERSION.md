@@ -23,12 +23,25 @@ Arbeitsstand, noch nicht veroeffentlicht; Prototyp fuer das UI-Redesign.
   Racks, per URL verlinkbar (`?inspect=device:<id>`), schliesst mit Zurueck oder
   Escape. Zeilen in den Geraete- und Endpunkt-Tabellen oeffnen es per Klick/Enter.
 
+- Netzwerkkarte im Kartografie-Stil: Kabel als Tintenstriche, Strichstaerke nach
+  Geschwindigkeit, ausgefallene Links gestrichelt, optionale Fluss-Animation
+  ("Flow"), Papier-Raster als Hintergrund.
+- Semantischer Zoom: weit entfernt nur Namen, nah zusaetzlich Port-Leiste und IP.
+- Scan-Anzeige auf der Karte (Fortschrittslinie, dezente Ringe, kurz markierte
+  Geraete). "Show on map" und die Kartensuche zoomen jetzt zum Geraet.
+- Hersteller-Abzeichen statt ASCII-Kuerzeln ([AX], [FS], [UF]).
+- "Auto-Layout" erscheint nur noch, wenn kein Hintergrundbild (Grundriss) fuer
+  die Karte hinterlegt ist, damit die manuelle Anordnung nicht verloren geht.
+
 ### Aenderungen
 
 - Toasts, Fehleransicht und Einstellungen verwenden Theme-Farben statt fester
   Hex-Werte. Der Standard-Kartenhintergrund folgt dem Theme ("Follow theme").
 - Die Switch-Detailansicht der Karte (SwitchDetailSlideIn) wurde durch den
   Inspector ersetzt.
+- Einheitliche Rundungen und Overlay-Abdunklung; im dunklen Theme ist der
+  Hover-Zustand des Hauptbuttons heller und kontrastreicher. Links werden nicht
+  mehr nach Kabelanzahl dicker (Anzahl steht im Label); 10M-Links sind bernsteinfarben.
 
 ## v2.1.2 -- Sitzungs-Sicherheit, Scan-Stabilitaet und UI-Polish
 

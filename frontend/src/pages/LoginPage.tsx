@@ -31,7 +31,7 @@ export default function LoginPage() {
       <form
         onSubmit={handleSubmit}
         aria-busy={loading}
-        className="w-full max-w-sm p-6 sm:p-8 rounded-xl border border-line-strong bg-panel shadow-xl"
+        className="w-full max-w-sm p-6 sm:p-8 rounded-card border border-line-strong bg-panel shadow-raised"
       >
         <div className="text-center mb-6">
           <svg className="inline-block" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -47,7 +47,7 @@ export default function LoginPage() {
         </div>
 
         {error && (
-          <div role="alert" className="px-3 py-2 mb-4 rounded-md bg-panel-2 border border-danger text-danger text-xs">
+          <div role="alert" className="px-3 py-2 mb-4 rounded-control bg-danger-soft border border-danger text-danger text-xs">
             {error}
           </div>
         )}

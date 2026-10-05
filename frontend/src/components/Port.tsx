@@ -15,6 +15,10 @@ interface PortProps {
   highlighted?: boolean;
 }
 
+// Translucent variant of any CSS color, including var(--token) fallbacks where
+// appending a hex alpha suffix would produce invalid CSS.
+const tint = (color: string, pct: number) => `color-mix(in srgb, ${color} ${pct}%, transparent)`;
+
 // ── Port ─────────────────────────────────────────────────────────────────────
 export default function Port({ port, portKey, portLinkMap, selectedLink, onPortClick, cableColor, interRack, highlighted }: PortProps) {
   const [hov, setHov] = useState(false);
@@ -48,11 +52,11 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
     else if (isLinked) hl = "dim";
   }
 
-  const bg     = hl==="from"||hl==="to" ? `${cc}28` : hl==="dim" ? "var(--surface)" : isLinked && !hl ? `${cc}12` : active ? base : "var(--panel)";
+  const bg     = hl==="from"||hl==="to" ? tint(cc, 16) : hl==="dim" ? "var(--surface)" : isLinked && !hl ? tint(cc, 7) : active ? base : "var(--panel)";
   const border = hl==="from"||hl==="to" ? cc : isLinked ? cc : base;
   const shadow = hl==="from"||hl==="to"
     ? `0 0 12px ${cc}, 0 0 4px ${cc}`
-    : isLinked && !hl ? `0 0 6px ${cc}` : hov && (hasDev || isLinked) ? `0 0 7px ${base}` : active ? `0 0 2px ${base}55` : "none";
+    : isLinked && !hl ? `0 0 6px ${cc}` : hov && (hasDev || isLinked) ? `0 0 7px ${base}` : active ? `0 0 2px ${tint(base, 33)}` : "none";
 
   const highlightStyle: React.CSSProperties = highlighted ? {
     animation: "portPulse 1s ease-in-out infinite",
@@ -114,7 +118,7 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
           )}
           <span style={{
             fontSize:12, fontWeight:700,
-            color: hl ? "rgba(255,255,255,0.95)"
+            color: hl ? "var(--primary)"
                  : (isLinked && !hl) ? "var(--primary)"
                  : active ? "rgba(0,0,0,0.75)"
                  : "var(--muted)",
@@ -131,11 +135,11 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
           borderRadius:8, padding:"10px 14px", minWidth:240,
           pointerEvents:"none",
           fontSize:12, color:"var(--muted)",
-          boxShadow:`0 8px 32px rgba(0,0,0,0.7), 0 0 12px ${cc}18`,
+          boxShadow:`var(--shadow-raised), 0 0 12px ${tint(cc, 9)}`,
         }}>
           {isLinked && (
             <div style={{marginBottom: hasDev ? 10 : 0, padding:"5px 8px",
-              backgroundColor:`${cc}12`, border:`1px solid ${cc}33`,
+              backgroundColor: tint(cc, 7), border:`1px solid ${tint(cc, 20)}`,
               borderRadius:5, color:cc, fontSize:12}}>
               <div style={{fontWeight:600, marginBottom:3}}>Switch-to-switch - {linkEntry!.link.speed_label}</div>
               <div style={{color:"var(--muted)"}}>

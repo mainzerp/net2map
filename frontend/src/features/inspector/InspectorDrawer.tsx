@@ -76,7 +76,7 @@ export default function InspectorDrawer() {
 
   return (
     <>
-      {isOpen && <div className="md:hidden fixed inset-0 z-40 bg-sidebar/50" onClick={close} aria-hidden="true" />}
+      {isOpen && <div className="md:hidden fixed inset-0 z-40 bg-scrim" onClick={close} aria-hidden="true" />}
       <aside
         ref={panelRef}
         role="dialog"

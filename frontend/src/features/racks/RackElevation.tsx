@@ -4,8 +4,9 @@
 // placement and an unassigned-devices tray.
 
 import { useCallback, useMemo, useRef } from "react";
-import { VENDOR_ICON, VENDOR_LABEL, speedColor } from "../../theme/visual";
+import { speedColor } from "../../theme/visual";
 import { Badge, StatusDot } from "../../components/ui";
+import VendorBadge from "../../components/map/VendorBadge";
 import type { RackInfo, TopologyNode } from "../../types";
 import {
   U_PX,
@@ -114,7 +115,6 @@ function Faceplate({
 }) {
   const ping = device.ping_status || "unknown";
   const status = ping === "online" ? "up" : ping === "offline" ? "down" : "unknown";
-  const vendor = VENDOR_ICON[device.vendor] ?? VENDOR_ICON.generic;
   const name = device.sys_name || device.hostname || device.ip;
   return (
     <div
@@ -141,9 +141,7 @@ function Faceplate({
       style={{ touchAction: "none" }}
     >
       <StatusDot status={status} className="shrink-0" />
-      <span className="text-[10px] text-muted shrink-0" title={VENDOR_LABEL[device.vendor] ?? device.vendor}>
-        {vendor}
-      </span>
+      <VendorBadge vendor={device.vendor} />
       <span className="text-primary text-[11px] font-semibold truncate shrink-0 max-w-[160px]">
         {name}
       </span>
@@ -364,7 +362,7 @@ function TraySection({
   onDragStart: (e: React.PointerEvent, device: TopologyNode) => void;
 }) {
   return (
-    <div className="border border-line rounded-lg bg-panel">
+    <div className="border border-line rounded-card bg-panel">
       <div className="px-3 py-2 border-b border-line text-[11px] font-semibold text-muted">
         {title} ({devices.length})
       </div>
@@ -387,9 +385,7 @@ function TraySection({
                 style={{ touchAction: "none" }}
               >
                 <StatusDot status={status} className="shrink-0" />
-                <span className="text-muted text-[10px] shrink-0">
-                  {VENDOR_ICON[d.vendor] ?? VENDOR_ICON.generic}
-                </span>
+                <VendorBadge vendor={d.vendor} />
                 <span className="text-primary truncate">{d.sys_name || d.hostname || d.ip}</span>
                 <span className="text-muted text-[10px] ml-auto shrink-0">
                   {deviceUHeight(d)}U

@@ -144,7 +144,7 @@ function MapSettingsTabContent() {
           )}
         </div>
         {bgUrl && (
-          <div className="mt-3 rounded-lg border border-line overflow-hidden max-w-[400px]">
+          <div className="mt-3 rounded-card border border-line overflow-hidden max-w-[400px]">
             <img src={bgUrl} alt="Background preview" className="block w-full opacity-80" />
           </div>
         )}

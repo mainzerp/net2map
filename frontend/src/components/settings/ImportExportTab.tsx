@@ -92,7 +92,7 @@ function DataImportExportTabContent() {
           value={configData}
           onChange={(e) => setConfigData(e.target.value)}
           placeholder='{"version":1,"settings":[...],"profiles":[...],"credentials":[...]}'
-          className="w-full min-h-[140px] px-2.5 py-2 rounded-md bg-surface text-primary text-xs border border-line-strong outline-none transition-colors placeholder:text-muted focus:border-accent"
+          className="w-full min-h-[140px] px-2.5 py-2 rounded-control bg-surface text-primary text-xs border border-line-strong outline-none transition-colors placeholder:text-muted focus:border-accent focus:outline-solid focus:outline-2 focus:outline-offset-2 focus:outline-accent"
         />
       </Card>
     </div>

@@ -161,6 +161,14 @@ describe("TopologyCanvas", () => {
     expect(rackTexts[0]).toContain("Keller");
   });
 
+  it("offers Auto-Layout only when no floor-plan background is set", () => {
+    const nodes = [makeNode({ id: 4, ip: "192.168.120.219", sys_name: "AP-Terasse" })];
+    const { rerender } = render(<TopologyCanvas {...defaultProps} nodes={nodes} />);
+    expect(screen.queryByRole("button", { name: "Auto-Layout" })).toBeTruthy();
+    rerender(<TopologyCanvas {...defaultProps} nodes={nodes} mapBgUrl="/api/map-bg?v=1" />);
+    expect(screen.queryByRole("button", { name: "Auto-Layout" })).toBeNull();
+  });
+
   it("renders devices without rack and class as outside device nodes", () => {
     const nodes = [
       makeNode({ id: 4, ip: "192.168.120.219", sys_name: "AP-Terasse", map_x: 620, map_y: 105 }),

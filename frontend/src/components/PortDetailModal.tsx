@@ -40,7 +40,7 @@ export default function PortDetailModal({ port, switchIp, onClose }: Props) {
   return (
     <Modal open onClose={onClose} title={`Port ${port.if_descr || port.if_index}`} width={460}>
       {/* Port metadata */}
-      <div className="grid grid-cols-[90px_1fr] gap-y-1.5 mb-4 px-3 py-2.5 bg-surface border border-line rounded-lg text-xs">
+      <div className="grid grid-cols-[90px_1fr] gap-y-1.5 mb-4 px-3 py-2.5 bg-surface border border-line rounded-card text-xs">
         <span className="text-muted">Port</span>
         <span className="text-primary">{port.if_descr || "-"}</span>
         <span className="text-muted">Status</span>

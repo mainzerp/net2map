@@ -1,3 +1,4 @@
+import { memo } from "react";
 import {
   BaseEdge,
   EdgeLabelRenderer,
@@ -6,6 +7,7 @@ import {
   type EdgeProps,
 } from "@xyflow/react";
 import { getBorderAnchor, nodeCenter } from "./floating";
+import { useFlowEnabled } from "../flowContext";
 import type { AggregatedFlowEdge, TopoFlowNode } from "../flowTypes";
 
 // ── AggregatedEdge ───────────────────────────────────────────────────────────
@@ -15,16 +17,21 @@ import type { AggregatedFlowEdge, TopoFlowNode } from "../flowTypes";
 // side the peer is on and track live while dragging. The badge shows the
 // aggregated link count and best speed, e.g. "3x 10G". An active edge is the
 // one whose pair contains the link currently selected in RackDetail.
+//
+// Cartographic look, drawn as up to three stacked paths:
+//  1. casing: a wider stroke in the surface color that separates the line from
+//     the paper grid and from crossing links (like the halo of a map road),
+//  2. ink: the link itself; width encodes speed (speedStrokeWidth), round
+//     caps; down/unknown links are dashed in the muted color,
+//  3. flow (optional): a slow dash pattern animated purely in CSS
+//     (.topo-edge-flow in index.css) for links that are up.
 
-export default function AggregatedEdge({
-  id,
-  source,
-  target,
-  data,
-  selected,
-}: EdgeProps<AggregatedFlowEdge>) {
+const DOWN_DASH = "4 4";
+
+function AggregatedEdge({ id, source, target, data, selected }: EdgeProps<AggregatedFlowEdge>) {
   const sourceNode = useInternalNode<TopoFlowNode>(source);
   const targetNode = useInternalNode<TopoFlowNode>(target);
+  const flowEnabled = useFlowEnabled();
 
   if (!sourceNode || !targetNode) return null;
 
@@ -40,38 +47,63 @@ export default function AggregatedEdge({
     targetPosition: targetAnchor.position,
   });
 
-  const active = !!data?.active || selected;
-  const color = data?.color || "var(--line-strong)";
-  const width = (data?.width || 1.5) + (active ? 1.5 : 0);
+  const active = !!data?.active || !!selected;
+  const status = data?.status ?? "up";
+  const up = status === "up";
+  const baseWidth = data?.width || 1.5;
+  const width = baseWidth + (active ? 1 : 0);
+  const color = active ? "var(--accent)" : up ? data?.color || "var(--line-strong)" : "var(--muted)";
 
   return (
     <>
-      {active && (
-        <BaseEdge
-          id={`${id}-glow`}
-          path={path}
-          style={{ stroke: color, strokeWidth: width + 7, strokeOpacity: 0.15 }}
-        />
-      )}
+      <path
+        d={path}
+        fill="none"
+        className="topo-edge-casing"
+        stroke="var(--surface)"
+        strokeWidth={width + 3}
+        strokeLinecap="round"
+        strokeOpacity={0.9}
+        pointerEvents="none"
+      />
       <BaseEdge
         id={id}
         path={path}
-        style={{ stroke: color, strokeWidth: width, strokeOpacity: active ? 0.95 : 0.6 }}
+        className={`topo-edge-ink ${up ? "" : "topo-edge-down"}`}
+        style={{
+          stroke: color,
+          strokeWidth: width,
+          strokeLinecap: "round",
+          strokeOpacity: active ? 1 : up ? 0.85 : 0.7,
+          strokeDasharray: up ? undefined : DOWN_DASH,
+        }}
       />
-      <EdgeLabelRenderer>
-        <div
-          style={{
-            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-            color,
-            borderColor: color,
-          }}
-          className={`absolute nodrag nopan pointer-events-none px-1.5 py-0.5 rounded border bg-surface font-mono text-[9px] font-bold tracking-wide ${
-            active ? "opacity-100" : "opacity-80"
-          }`}
-        >
-          {data?.label}
-        </div>
-      </EdgeLabelRenderer>
+      {up && flowEnabled && (
+        <path
+          d={path}
+          fill="none"
+          className="topo-edge-flow"
+          stroke="var(--surface)"
+          strokeWidth={Math.max(1, width * 0.55)}
+          strokeLinecap="round"
+          pointerEvents="none"
+        />
+      )}
+      {data?.label && (
+        <EdgeLabelRenderer>
+          <div
+            style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
+            className={`topo-edge-label absolute nodrag nopan pointer-events-none px-1.5 py-px rounded-full border bg-panel font-mono text-[9px] leading-[13px] font-semibold tabular-nums whitespace-nowrap ${
+              active ? "border-accent text-accent" : up ? "border-line text-primary" : "border-line text-muted"
+            }`}
+            data-link-status={status}
+          >
+            {data.label}
+          </div>
+        </EdgeLabelRenderer>
+      )}
     </>
   );
 }
+
+export default memo(AggregatedEdge);

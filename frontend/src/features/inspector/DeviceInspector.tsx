@@ -39,6 +39,7 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
   const { open, close, raw } = useInspector();
   const navigate = useNavigate();
   const setSelectedRack = useNetmapStore((s) => s.setSelectedRack);
+  const setFocusDevice = useNetmapStore((s) => s.setFocusDevice);
 
   const device = useMemo(
     () => data?.nodes.find((n) => n.id === id) ?? devicesQuery.data?.find((n) => n.id === id),
@@ -85,6 +86,9 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
 
   const showOnMap = () => {
     if (rack) setSelectedRack({ id: rack.id, label: rack.label, location: rack.location, devices: [] });
+    // The topology canvas centers and zooms on this device (or its rack node)
+    // and clears the focus afterwards.
+    setFocusDevice(device.id);
     navigate({ pathname: "/map", search: searchWithInspect({}, raw) });
   };
 

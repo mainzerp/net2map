@@ -124,3 +124,6 @@
 - **Command palette without a new dependency.** Ctrl/Cmd+K searches the already cached
   `useTopology` + `useEndpoints` data with hand-rolled fuzzy scoring; there is no backend
   search endpoint and the lists are small enough for client-side matching.
+- **Auto-Layout only without a floor-plan background.** The map's value is nodes
+  placed by hand on the uploaded plan; a full re-layout would destroy that. The
+  function stays for maps without a background image.

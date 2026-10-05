@@ -42,6 +42,8 @@
   --radius-card: 14px;
   --shadow-card: 0 3px 12px rgb(32 45 57 / 4%);
   --shadow-raised: 0 12px 32px rgb(32 45 57 / 8%);
+  /* Overlay backdrop behind modals, drawers and the command palette */
+  --scrim: rgb(32 45 57 / 0.32);
 }
 
 [data-theme="dark"] {
@@ -55,7 +57,10 @@
   --primary: #ece8df;
   --muted: #a3acb0;
   --accent: #d9714f;
-  --accent-strong: #c25a3d;
+  /* Lighter than accent (hover lifts instead of darkening): accent-contrast
+     text on it is 6.39:1 (was 3.95:1 with #c25a3d); as text it reaches
+     5.70:1 on panel and 4.99:1 on panel-2. */
+  --accent-strong: #e38563;
   /* Adjusted from #3a2a25 so accent text on it reaches 4.59:1 (was 4.18:1) */
   --accent-soft: #33231e;
   --accent-contrast: #141c24;
@@ -75,6 +80,7 @@
 
   --shadow-card: 0 3px 12px rgb(0 0 0 / 25%);
   --shadow-raised: 0 12px 32px rgb(0 0 0 / 40%);
+  --scrim: rgb(0 0 0 / 0.55);
 }
 
 @theme inline {
@@ -101,6 +107,7 @@
   --color-sidebar-muted: var(--sidebar-muted);
   --color-sidebar-hover: var(--sidebar-hover);
   --color-sidebar-text: var(--sidebar-text);
+  --color-scrim: var(--scrim);
 }
 
 /* System font stacks only (no web fonts). Overrides Tailwind's defaults so
@@ -191,6 +198,10 @@ progress {
    tokens so the canvas matches both themes. */
 
 .react-flow {
+  /* Keep the root and the <Background> pattern layers transparent in both
+     color modes (xyflow's dark mode defaults them to #141414), so the canvas
+     wrapper's surface / custom map color shows through. */
+  --xy-background-color: transparent;
   background: transparent;
   font-family: var(--font-sans);
 }
@@ -247,10 +258,145 @@ progress {
   stroke: var(--accent);
 }
 
+/* Ink-stroke links: round caps and joins on every link path. */
+.react-flow__edge-path {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .react-flow__node.selectable:focus {
   outline: none;
 }
 
 .react-flow__panel {
   font-family: var(--font-sans);
+}
+
+/* --- Topology map (phase 3) --- */
+/* Owned by the topology map. Semantic zoom, link flow, scan sweep. All colors
+   come from theme tokens; animations are CSS-only and switch off under
+   prefers-reduced-motion. */
+
+/* Semantic zoom: the canvas wrapper carries data-zoom-tier (far|mid|close).
+   Far shows node labels only and hides link labels. */
+.topo-canvas[data-zoom-tier="far"] .topo-detail,
+.topo-canvas[data-zoom-tier="far"] .topo-edge-label {
+  display: none;
+}
+.topo-canvas[data-zoom-tier="far"] .topo-node-label {
+  font-size: 16px;
+}
+
+/* Link flow: slow dash train over links that are up. Surface-colored dashes
+   read as gaps travelling along the ink line; direction-agnostic. */
+@keyframes topoFlow {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+.topo-edge-flow {
+  stroke-dasharray: 2 10;
+  stroke-opacity: 0.55;
+  animation: topoFlow 2.6s linear infinite;
+}
+
+/* Brief accent ring on nodes the running scan just touched. */
+@keyframes topoScanRing {
+  from {
+    outline-color: var(--accent);
+  }
+  to {
+    outline-color: transparent;
+  }
+}
+.topo-scan-ring {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 3px;
+  animation: topoScanRing 2.5s ease-out both;
+}
+
+/* Scan sweep overlay: thin progress rule on the top edge plus slow contour
+   rings expanding from the viewport center. */
+.topo-scan-overlay {
+  z-index: 4;
+}
+.topo-scan-track {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  overflow: hidden;
+  background: var(--accent-soft);
+}
+.topo-scan-line {
+  height: 100%;
+  background: var(--accent);
+  transform-origin: left center;
+  transition: transform 400ms ease-out;
+}
+.topo-scan-line-indeterminate {
+  width: 30%;
+  animation: topoScanIndeterminate 2.4s ease-in-out infinite;
+}
+@keyframes topoScanIndeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+.topo-scan-sweep,
+.topo-scan-sweep::after {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 560px;
+  height: 560px;
+  margin: -280px 0 0 -280px;
+  border-radius: 50%;
+  border: 1px solid var(--accent);
+  opacity: 0;
+  animation: topoScanPulse 5s ease-out infinite;
+}
+.topo-scan-sweep::after {
+  content: "";
+  left: -1px;
+  top: -1px;
+  margin: 0;
+  animation-delay: 2.5s;
+}
+@keyframes topoScanPulse {
+  0% {
+    transform: scale(0.15);
+    opacity: 0.22;
+  }
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topo-edge-flow {
+    display: none;
+    animation: none;
+  }
+  .topo-scan-ring {
+    animation: none;
+  }
+  .topo-scan-sweep,
+  .topo-scan-sweep::after {
+    display: none;
+    animation: none;
+  }
+  .topo-scan-line {
+    transition: none;
+  }
+  .topo-scan-line-indeterminate {
+    width: 100%;
+    opacity: 0.6;
+    animation: none;
+  }
 }

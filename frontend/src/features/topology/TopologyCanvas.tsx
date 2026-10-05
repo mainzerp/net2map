@@ -18,6 +18,8 @@ import {
   useNodesState,
   useEdgesState,
   useReactFlow,
+  useStore,
+  useNodesInitialized,
   type NodeTypes,
   type EdgeTypes,
   type Viewport,
@@ -32,6 +34,8 @@ import type {
   FilterState,
 } from "../../types";
 import { useTheme } from "../../theme/ThemeProvider";
+import { speedLabelToMbps, speedStrokeWidth } from "../../theme/visual";
+import useNetmapStore from "../../store";
 import RackNode from "./nodes/RackNode";
 import DeviceNode from "./nodes/DeviceNode";
 import BackgroundNode from "./nodes/BackgroundNode";
@@ -47,7 +51,18 @@ import {
   rackNodeId,
   deviceNodeId,
   speedFallbackColor,
+  linkStatus,
+  aggregateLinkStatus,
 } from "./graph";
+import { ZoomTierContext, ScanPulseContext, zoomTier } from "./zoomTier";
+import {
+  FlowEnabledContext,
+  defaultFlowEnabled,
+  loadFlowPreference,
+  saveFlowPreference,
+} from "./flowContext";
+import ScanOverlay from "./ScanOverlay";
+import { prefersReducedMotion, useReducedMotion } from "./motion";
 import {
   RACK_COLLAPSED_SIZE,
   DEVICE_NODE_SIZE,
@@ -103,7 +118,19 @@ interface TopologyCanvasProps {
   mapBgColor: string;
   stats: { switches: number; fast: number; gig: number };
   updatedAt: number | null;
+  // Scan sweep overlay: shown while a scan job is running. progress is the
+  // scanned fraction (0..1) or null while the total is not yet known.
+  scan?: { active: boolean; progress: number | null; label?: string };
+  // IPs touched by the running scan very recently (brief accent ring).
+  scanPulseIps?: string[];
 }
+
+// Zoom the "Show on map" focus lands on: close tier for devices (port strip
+// visible), mid tier for racks.
+const FOCUS_DEVICE_ZOOM = 1.3;
+const FOCUS_RACK_ZOOM = 1.0;
+
+const EMPTY_IPS: string[] = [];
 
 function loadStoredViewport(): Viewport | null {
   try {
@@ -142,11 +169,24 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
     onRackPositionChange, onDevicePositionChange, onAutoLayout,
     selectedLink, rackPairColorMap,
     mapBgUrl, mapBgOpacity, mapBgScale, mapBgColor,
-    stats, updatedAt,
+    stats, updatedAt, scan, scanPulseIps = EMPTY_IPS,
   } = props;
 
   const rf = useReactFlow();
   const { theme } = useTheme();
+  // One coarse zoom tier; the selector only re-renders on tier changes.
+  const tier = useStore(s => zoomTier(s.transform[2]));
+  const nodesInitialized = useNodesInitialized();
+  const reducedMotion = useReducedMotion();
+  const focusDeviceId = useNetmapStore(s => s.focusDeviceId);
+  const clearFocusDevice = useNetmapStore(s => s.clearFocusDevice);
+  const [flowPref, setFlowPref] = useState<boolean | null>(loadFlowPreference);
+  const pulseSet = useMemo(() => new Set(scanPulseIps), [scanPulseIps]);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState<TopoFlowNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<AggregatedFlowEdge>([]);
   const [initialViewport] = useState<Viewport | null>(loadStoredViewport);
@@ -243,6 +283,8 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
     outsideNodes.forEach(n => visible.add(`outside:${n.id}`));
     return buildAggregatedLinks(links, endpointByIp, visible);
   }, [nodes, managedRacks, switchClasses, racks, outsideNodes, links]);
+
+  const nodesByIp = useMemo(() => new Map(nodes.map(n => [n.ip, n])), [nodes]);
 
   // Which endpoint pair contains the link selected in RackDetail.
   const activePairKey = useMemo(() => {
@@ -348,7 +390,9 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
       aggregated.map(l => {
         const pairKey = [l.from, l.to].sort().join("|");
         const color = rackPairColorMap[pairKey] || speedFallbackColor(l.speed);
-        const baseWidth = l.speed === "100G" || l.speed === "40G" ? 2.5 : 1.5;
+        // Ink weight encodes the best member speed; the count is in the label.
+        const width = speedStrokeWidth(speedLabelToMbps(l.speed));
+        const status = aggregateLinkStatus(l.individual.map(link => linkStatus(link, nodesByIp)));
         return {
           id: `agg:${pairKey}`,
           source: endpointToNodeId(l.from),
@@ -357,15 +401,16 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
           data: {
             label: l.count > 1 ? `${l.count}x ${l.speed || ""}`.trim() : l.speed || "",
             color,
-            width: baseWidth * Math.min(l.count, 4),
+            width,
             active: activePairKey === pairKey,
+            status,
           },
           selectable: false,
           deletable: false,
         };
       }),
     );
-  }, [graphModel, aggregated, activePairKey, racks, outsideNodes, classMap, rackPairColorMap, mapBgUrl, mapBgOpacity, mapBgScale, mapBgColor, setFlowNodes, setEdges]);
+  }, [graphModel, aggregated, activePairKey, racks, outsideNodes, classMap, rackPairColorMap, nodesByIp, mapBgUrl, mapBgOpacity, mapBgScale, mapBgColor, setFlowNodes, setEdges]);
 
   // Center the viewport on a rack/outside node when its selection changes
   // (covers rack clicks, toolbar search and the highlightPortKey deep-link).
@@ -387,10 +432,51 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
     const h = node.measured?.height ?? (node.style?.height as number) ?? RACK_COLLAPSED_SIZE.height;
     void rf.setCenter(node.position.x + w / 2, node.position.y + h / 2, {
       zoom: rf.getZoom(),
-      duration: 300,
+      duration: prefersReducedMotion() ? 0 : 300,
     });
     lastCenteredRef.current = key;
   }, [selectedRackId, selectedOutsideId, flowNodes, rf]);
+
+  // "Show on map" / toolbar search: center and zoom on the focused device, or
+  // on its rack node when the device is racked. Declared after the selection
+  // effect so its viewport call wins when both fire in the same commit. Waits
+  // for topology data and measured nodes, then clears the focus; a device that
+  // is not on the canvas (filtered out, ignored) just clears it.
+  useEffect(() => {
+    if (focusDeviceId == null) return;
+    if (nodes.length === 0) return; // topology not loaded yet
+    const device = nodes.find(n => n.id === focusDeviceId);
+    if (!device) {
+      clearFocusDevice();
+      return;
+    }
+    const rackTarget = device.rack_id != null ? rackNodeId(device.rack_id) : null;
+    const target =
+      (rackTarget && flowNodes.find(n => n.id === rackTarget)) ||
+      flowNodes.find(n => n.id === deviceNodeId(device.id));
+    if (!target) {
+      // Rebuild still pending -> retry; built but absent -> give up.
+      if (flowNodes.some(n => n.type !== "mapBackground")) clearFocusDevice();
+      return;
+    }
+    if (!nodesInitialized) return;
+    const isRack = target.type === "rack";
+    const fallback = isRack ? RACK_COLLAPSED_SIZE : DEVICE_NODE_SIZE;
+    const w = target.measured?.width ?? (target.style?.width as number) ?? fallback.width;
+    const h = target.measured?.height ?? (target.style?.height as number) ?? fallback.height;
+    const zoom = Math.max(rf.getZoom(), isRack ? FOCUS_RACK_ZOOM : FOCUS_DEVICE_ZOOM);
+    // Skip the selection effect's own centering for this node afterwards.
+    lastCenteredRef.current = target.id;
+    // Deferred one frame so it lands after xyflow's own initial fitView. Not
+    // cancelled on the re-render caused by clearFocusDevice() below.
+    const cx = target.position.x + w / 2;
+    const cy = target.position.y + h / 2;
+    requestAnimationFrame(() => {
+      if (!mountedRef.current) return;
+      void rf.setCenter(cx, cy, { zoom, duration: prefersReducedMotion() ? 0 : 400 });
+    });
+    clearFocusDevice();
+  }, [focusDeviceId, nodes, flowNodes, nodesInitialized, rf, clearFocusDevice]);
 
   const handleNodeDragStop = useCallback(
     (_event: MouseEvent | TouchEvent, node: TopoFlowNode) => {
@@ -483,13 +569,23 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
 
     onAutoLayout(assignment);
     requestAnimationFrame(() => {
-      void rf.fitView({ duration: 300, padding: 0.15 });
+      void rf.fitView({ duration: prefersReducedMotion() ? 0 : 300, padding: 0.15 });
     });
   }, [flowNodes, aggregated, racks, onAutoLayout, rf, setFlowNodes]);
 
   const handleResetZoom = useCallback(() => {
-    void rf.setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 300 });
+    void rf.setViewport({ x: 0, y: 0, zoom: 1 }, { duration: prefersReducedMotion() ? 0 : 300 });
   }, [rf]);
+
+  // Flow overlay: explicit preference, else on for maps up to ~300 links.
+  // Under prefers-reduced-motion the overlay is never mounted.
+  const flowSetting = defaultFlowEnabled(flowPref, edges.length);
+  const flowActive = flowSetting && !reducedMotion;
+  const handleToggleFlow = useCallback(() => {
+    const next = !flowSetting;
+    setFlowPref(next);
+    saveFlowPreference(next);
+  }, [flowSetting]);
 
   const handleMoveEnd = useCallback((_e: unknown, viewport: Viewport) => {
     try {
@@ -512,12 +608,23 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
         filters={filters}
         onFilterChange={onFilterChange}
         onSearchSelect={onSearchSelect}
-        onAutoLayout={handleAutoLayout}
+        onAutoLayout={mapBgUrl ? undefined : handleAutoLayout}
         onResetZoom={handleResetZoom}
+        flowEnabled={flowSetting}
+        flowDisabledReason={reducedMotion ? "Animation is off because the system requests reduced motion" : undefined}
+        onToggleFlow={handleToggleFlow}
         stats={stats}
         updatedAt={updatedAt}
       />
-      <div className="relative flex-1 min-h-0" style={{ background: mapBgColor || "var(--surface)" }}>
+      <div
+        className="topo-canvas relative flex-1 min-h-0"
+        style={{ background: mapBgColor || "var(--surface)" }}
+        data-zoom-tier={tier}
+        data-flow={flowActive ? "on" : "off"}
+      >
+        <ZoomTierContext.Provider value={tier}>
+        <FlowEnabledContext.Provider value={flowActive}>
+        <ScanPulseContext.Provider value={pulseSet}>
         <ReactFlow
           nodes={flowNodes}
           edges={edges}
@@ -538,7 +645,25 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
           colorMode={theme}
         >
           {!mapBgUrl && (
-            <Background variant={BackgroundVariant.Lines} gap={40} color="var(--line)" />
+            <>
+              {/* Paper grid: faint minor ruling plus a sparser major grid,
+                  like surveyor's paper. Both layers are transparent so the
+                  wrapper surface shows through (see .react-flow in index.css). */}
+              <Background
+                id="paper-minor"
+                variant={BackgroundVariant.Lines}
+                gap={40}
+                lineWidth={0.5}
+                color="var(--line)"
+              />
+              <Background
+                id="paper-major"
+                variant={BackgroundVariant.Lines}
+                gap={200}
+                lineWidth={1}
+                color="var(--line)"
+              />
+            </>
           )}
           <Controls position="bottom-left" showInteractive={false} />
           <MiniMap
@@ -546,9 +671,15 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
             pannable
             zoomable
             nodeColor={minimapNodeColor}
+            nodeStrokeWidth={0}
+            nodeBorderRadius={2}
             bgColor="var(--panel)"
           />
         </ReactFlow>
+        </ScanPulseContext.Provider>
+        </FlowEnabledContext.Provider>
+        </ZoomTierContext.Provider>
+        {scan?.active && <ScanOverlay progress={scan.progress} label={scan.label} />}
       </div>
     </div>
   );

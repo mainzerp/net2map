@@ -1,0 +1,207 @@
+/**
+ * Canvas-level tests for the topology map phase 3: semantic zoom attribute,
+ * Flow toggle persistence, scan sweep overlay and "Show on map" focus
+ * handling (the focus is consumed and cleared once the node exists).
+ */
+import React from "react";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import TopologyCanvas from "../features/topology/TopologyCanvas";
+import useNetmapStore from "../store";
+import { FLOW_STORAGE_KEY } from "../features/topology/flowContext";
+import { stubMemoryStorage } from "./test-utils";
+import type { TopologyNode, RackInfo } from "../types";
+
+// ── jsdom shims for @xyflow/react ────────────────────────────────────────────
+beforeAll(() => {
+  // xyflow hides nodes/edges until a ResizeObserver reports dimensions; the
+  // mock fires one (zero-size) measurement per observed element so the flow
+  // becomes visible and edges render under jsdom.
+  class ResizeObserverMock {
+    callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) {
+      this.callback = callback;
+    }
+    observe(target: Element) {
+      const entry = {
+        target,
+        contentRect: target.getBoundingClientRect(),
+        borderBoxSize: [{ inlineSize: 0, blockSize: 0 }],
+        contentBoxSize: [{ inlineSize: 0, blockSize: 0 }],
+        devicePixelContentBoxSize: [],
+      } as unknown as ResizeObserverEntry;
+      Promise.resolve().then(() =>
+        this.callback([entry], this as unknown as ResizeObserver),
+      );
+    }
+    unobserve() {}
+    disconnect() {}
+  }
+  // @ts-expect-error test shim
+  global.ResizeObserver = global.ResizeObserver || ResizeObserverMock;
+
+  // xyflow reads the zoom scale out of DOMMatrixReadOnly transforms
+  class DOMMatrixReadOnlyMock {
+    m22: number;
+    constructor(transform?: string) {
+      const scale = transform?.match(/scale\(([\d.]+)\)/)?.[1];
+      this.m22 = scale !== undefined ? Number(scale) : 1;
+    }
+  }
+  // @ts-expect-error test shim
+  global.DOMMatrixReadOnly = global.DOMMatrixReadOnly || DOMMatrixReadOnlyMock;
+
+  // jsdom reports all-zero boxes; xyflow sizes nodes from offsetWidth/
+  // offsetHeight and getBoundingClientRect, so honor inline width/height.
+  Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return parseFloat(this.style?.width || "0") || 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return parseFloat(this.style?.height || "0") || 0;
+    },
+  });
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    const el = this as HTMLElement;
+    const width = parseFloat(el.style?.width || "0") || 0;
+    const height = parseFloat(el.style?.height || "0") || 0;
+    return {
+      width,
+      height,
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: width,
+      bottom: height,
+      toJSON: () => ({}),
+    } as DOMRect;
+  };
+});
+
+function makeNode(overrides: Partial<TopologyNode>): TopologyNode {
+  return {
+    id: 1,
+    ip: "10.0.0.1",
+    hostname: "",
+    sys_name: "sw-1",
+    vendor: "generic",
+    model: "",
+    mac: "",
+    rack_id: null,
+    class_id: null,
+    model_id: null,
+    x: null,
+    y: null,
+    map_x: 100,
+    map_y: 100,
+    ignored: false,
+    role: "",
+    ports_per_row: 24,
+    total_ports: 24,
+    ports: [],
+    ...overrides,
+  } as TopologyNode;
+}
+
+function makeRack(overrides: Partial<RackInfo>): RackInfo {
+  return {
+    id: 1,
+    label: "Rack",
+    location: "",
+    room: "",
+    row_pos: null,
+    col_pos: null,
+    ...overrides,
+  };
+}
+
+const defaultProps = {
+  links: [],
+  managedRacks: [] as RackInfo[],
+  switchClasses: [],
+  filters: { racks: null, classes: null },
+  onFilterChange: () => {},
+  selectedRackId: undefined,
+  selectedOutsideId: null,
+  onSelectRack: () => {},
+  onSelectOutside: () => {},
+  onSearchSelect: () => {},
+  onRackPositionChange: () => {},
+  onDevicePositionChange: () => {},
+  onAutoLayout: () => {},
+  selectedLink: null,
+  rackPairColorMap: {},
+  mapBgUrl: null,
+  mapBgOpacity: 0.3,
+  mapBgScale: 1,
+  mapBgColor: "var(--surface)",
+  stats: { switches: 0, fast: 0, gig: 0 },
+  updatedAt: null,
+};
+
+describe("TopologyCanvas phase 3", () => {
+  let storage: Map<string, string>;
+  beforeEach(() => {
+    storage = stubMemoryStorage();
+    useNetmapStore.setState({ focusDeviceId: null });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const nodes = [
+    makeNode({ id: 7, ip: "10.0.1.1", sys_name: "sw-a", rack_id: 1, map_x: 300, map_y: 200 }),
+    makeNode({ id: 9, ip: "10.0.9.9", sys_name: "sw-out", map_x: 700, map_y: 200 }),
+  ];
+  const managedRacks = [makeRack({ id: 1, label: "R1" })];
+
+  it("exposes the zoom tier and flow state on the canvas wrapper", () => {
+    const { container } = render(<TopologyCanvas {...defaultProps} nodes={nodes} managedRacks={managedRacks} />);
+    const canvas = container.querySelector(".topo-canvas") as HTMLElement;
+    expect(canvas).toBeTruthy();
+    expect(["far", "mid", "close"]).toContain(canvas.dataset.zoomTier);
+    expect(canvas.dataset.flow).toBe("on");
+  });
+
+  it("Flow toggle flips the overlay and persists the preference", () => {
+    const { container } = render(<TopologyCanvas {...defaultProps} nodes={nodes} managedRacks={managedRacks} />);
+    const toggle = screen.getByRole("button", { name: /Flow/ });
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(storage.get(FLOW_STORAGE_KEY)).toBe("off");
+    expect((container.querySelector(".topo-canvas") as HTMLElement).dataset.flow).toBe("off");
+  });
+
+  it("renders the scan overlay only while a scan is active", () => {
+    const { rerender } = render(<TopologyCanvas {...defaultProps} nodes={nodes} managedRacks={managedRacks} />);
+    expect(screen.queryByTestId("scan-overlay")).toBeNull();
+    rerender(
+      <TopologyCanvas
+        {...defaultProps}
+        nodes={nodes}
+        managedRacks={managedRacks}
+        scan={{ active: true, progress: 0.25, label: "Scanning 1 of 4 devices" }}
+      />,
+    );
+    expect(screen.getByTestId("scan-overlay")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe("Scanning 1 of 4 devices");
+  });
+
+  it("consumes and clears a focus request for a racked device", async () => {
+    useNetmapStore.getState().setFocusDevice(7);
+    render(<TopologyCanvas {...defaultProps} nodes={nodes} managedRacks={managedRacks} />);
+    await waitFor(() => expect(useNetmapStore.getState().focusDeviceId).toBeNull());
+  });
+
+  it("clears a focus request for a device that is not on the canvas", async () => {
+    useNetmapStore.getState().setFocusDevice(12345);
+    render(<TopologyCanvas {...defaultProps} nodes={nodes} managedRacks={managedRacks} />);
+    await waitFor(() => expect(useNetmapStore.getState().focusDeviceId).toBeNull());
+  });
+});

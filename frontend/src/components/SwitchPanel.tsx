@@ -29,7 +29,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
   const statusColor = pingStatus === "online" ? "var(--success)" : pingStatus === "offline" ? "var(--danger)" : "var(--muted)";
 
   return (
-    <div ref={panelRef} className="bg-panel border border-line rounded-lg mb-1.5 overflow-visible relative transition-all">
+    <div ref={panelRef} className="bg-panel border border-line rounded-card mb-1.5 overflow-visible relative transition-all">
       <div className="flex items-center justify-between px-3.5 py-2.5 select-none">
         <div className="flex items-center gap-2.5">
           <div

@@ -82,7 +82,7 @@ function DiscoveryRanges() {
         onChange={(e) => setRangesInput(e.target.value)}
         placeholder={"192.168.1.0/24\n10.0.0.0/16\n172.16.5.42"}
         disabled={isLoading || saveMutation.isPending}
-        className="w-full min-h-[70px] resize-y px-2.5 py-2 rounded-md bg-panel-2 text-primary text-xs font-mono border border-line-strong outline-none transition-colors placeholder:text-muted focus:border-accent"
+        className="w-full min-h-[70px] resize-y px-2.5 py-2 rounded-control bg-panel-2 text-primary text-xs font-mono border border-line-strong outline-none transition-colors placeholder:text-muted focus:border-accent focus:outline-solid focus:outline-2 focus:outline-offset-2 focus:outline-accent"
       />
       {rangesError && <div className="text-danger text-[11px]">{rangesError}</div>}
       <div className="flex items-center gap-2">

@@ -78,7 +78,7 @@ export function Modal({ open, onClose, title, children, width = 480 }: ModalProp
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim"
       onClick={onClose}
     >
       <div
@@ -100,7 +100,7 @@ export function Modal({ open, onClose, title, children, width = 480 }: ModalProp
               type="button"
               onClick={onClose}
               aria-label="Close"
-              className="shrink-0 inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-panel-2 hover:text-primary transition-colors cursor-pointer"
+              className="shrink-0 inline-flex h-8 w-8 items-center justify-center rounded-control text-muted hover:bg-panel-2 hover:text-primary transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                 <line x1="4" y1="4" x2="20" y2="20" />
