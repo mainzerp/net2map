@@ -93,7 +93,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
                 key={r.id}
                 type="button"
                 onClick={() => { onMove!(device, r.id); setShowMove(false); }}
-                className="text-[10px] px-2.5 py-0.5 rounded border border-accent text-accent bg-panel-2 hover:bg-accent hover:text-white transition-colors cursor-pointer"
+                className="text-[10px] px-2.5 py-0.5 rounded border border-accent text-accent bg-panel-2 hover:bg-accent hover:text-accent-contrast transition-colors cursor-pointer"
               >{r.label}</button>
             ))}
           </div>

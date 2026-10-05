@@ -1,42 +1,80 @@
 @import "tailwindcss";
 
-/* ── Theme tokens ────────────────────────────────────────────────────────────
-   Semantic color tokens as CSS custom properties. Dark is the default theme;
-   [data-theme="light"] overrides them. Exposed to Tailwind via @theme inline
-   so utilities like bg-surface, text-primary, border-line resolve per theme. */
+/* -- Theme tokens: "Cartography" ----------------------------------------------
+   Warm paper neutrals, ink-navy chrome, one terracotta accent and sage/amber/red
+   status pairs. Light ("paper") is the default theme in :root; [data-theme="dark"]
+   ("ink night") overrides it. Exposed to Tailwind via @theme inline so utilities
+   like bg-surface, text-primary, border-line, bg-success-soft resolve per theme.
+   Text tokens (primary, muted, accent, success, warning, danger) meet WCAG AA
+   (>= 4.5:1) against surface and panel in both themes; status text tokens also
+   meet AA on their matching *-soft background. */
 
 :root {
-  --surface: #020817;
-  --panel: #0f172a;
-  --panel-2: #1e293b;
-  --line: #1e293b;
-  --line-strong: #334155;
-  --primary: #e2e8f0;
-  --muted: #94a3b8;
-  --accent: #22d3ee;
-  --accent-strong: #0891b2;
-  --success: #4ade80;
-  --warning: #fbbf24;
-  --danger: #f87171;
-  --external: #818cf8;
-  --port-highlight: #38bdf8;
+  color-scheme: light;
+
+  --surface: #f7f5f0;
+  --panel: #ffffff;
+  --panel-2: #efece4;
+  --line: #dedcd5;
+  --line-strong: #c9c5bb;
+  --primary: #202d39;
+  --muted: #61696c;
+  --accent: #a6442c;
+  --accent-strong: #873521;
+  --accent-soft: #f7eae3;
+  --accent-contrast: #ffffff;
+  --success: #38604b;
+  --success-soft: #eaf1eb;
+  --warning: #80551c;
+  --warning-soft: #faf0dd;
+  --danger: #a52e35;
+  --danger-soft: #fff0f0;
+  --external: #3d5a80;
+  --port-highlight: #2f6690;
+
+  /* Sidebar stays ink navy in both themes */
+  --sidebar: #202d39;
+  --sidebar-muted: #bac4c9;
+  --sidebar-hover: #31414e;
+  --sidebar-text: #f7f5f0;
+
+  --radius-control: 8px;
+  --radius-card: 14px;
+  --shadow-card: 0 3px 12px rgb(32 45 57 / 4%);
+  --shadow-raised: 0 12px 32px rgb(32 45 57 / 8%);
 }
 
-[data-theme="light"] {
-  --surface: #f8fafc;
-  --panel: #ffffff;
-  --panel-2: #f1f5f9;
-  --line: #e2e8f0;
-  --line-strong: #cbd5e1;
-  --primary: #0f172a;
-  --muted: #64748b;
-  --accent: #0891b2;
-  --accent-strong: #0e7490;
-  --success: #16a34a;
-  --warning: #d97706;
-  --danger: #dc2626;
-  --external: #4f46e5;
-  --port-highlight: #0284c7;
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --surface: #141c24;
+  --panel: #1b2631;
+  --panel-2: #223040;
+  --line: #2c3a47;
+  --line-strong: #3d4e5c;
+  --primary: #ece8df;
+  --muted: #a3acb0;
+  --accent: #d9714f;
+  --accent-strong: #c25a3d;
+  /* Adjusted from #3a2a25 so accent text on it reaches 4.59:1 (was 4.18:1) */
+  --accent-soft: #33231e;
+  --accent-contrast: #141c24;
+  --success: #7fb08f;
+  --success-soft: #1f3328;
+  --warning: #d9a75a;
+  --warning-soft: #3a2f1c;
+  --danger: #e0757a;
+  --danger-soft: #3d2226;
+  --external: #9aa7d6;
+  --port-highlight: #7fa6c9;
+
+  --sidebar: #0f161d;
+  --sidebar-muted: #8d979c;
+  --sidebar-hover: #1b2631;
+  --sidebar-text: #ece8df;
+
+  --shadow-card: 0 3px 12px rgb(0 0 0 / 25%);
+  --shadow-raised: 0 12px 32px rgb(0 0 0 / 40%);
 }
 
 @theme inline {
@@ -49,13 +87,55 @@
   --color-muted: var(--muted);
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-contrast: var(--accent-contrast);
   --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
   --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
   --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
   --color-external: var(--external);
+  --color-port-highlight: var(--port-highlight);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-hover: var(--sidebar-hover);
+  --color-sidebar-text: var(--sidebar-text);
 }
 
-/* ── Global base styles (moved from App.tsx) ───────────────────────────────── */
+/* System font stacks only (no web fonts). Overrides Tailwind's defaults so
+   font-sans / font-mono and the preflight html font follow them. */
+@theme {
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+}
+
+/* Radius and shadow utilities read the per-theme custom properties directly
+   (Tailwind would inline static theme values, which would break the dark
+   shadow override). Names: rounded-control, rounded-card, shadow-card,
+   shadow-raised. */
+@utility rounded-control {
+  border-radius: var(--radius-control);
+}
+@utility rounded-card {
+  border-radius: var(--radius-card);
+}
+@utility shadow-card {
+  box-shadow: var(--shadow-card);
+}
+@utility shadow-raised {
+  box-shadow: var(--shadow-raised);
+}
+/* Small uppercase page eyebrow in the accent color */
+@utility eyebrow {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+/* -- Global base styles ------------------------------------------------------- */
 
 html,
 body,
@@ -68,8 +148,15 @@ body,
 body {
   background: var(--surface);
   color: var(--primary);
-  font-family: "Inter", system-ui, sans-serif;
+  font-family: var(--font-sans);
   font-size: 12px;
+}
+
+/* Numbers line up in tables, counters and stats */
+table,
+.tabular-nums,
+progress {
+  font-variant-numeric: tabular-nums;
 }
 
 ::-webkit-scrollbar {
@@ -87,7 +174,7 @@ body {
   background: var(--line-strong);
 }
 
-/* ── Port highlight pulse (deep-link from Endpoints page) ──────────────────── */
+/* -- Port highlight pulse (deep-link from Endpoints page) ---------------------- */
 
 @keyframes portPulse {
   0%,
@@ -99,19 +186,19 @@ body {
   }
 }
 
-/* ── React Flow (@xyflow/react) theme overrides ──────────────────────────────
-   The library ships light defaults; remap its panels/controls onto the theme
-   tokens so the canvas matches both dark and light themes. */
+/* -- React Flow (@xyflow/react) theme overrides ---------------------------------
+   The library ships its own defaults; remap its panels/controls onto the theme
+   tokens so the canvas matches both themes. */
 
 .react-flow {
   background: transparent;
-  font-family: "Inter", system-ui, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .react-flow__controls {
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   overflow: hidden;
-  box-shadow: none;
+  box-shadow: var(--shadow-card);
   border: 1px solid var(--line);
 }
 
@@ -137,7 +224,9 @@ body {
 .react-flow__minimap {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
 }
 
 .react-flow__minimap-mask {
@@ -163,5 +252,5 @@ body {
 }
 
 .react-flow__panel {
-  font-family: "Inter", system-ui, sans-serif;
+  font-family: var(--font-sans);
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 export interface ModalProps {
@@ -10,10 +10,23 @@ export interface ModalProps {
 }
 
 const FOCUSABLE =
-  'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
+  'a[href], button, textarea, input:not([type="hidden"]), select, [tabindex]';
+
+function focusableElements(panel: HTMLElement): HTMLElement[] {
+  return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(element => {
+    if (element.tabIndex < 0 || element.matches(":disabled") ||
+      element.closest('[hidden], [aria-hidden="true"], [inert]')) return false;
+    for (let current: HTMLElement | null = element; current && current !== panel; current = current.parentElement) {
+      const style = getComputedStyle(current);
+      if (style.display === "none" || style.visibility === "hidden") return false;
+    }
+    return true;
+  });
+}
 
 export function Modal({ open, onClose, title, children, width = 480 }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
 
   // Escape to close
   useEffect(() => {
@@ -34,19 +47,19 @@ export function Modal({ open, onClose, title, children, width = 480 }: ModalProp
     const panel = panelRef.current;
     if (!panel) return;
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const first = panel.querySelector<HTMLElement>(FOCUSABLE);
+    const first = focusableElements(panel)[0];
     (first ?? panel).focus();
 
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== "Tab" || !panel) return;
-      const focusable = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE));
+      const focusable = focusableElements(panel);
       if (focusable.length === 0) {
         e.preventDefault();
         return;
       }
       const firstEl = focusable[0];
       const lastEl = focusable[focusable.length - 1];
-      if (e.shiftKey && document.activeElement === firstEl) {
+      if (e.shiftKey && (document.activeElement === firstEl || document.activeElement === panel)) {
         e.preventDefault();
         lastEl.focus();
       } else if (!e.shiftKey && document.activeElement === lastEl) {
@@ -72,20 +85,22 @@ export function Modal({ open, onClose, title, children, width = 480 }: ModalProp
         ref={panelRef}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={title != null ? titleId : undefined}
+        aria-label={title == null ? "Dialog" : undefined}
         data-modal
         tabIndex={-1}
         style={{ width, maxWidth: "calc(100vw - 32px)" }}
-        className="bg-panel border border-line-strong rounded-lg shadow-xl outline-none max-h-[calc(100vh-64px)] flex flex-col"
+        className="bg-panel border border-line rounded-card shadow-raised outline-none max-h-[calc(100dvh-32px)] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {title != null && (
-          <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-line">
-            <div className="text-sm font-semibold text-primary">{title}</div>
+          <div className="shrink-0 flex items-center justify-between gap-3 px-4 py-3 border-b border-line">
+            <div id={titleId} className="text-sm font-semibold text-primary">{title}</div>
             <button
               type="button"
               onClick={onClose}
               aria-label="Close"
-              className="text-muted hover:text-primary transition-colors cursor-pointer"
+              className="shrink-0 inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-panel-2 hover:text-primary transition-colors cursor-pointer"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                 <line x1="4" y1="4" x2="20" y2="20" />
@@ -94,7 +109,7 @@ export function Modal({ open, onClose, title, children, width = 480 }: ModalProp
             </button>
           </div>
         )}
-        <div className="p-4 overflow-auto">{children}</div>
+        <div className="min-h-0 p-4 overflow-auto">{children}</div>
       </div>
     </div>,
     document.body,

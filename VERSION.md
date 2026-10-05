@@ -1,5 +1,27 @@
 # Version History
 
+## v2.2.0 -- Neues Erscheinungsbild "Cartography"
+
+**Type:** MINOR
+
+Arbeitsstand, noch nicht veroeffentlicht; Prototyp fuer das UI-Redesign.
+
+### Features
+
+- Neue Farbpalette nach dem Vorbild von Billio: warmes Papier, Tinten-Navy und
+  Terrakotta als einziger Akzent. Hell ist jetzt Standard; das dunkle Theme
+  "Nachtkarte" ist daraus abgeleitet. Gespeicherte Theme-Wahl bleibt erhalten.
+- Systemschrift statt Google Fonts; Icons ueber lucide-react; Sidebar in
+  Tinten-Navy mit Terrakotta-Markierung des aktiven Eintrags.
+- Dashboard neu aufgebaut: Statussatz als Ueberschrift, kompakte Scan-Leiste
+  mit Abbrechen, Aufmerksamkeitsliste als Hauptbereich, kompakte Verteilungen.
+- Neue Seite `/styleguide` zur Pruefung aller Farben und UI-Bausteine.
+
+### Aenderungen
+
+- Toasts, Fehleransicht und Einstellungen verwenden Theme-Farben statt fester
+  Hex-Werte. Der Standard-Kartenhintergrund folgt dem Theme ("Follow theme").
+
 ## v2.1.2 -- Sitzungs-Sicherheit, Scan-Stabilitaet und UI-Polish
 
 **Type:** PATCH

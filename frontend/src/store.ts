@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { api, API, _getAuthHeader } from "./api";
 import type { NetmapState, SelectedRack } from "./types";
+import { resolveMapBgColor } from "./theme/mapBackground";
 
 const useNetmapStore = create<NetmapState>((set, get) => ({
   // ── Topology slice ───────────────────────────────────────────────────────
@@ -26,7 +27,8 @@ const useNetmapStore = create<NetmapState>((set, get) => ({
   bgNat: null,
   bgOpacity: 0.3,
   bgScale: 1,
-  bgColor: "#020817",
+  // Empty string = follow the theme surface (see theme/mapBackground.ts).
+  bgColor: "",
   // Session-scoped image version: repeat mounts reuse the cached image, and
   // upload/delete mutations bump it so the new URL bypasses the cache.
   bgVersion: Date.now(),
@@ -56,7 +58,7 @@ const useNetmapStore = create<NetmapState>((set, get) => ({
       const patch: Partial<NetmapState> = {};
       if (s.opacity != null) patch.bgOpacity = s.opacity as number;
       if (s.scale != null) patch.bgScale = s.scale as number;
-      if (s.bg_color != null) patch.bgColor = s.bg_color as string;
+      if (s.bg_color != null) patch.bgColor = resolveMapBgColor(s.bg_color as string);
       set(patch);
     }).catch(console.error);
   },

@@ -8,6 +8,7 @@ import {
   useRef,
   type ReactNode,
 } from "react";
+import { CircleCheck, CircleX, Info, TriangleAlert, type LucideIcon } from "lucide-react";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -37,19 +38,27 @@ export function useToast(): ToastContextValue {
 
 // ── Styles ───────────────────────────────────────────────────────────────────
 
-const TOAST_COLORS: Record<ToastType, { bg: string; border: string; color: string }> = {
-  success: { bg: "#052e16", border: "#166534", color: "#4ade80" },
-  error:   { bg: "#2a0a0a", border: "#7f1d1d", color: "#f87171" },
-  warning: { bg: "#2a1f04", border: "#854d0e", color: "#facc15" },
-  info:    { bg: "#082f49", border: "#0e7490", color: "#22d3ee" },
+// Soft background + strong text pairs from the theme tokens (AA in both themes).
+const TOAST_CLASSES: Record<ToastType, string> = {
+  success: "bg-success-soft text-success border-success/30",
+  error:   "bg-danger-soft text-danger border-danger/30",
+  warning: "bg-warning-soft text-warning border-warning/30",
+  info:    "bg-panel text-primary border-line",
 };
 
-// ASCII markers only (project rule: no emoji / pictographic glyphs)
-const ICONS: Record<ToastType, string> = {
-  success: "OK",
-  error:   "X",
-  warning: "!",
-  info:    "i",
+// Icon plus a hidden status word so status is never conveyed by color alone.
+const ICONS: Record<ToastType, LucideIcon> = {
+  success: CircleCheck,
+  error:   CircleX,
+  warning: TriangleAlert,
+  info:    Info,
+};
+
+const STATUS_WORD: Record<ToastType, string> = {
+  success: "Success",
+  error:   "Error",
+  warning: "Warning",
+  info:    "Info",
 };
 
 const AUTO_DISMISS_MS = 5000;
@@ -71,34 +80,25 @@ function ToastItem({ toast, onRemove }: { toast: Toast; onRemove: (id: string) =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const c = TOAST_COLORS[toast.type];
+  const Icon = ICONS[toast.type];
 
   return (
     <div
       role="alert"
+      className={`flex items-center gap-2 px-3.5 py-2.5 rounded-control border text-xs font-medium shadow-raised cursor-pointer max-w-[340px] break-words transition-[transform,opacity] duration-300 ease-out ${TOAST_CLASSES[toast.type]}`}
       style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "10px 14px",
-        borderRadius: 8,
-        border: `1px solid ${c.border}`,
-        backgroundColor: c.bg,
-        color: c.color,
-        fontSize: 12,
-        fontFamily: "'Inter', system-ui, sans-serif",
-        boxShadow: "0 4px 12px rgba(0,0,0,.4)",
         transform: visible ? "translateX(0)" : "translateX(120%)",
         opacity: visible ? 1 : 0,
-        transition: "transform 0.3s ease, opacity 0.3s ease",
-        cursor: "pointer",
-        maxWidth: 340,
-        wordBreak: "break-word",
       }}
       onClick={() => onRemove(toast.id)}
     >
-      <span style={{ fontSize: 14, flexShrink: 0 }}>{ICONS[toast.type]}</span>
-      <span style={{ flex: 1 }}>{toast.message}</span>
+      <Icon
+        size={16}
+        aria-hidden="true"
+        className={`shrink-0 ${toast.type === "info" ? "text-external" : ""}`}
+      />
+      <span className="sr-only">{STATUS_WORD[toast.type]}: </span>
+      <span className="flex-1">{toast.message}</span>
     </div>
   );
 }

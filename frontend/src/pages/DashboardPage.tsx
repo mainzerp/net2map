@@ -1,36 +1,140 @@
-import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { ArrowRight, RefreshCw, Server, Settings, Waypoints, type LucideIcon } from "lucide-react";
 import { useTopology, useStats, useEndpoints, useInvalidateApi } from "../hooks/api";
 import { useScanProgress } from "../hooks/useScanProgress";
 import useNetmapStore from "../store";
 import { useToast } from "../components/ToastProvider";
-import { Button, Card, EmptyState } from "../components/ui";
+import { Button, Card } from "../components/ui";
 import { ScanHero } from "../features/dashboard/ScanHero";
-import { StatCards } from "../features/dashboard/StatCards";
 import { AttentionCard } from "../features/dashboard/AttentionCard";
-import { VendorDistribution, LinkSpeedDistribution } from "../features/dashboard/DistributionCards";
+import { DistributionPanel } from "../features/dashboard/DistributionCards";
 import { RackOverview } from "../features/dashboard/RackOverview";
 import { useLastScanRun } from "../features/dashboard/useLastScanRun";
-import { extractErrorMessage } from "../api";
+import { api, extractErrorMessage } from "../api";
+import { formatTimestamp } from "../utils/datetime";
 import type { ScanProgress } from "../types";
 
 function DashboardSkeleton() {
   return (
-    <div className="max-w-6xl mx-auto flex flex-col gap-4" aria-label="Loading dashboard">
-      <div className="h-8 w-56 rounded bg-panel animate-pulse" />
-      <div className="h-24 rounded-lg bg-panel border border-line animate-pulse" />
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="h-20 rounded-lg bg-panel border border-line animate-pulse" />
-        ))}
+    <div className="max-w-6xl mx-auto flex flex-col gap-6 pt-6" aria-label="Loading dashboard">
+      <div className="flex flex-col gap-2">
+        <div className="h-3 w-24 rounded bg-panel-2 animate-pulse" />
+        <div className="h-8 w-96 max-w-full rounded bg-panel-2 animate-pulse" />
+        <div className="h-3 w-72 max-w-full rounded bg-panel-2 animate-pulse" />
       </div>
-      <div className="h-48 rounded-lg bg-panel border border-line animate-pulse" />
+      <div className="h-14 rounded-card bg-panel border border-line animate-pulse" />
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-2 h-64 rounded-card bg-panel border border-line animate-pulse" />
+        <div className="h-64 rounded-card bg-panel border border-line animate-pulse" />
+      </div>
     </div>
   );
 }
 
-export default function DashboardPage() {
+const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
+
+// Status sentence used as the page headline. Counts are emphasized; the
+// sentence itself carries the meaning so status never depends on color.
+function StatusHeadline({ monitored, offline }: { monitored: number; offline: number }) {
+  const online = monitored - offline;
+  let content: ReactNode;
+  if (monitored === 0) {
+    content = "No switches discovered yet.";
+  } else if (offline === 0) {
+    content = (
+      <>
+        All <strong className="font-semibold text-success tabular-nums">{monitored}</strong>{" "}
+        {plural(monitored, "switch", "switches")} online.
+      </>
+    );
+  } else {
+    content = (
+      <>
+        <strong className="font-semibold tabular-nums">{online}</strong> {plural(online, "switch", "switches")} online.{" "}
+        <strong className="font-semibold text-danger tabular-nums">{offline}</strong>{" "}
+        {plural(offline, "needs", "need")} attention.
+      </>
+    );
+  }
+  return (
+    <h1 className="m-0 mt-2 text-[28px] leading-tight font-normal tracking-tight text-primary">{content}</h1>
+  );
+}
+
+interface FactItem {
+  key: string;
+  value: ReactNode;
+  label: string;
+  to?: string;
+}
+
+// Thin secondary line: key counts inline, separated by middots.
+function FactLine({ items }: { items: FactItem[] }) {
+  return (
+    <p className="m-0 mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-muted tabular-nums">
+      {items.map((item, i) => (
+        <Fragment key={item.key}>
+          {i > 0 && <span aria-hidden="true">&middot;</span>}
+          {item.to ? (
+            <Link to={item.to} className="text-muted no-underline hover:text-accent">
+              <span className="text-primary font-medium">{item.value}</span> {item.label}
+            </Link>
+          ) : (
+            <span>
+              {item.label} <span className="text-primary font-medium">{item.value}</span>
+            </span>
+          )}
+        </Fragment>
+      ))}
+    </p>
+  );
+}
+
+interface QuickLink {
+  to: string;
+  icon: LucideIcon;
+  title: string;
+  hint: string;
+}
+
+const QUICK_LINKS: QuickLink[] = [
+  { to: "/map", icon: Waypoints, title: "Topology map", hint: "Rack grouping and cable tracing" },
+  { to: "/devices", icon: Server, title: "Devices", hint: "Discovered endpoints and ports" },
+  { to: "/settings", icon: Settings, title: "Settings", hint: "Credentials, SNMP profiles, racks" },
+];
+
+function QuickNav() {
   const navigate = useNavigate();
+  return (
+    <nav aria-label="Quick navigation" className="bg-panel border border-line rounded-card shadow-card overflow-hidden">
+      <ul className="m-0 p-0 list-none divide-y divide-line">
+        {QUICK_LINKS.map(({ to, icon: Icon, title, hint }) => (
+          <li key={to}>
+            <button
+              type="button"
+              onClick={() => navigate(to)}
+              className="group w-full flex items-center gap-3 px-5 py-3 text-left hover:bg-panel-2/60 cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+            >
+              <Icon size={16} strokeWidth={1.75} className="shrink-0 text-muted group-hover:text-accent" aria-hidden="true" />
+              <span className="flex-1 min-w-0">
+                <span className="block text-xs font-semibold text-primary">{title}</span>
+                <span className="block text-[11px] text-muted truncate">{hint}</span>
+              </span>
+              <ArrowRight
+                size={14}
+                className="shrink-0 text-muted group-hover:text-accent group-hover:translate-x-0.5 transition-transform"
+                aria-hidden="true"
+              />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+}
+
+export default function DashboardPage() {
   const topologyQuery = useTopology();
   const statsQuery = useStats();
   const endpointsQuery = useEndpoints();
@@ -38,6 +142,7 @@ export default function DashboardPage() {
   const { invalidate, invalidateTopology } = useInvalidateApi();
 
   const [scanning, setScanning] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
 
   const activeScanJobId = useNetmapStore((s) => s.activeScanJobId);
@@ -50,6 +155,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (progress?.type === "scan_complete") {
       setScanning(false);
+      setCancelling(false);
       clearScanJob();
       invalidateTopology();
       invalidate(["scan-runs"]);
@@ -68,6 +174,20 @@ export default function DashboardPage() {
       const msg = extractErrorMessage(e) || "Failed to start scan";
       setScanError(msg);
       addToast(msg, "error");
+    }
+  };
+
+  // Uses the existing cancel endpoint (also used by Settings > Scan history).
+  // Completion still arrives through the scan_complete WebSocket event.
+  const handleCancelScan = async () => {
+    if (!activeScanJobId) return;
+    setCancelling(true);
+    try {
+      await api.post(`/api/scan/jobs/${activeScanJobId}/cancel`, {});
+      addToast("Scan cancellation requested", "info");
+    } catch (e: unknown) {
+      setCancelling(false);
+      addToast(extractErrorMessage(e) || "Failed to cancel scan", "error");
     }
   };
 
@@ -105,12 +225,12 @@ export default function DashboardPage() {
 
     return {
       switchCount: apiStats != null ? apiStats.device_count : nodes.length,
+      monitoredCount: nodes.filter((n) => !n.ignored).length,
       totalPorts,
       activePorts,
       linkCount: links.length,
       rackCount: apiStats != null ? apiStats.rack_count : racks.length,
       downCount: nodes.filter((n) => !n.ignored && n.ping_status === "offline").length,
-      unassignedCount: nodes.filter((n) => !n.rack_id).length,
       vendors,
       speeds,
       rackStats,
@@ -145,90 +265,77 @@ export default function DashboardPage() {
   }
 
   const endpointCount = endpointsQuery.data ? endpointsQuery.data.filter((e) => !e.ignored).length : null;
+  const lastRun = lastScanQuery.data?.[0] ?? null;
+
+  const facts: FactItem[] = [
+    { key: "devices", value: stats.switchCount, label: plural(stats.switchCount, "device", "devices"), to: "/network" },
+    { key: "endpoints", value: endpointCount ?? "-", label: plural(endpointCount ?? 0, "endpoint", "endpoints"), to: "/devices" },
+    { key: "links", value: stats.linkCount, label: plural(stats.linkCount, "link", "links"), to: "/map" },
+    { key: "ports", value: `${stats.activePorts}/${stats.totalPorts}`, label: "ports up", to: "/network" },
+    { key: "racks", value: stats.rackCount, label: plural(stats.rackCount, "rack", "racks"), to: "/racks" },
+    {
+      key: "last-scan",
+      value: lastRun ? formatTimestamp(lastRun.finished_at ?? lastRun.started_at) : "never",
+      label: "Last scan",
+    },
+  ];
 
   return (
-    <div className="max-w-6xl mx-auto flex flex-col gap-4">
-      {/* Title row */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-lg font-bold text-primary">Dashboard</h1>
-          <p className="text-xs text-muted mt-0.5">Network topology overview</p>
+    <div className="max-w-6xl mx-auto flex flex-col gap-8 pt-6 pb-12 px-1 md:px-4">
+      {/* Calm header: eyebrow, status sentence, key facts, compact scan bar */}
+      <header className="flex flex-col gap-5">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="eyebrow">Dashboard</div>
+            <StatusHeadline monitored={stats.monitoredCount} offline={stats.downCount} />
+            {stats.switchCount === 0 ? (
+              <p className="m-0 mt-2 text-xs text-muted">Add credentials in Settings and run a scan.</p>
+            ) : (
+              <FactLine items={facts} />
+            )}
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Refresh dashboard"
+            title="Refresh"
+            onClick={() => {
+              void topologyQuery.refetch();
+              void statsQuery.refetch();
+              void endpointsQuery.refetch();
+              void lastScanQuery.refetch();
+            }}
+          >
+            <RefreshCw size={13} aria-hidden="true" />
+            Refresh
+          </Button>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            void topologyQuery.refetch();
-            void statsQuery.refetch();
-            void endpointsQuery.refetch();
-            void lastScanQuery.refetch();
-          }}
-        >
-          Refresh
-        </Button>
-      </div>
 
-      <ScanHero
-        scanning={scanning || !!activeScanJobId}
-        progress={progress}
-        scanError={scanError}
-        lastRun={lastScanQuery.data?.[0] ?? null}
-        onStartScan={handleStartScan}
-      />
+        <ScanHero
+          scanning={scanning || !!activeScanJobId}
+          progress={progress}
+          scanError={scanError}
+          lastRun={lastRun}
+          onStartScan={handleStartScan}
+          onCancelScan={activeScanJobId ? handleCancelScan : undefined}
+          cancelling={cancelling}
+        />
+      </header>
 
-      <StatCards
-        switchCount={stats.switchCount}
-        downCount={stats.downCount}
-        unassignedCount={stats.unassignedCount}
-        activePorts={stats.activePorts}
-        totalPorts={stats.totalPorts}
-        linkCount={stats.linkCount}
-        rackCount={stats.rackCount}
-        endpointCount={endpointCount}
-      />
-
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-1">
-          <AttentionCard nodes={topology.nodes} />
-        </div>
-        <div className="lg:col-span-2 grid gap-4 md:grid-cols-2">
-          <VendorDistribution vendors={stats.vendors} total={stats.switchCount} />
-          <LinkSpeedDistribution speeds={stats.speeds} total={stats.linkCount} />
+      <div className="grid gap-6 lg:grid-cols-3 items-start">
+        <AttentionCard nodes={topology.nodes} lastRun={lastRun} className="lg:col-span-2" />
+        <div className="flex flex-col gap-6">
+          <DistributionPanel
+            vendors={stats.vendors}
+            switchTotal={stats.switchCount}
+            speeds={stats.speeds}
+            linkTotal={stats.linkCount}
+          />
+          <QuickNav />
         </div>
       </div>
 
       <RackOverview racks={stats.rackStats} />
-
-      {/* Quick navigation */}
-      <div className="grid gap-4 md:grid-cols-2">
-        <button
-          type="button"
-          onClick={() => navigate("/map")}
-          className="text-left bg-panel border border-line rounded-lg p-4 hover:border-accent transition-colors cursor-pointer"
-        >
-          <div className="text-sm font-semibold text-accent">Topology Map</div>
-          <div className="text-[11px] text-muted mt-1">
-            Interactive network map with rack grouping and cable tracing
-          </div>
-        </button>
-        <button
-          type="button"
-          onClick={() => navigate("/settings")}
-          className="text-left bg-panel border border-line rounded-lg p-4 hover:border-accent transition-colors cursor-pointer"
-        >
-          <div className="text-sm font-semibold text-primary">Settings</div>
-          <div className="text-[11px] text-muted mt-1">
-            Manage credentials, SNMP profiles, racks and device classes
-          </div>
-        </button>
-      </div>
-
-      {stats.switchCount === 0 && (
-        <EmptyState
-          title="No switches discovered yet"
-          hint="Add credentials in Settings and run a scan."
-        />
-      )}
     </div>
   );
 }

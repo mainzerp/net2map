@@ -264,15 +264,17 @@ Rules of thumb:
   `celery_app.py`, `tasks.py`, `seed_db.py`, legacy `snmp_scanner.py`.
 - `frontend/` — React 18 + Vite + TypeScript SPA served by nginx; entry
   `index.html` → `src/main.tsx` (lazy-loaded pages); owning doc: `docs/README.md`.
-  Feature modules in `src/features/`: `dashboard/` (ScanHero, StatCards,
-  AttentionCard), `topology/` (React Flow map: TopologyCanvas, graph/layout,
+  Feature modules in `src/features/`: `dashboard/` (ScanHero, AttentionCard,
+  DistributionCards, RackOverview), `topology/` (React Flow map: TopologyCanvas, graph/layout,
   nodes/, edges/, MapToolbar), `racks/` (rack elevation view at route `/racks`:
   RackElevation, useRackLayout, rackLayout).
   Styling: Tailwind v4 (`@tailwindcss/vite`) with theme tokens in `src/index.css`
-  (dark default, `[data-theme="light"]`; semantic utilities like `bg-surface`,
-  `text-primary`, `border-line`); theme state in `src/theme/ThemeProvider.tsx`
-  (`useTheme`), visual constants in `src/theme/visual.ts`; UI primitives in
-  `src/components/ui/`; React Query data hooks in `src/hooks/api/`.
+  ("Cartography" palette after Billio: light paper default, `[data-theme="dark"]`
+  ink night; semantic utilities like `bg-surface`, `text-primary`, `border-line`,
+  `*-soft`, `sidebar-*`; system font stack, no web fonts); theme state in
+  `src/theme/ThemeProvider.tsx` (`useTheme`), visual constants in
+  `src/theme/visual.ts`; icons via `lucide-react`; UI primitives in
+  `src/components/ui/`, reviewed on the unlinked `/styleguide` page; React Query data hooks in `src/hooks/api/`.
 - `docs/` — doc map `docs/README.md` plus `docs/SubAgent/` (AI-agent ANALYSIS/PLAN
   working notes; not maintained user docs).
 - `scripts/` — `backup.sh` / `restore.sh` PostgreSQL dump/restore wrappers.

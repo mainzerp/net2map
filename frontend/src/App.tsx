@@ -1,123 +1,59 @@
 import { NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Container,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  Moon,
+  Network,
+  ScrollText,
+  Server,
+  Settings,
+  Sun,
+  Waypoints,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { getStoredToken, getStoredUser, logout, setApiNavigate } from "./api";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import useNetmapStore from "./store";
 import { useToast } from "./components/ToastProvider";
 import { useTheme } from "./theme/ThemeProvider";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 interface NavItem {
   to: string;
   label: string;
-  icon: ReactNode;
+  icon: LucideIcon;
 }
 
-const ICON_PROPS = {
-  width: 16,
-  height: 16,
-  viewBox: "0 0 24 24",
-  fill: "none",
-  stroke: "currentColor",
-  strokeWidth: 2,
-  strokeLinecap: "round",
-  strokeLinejoin: "round",
-} as const;
+const ICON_SIZE = 16;
+const ICON_STROKE = 1.75;
 
 const NAV: NavItem[] = [
-  {
-    to: "/",
-    label: "Dashboard",
-    icon: (
-      <svg {...ICON_PROPS}>
-        <rect x="3" y="3" width="7" height="9" rx="1" />
-        <rect x="14" y="3" width="7" height="5" rx="1" />
-        <rect x="14" y="12" width="7" height="9" rx="1" />
-        <rect x="3" y="16" width="7" height="5" rx="1" />
-      </svg>
-    ),
-  },
-  {
-    to: "/map",
-    label: "Topology",
-    icon: (
-      <svg {...ICON_PROPS}>
-        <circle cx="5" cy="6" r="2.5" />
-        <circle cx="19" cy="6" r="2.5" />
-        <circle cx="12" cy="18" r="2.5" />
-        <line x1="7" y1="7.5" x2="10.5" y2="16" />
-        <line x1="17" y1="7.5" x2="13.5" y2="16" />
-        <line x1="7.5" y1="6" x2="16.5" y2="6" />
-      </svg>
-    ),
-  },
-  {
-    to: "/devices",
-    label: "Devices",
-    icon: (
-      <svg {...ICON_PROPS}>
-        <rect x="2" y="14" width="20" height="8" rx="2" />
-        <line x1="6" y1="18" x2="6.01" y2="18" />
-        <line x1="10" y1="18" x2="10.01" y2="18" />
-        <rect x="2" y="2" width="20" height="8" rx="2" />
-        <line x1="6" y1="6" x2="6.01" y2="6" />
-        <line x1="10" y1="6" x2="10.01" y2="6" />
-      </svg>
-    ),
-  },
-  {
-    to: "/network",
-    label: "Network",
-    icon: (
-      <svg {...ICON_PROPS}>
-        <rect x="1" y="3" width="22" height="6" rx="1.5" />
-        <rect x="1" y="15" width="22" height="6" rx="1.5" />
-        <line x1="6" y1="9" x2="6" y2="15" />
-        <line x1="18" y1="9" x2="18" y2="15" />
-      </svg>
-    ),
-  },
-  {
-    to: "/racks",
-    label: "Racks",
-    icon: (
-      <svg {...ICON_PROPS}>
-        <rect x="5" y="2" width="14" height="20" rx="1.5" />
-        <line x1="5" y1="7" x2="19" y2="7" />
-        <line x1="5" y1="12" x2="19" y2="12" />
-        <line x1="5" y1="17" x2="19" y2="17" />
-        <line x1="9" y1="4.5" x2="9.01" y2="4.5" />
-        <line x1="9" y1="9.5" x2="9.01" y2="9.5" />
-        <line x1="9" y1="14.5" x2="9.01" y2="14.5" />
-      </svg>
-    ),
-  },
-  {
-    to: "/logs",
-    label: "Logs",
-    icon: (
-      <svg {...ICON_PROPS}>
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-        <polyline points="14 2 14 8 20 8" />
-        <line x1="8" y1="13" x2="16" y2="13" />
-        <line x1="8" y1="17" x2="16" y2="17" />
-      </svg>
-    ),
-  },
-  {
-    to: "/settings",
-    label: "Settings",
-    icon: (
-      <svg {...ICON_PROPS}>
-        <circle cx="12" cy="12" r="3" />
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-      </svg>
-    ),
-  },
+  { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/map", label: "Topology", icon: Waypoints },
+  { to: "/devices", label: "Devices", icon: Server },
+  { to: "/network", label: "Network", icon: Network },
+  { to: "/racks", label: "Racks", icon: Container },
+  { to: "/logs", label: "Logs", icon: ScrollText },
+  { to: "/settings", label: "Settings", icon: Settings },
 ];
 
-function BrandMark({ size = 20 }: { size?: number }) {
+// "sidebar": controls on the ink-navy sidebar; "surface": controls on the page
+// surface (mobile top bar).
+type ChromeTone = "sidebar" | "surface";
+
+const ICON_BUTTON_TONE: Record<ChromeTone, string> = {
+  sidebar: "text-sidebar-muted hover:text-sidebar-text hover:bg-sidebar-hover",
+  surface: "text-muted hover:text-primary hover:bg-panel-2",
+};
+
+function BrandMark({ size = 20, className = "text-accent" }: { size?: number; className?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
       <rect x="1" y="2" width="22" height="6" rx="1.5" />
       <rect x="1" y="16" width="22" height="6" rx="1.5" />
       <line x1="6" y1="8" x2="6" y2="16" />
@@ -126,59 +62,45 @@ function BrandMark({ size = 20 }: { size?: number }) {
   );
 }
 
-function ThemeToggleButton({ className = "" }: { className?: string }) {
+function ThemeToggleButton({ tone = "surface", className = "" }: { tone?: ChromeTone; className?: string }) {
   const { theme, toggleTheme } = useTheme();
   const isDark = theme === "dark";
+  const Icon = isDark ? Sun : Moon;
   return (
     <button
       type="button"
       onClick={toggleTheme}
       title={isDark ? "Switch to light theme" : "Switch to dark theme"}
       aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
-      className={`inline-flex items-center justify-center w-8 h-8 rounded-md text-muted hover:text-primary hover:bg-panel-2 transition-colors cursor-pointer ${className}`}
+      className={`inline-flex items-center justify-center w-8 h-8 rounded-control transition-colors cursor-pointer ${ICON_BUTTON_TONE[tone]} ${className}`}
     >
-      {isDark ? (
-        <svg {...ICON_PROPS}>
-          <circle cx="12" cy="12" r="4" />
-          <line x1="12" y1="2" x2="12" y2="5" />
-          <line x1="12" y1="19" x2="12" y2="22" />
-          <line x1="2" y1="12" x2="5" y2="12" />
-          <line x1="19" y1="12" x2="22" y2="12" />
-          <line x1="4.9" y1="4.9" x2="7" y2="7" />
-          <line x1="17" y1="17" x2="19.1" y2="19.1" />
-          <line x1="4.9" y1="19.1" x2="7" y2="17" />
-          <line x1="17" y1="7" x2="19.1" y2="4.9" />
-        </svg>
-      ) : (
-        <svg {...ICON_PROPS}>
-          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
-        </svg>
-      )}
+      <Icon size={ICON_SIZE} strokeWidth={ICON_STROKE} aria-hidden="true" />
     </button>
   );
 }
 
 function NavItems({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
   return (
-    <nav className="flex flex-col gap-1 px-2">
-      {NAV.map(({ to, label, icon }) => (
+    <nav aria-label="Main navigation" className="flex flex-col gap-0.5 px-2">
+      {NAV.map(({ to, label, icon: Icon }) => (
         <NavLink
           key={to}
           to={to}
           end={to === "/"}
           title={collapsed ? label : undefined}
+          aria-label={collapsed ? label : undefined}
           onClick={onNavigate}
           className={({ isActive }) =>
-            `flex items-center gap-3 px-3 py-2 rounded-md text-xs font-semibold transition-colors ${
+            `flex items-center gap-3 px-3 py-2 rounded-control text-xs font-medium no-underline transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
               collapsed ? "justify-center px-0" : ""
             } ${
               isActive
-                ? "text-accent bg-panel-2 border border-line-strong"
-                : "text-muted border border-transparent hover:text-primary hover:bg-panel-2"
+                ? "text-sidebar-text bg-sidebar-hover shadow-[inset_3px_0_var(--accent)]"
+                : "text-sidebar-muted hover:text-sidebar-text hover:bg-sidebar-hover"
             }`
           }
         >
-          <span className="shrink-0">{icon}</span>
+          <Icon size={ICON_SIZE} strokeWidth={ICON_STROKE} className="shrink-0" aria-hidden="true" />
           {!collapsed && <span className="truncate">{label}</span>}
         </NavLink>
       ))}
@@ -202,6 +124,36 @@ export default function App() {
     }
   });
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!drawerOpen || !drawerRef.current) return;
+    const panel = drawerRef.current;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const controls = Array.from(panel.querySelectorAll<HTMLElement>("button, a[href]"));
+    controls[0]?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setDrawerOpen(false);
+      }
+      if (event.key !== "Tab") return;
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      opener?.focus();
+    };
+  }, [drawerOpen]);
 
   useEffect(() => {
     setApiNavigate(navigate);
@@ -243,7 +195,9 @@ export default function App() {
   const user = getStoredUser();
 
   function handleLogout() {
-    logout();
+    void logout().then(revoked => {
+      if (!revoked) addToast("Signed out locally. Server session revocation failed; the token may remain valid until it expires.", "error");
+    });
     navigate("/login", { replace: true });
   }
 
@@ -258,101 +212,115 @@ export default function App() {
     });
   }
 
-  const userControls = (
-    <div className="flex items-center gap-2">
+  const renderUserControls = (tone: ChromeTone) => (
+    <div className="flex min-w-0 items-center gap-2">
       {user && (
-        <span className="text-muted text-[11px] truncate">
+        <span
+          title={`${user.username} (${user.role})`}
+          className={`text-[11px] truncate max-w-28 ${tone === "sidebar" ? "text-sidebar-muted" : "text-muted"} ${collapsed && tone === "sidebar" ? "hidden" : "hidden sm:inline"}`}
+        >
           {user.username} ({user.role})
         </span>
       )}
       <button
         type="button"
         onClick={handleLogout}
-        className="px-2.5 py-1 rounded border border-line-strong bg-transparent text-muted text-[11px] hover:text-primary transition-colors cursor-pointer"
+        title="Logout"
+        aria-label={collapsed && tone === "sidebar" ? "Logout" : undefined}
+        className={`shrink-0 inline-flex items-center gap-1.5 px-2 py-1.5 rounded-control border bg-transparent text-[11px] transition-colors cursor-pointer ${
+          tone === "sidebar"
+            ? "border-sidebar-hover text-sidebar-muted hover:text-sidebar-text hover:bg-sidebar-hover"
+            : "border-line-strong text-muted hover:text-primary hover:bg-panel-2"
+        }`}
       >
-        Logout
+        <LogOut size={13} strokeWidth={ICON_STROKE} aria-hidden="true" />
+        {!(collapsed && tone === "sidebar") && "Logout"}
       </button>
     </div>
   );
 
   return (
-    <div className="flex h-screen bg-surface text-primary overflow-hidden">
+    <div className="flex h-dvh bg-surface text-primary overflow-hidden">
       {/* Mobile top bar */}
       <div className="md:hidden fixed top-0 inset-x-0 z-30 h-12 flex items-center gap-2 px-3 border-b border-line bg-surface">
         <button
           type="button"
           onClick={() => setDrawerOpen(true)}
           aria-label="Open navigation"
-          className="inline-flex items-center justify-center w-8 h-8 rounded-md text-muted hover:text-primary hover:bg-panel-2 transition-colors cursor-pointer"
+          aria-expanded={drawerOpen}
+          aria-controls="mobile-navigation"
+          className={`inline-flex items-center justify-center w-8 h-8 rounded-control transition-colors cursor-pointer ${ICON_BUTTON_TONE.surface}`}
         >
-          <svg {...ICON_PROPS}>
-            <line x1="3" y1="6" x2="21" y2="6" />
-            <line x1="3" y1="12" x2="21" y2="12" />
-            <line x1="3" y1="18" x2="21" y2="18" />
-          </svg>
+          <Menu size={ICON_SIZE} strokeWidth={ICON_STROKE} aria-hidden="true" />
         </button>
         <NavLink to="/" className="flex items-center gap-2 no-underline">
           <BrandMark />
-          <span className="text-primary font-bold text-[15px]">NetMap</span>
+          <span className="text-primary font-semibold text-[15px] tracking-tight">NetMap</span>
         </NavLink>
         <div className="ml-auto flex items-center gap-1">
           <ThemeToggleButton />
-          {userControls}
+          {renderUserControls("surface")}
         </div>
       </div>
 
       {/* Mobile drawer */}
       {drawerOpen && (
         <div className="md:hidden fixed inset-0 z-40">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setDrawerOpen(false)} />
-          <aside className="absolute left-0 top-0 bottom-0 w-56 bg-surface border-r border-line flex flex-col py-3">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setDrawerOpen(false)} />
+          <aside ref={drawerRef} id="mobile-navigation" role="dialog" aria-modal="true" aria-label="Navigation" className="absolute left-0 top-0 bottom-0 w-56 bg-sidebar text-sidebar-text flex flex-col py-3 overflow-y-auto shadow-raised">
             <div className="flex items-center gap-2 px-4 pb-3">
-              <BrandMark />
-              <span className="text-primary font-bold text-[15px]">NetMap</span>
+              <BrandMark className="text-sidebar-text" />
+              <span className="text-sidebar-text font-semibold text-[15px] tracking-tight">NetMap</span>
+              <button
+                type="button"
+                onClick={() => setDrawerOpen(false)}
+                aria-label="Close navigation"
+                className={`ml-auto inline-flex items-center justify-center w-8 h-8 rounded-control cursor-pointer ${ICON_BUTTON_TONE.sidebar}`}
+              >
+                <X size={ICON_SIZE} strokeWidth={ICON_STROKE} aria-hidden="true" />
+              </button>
             </div>
             <NavItems collapsed={false} onNavigate={() => setDrawerOpen(false)} />
           </aside>
         </div>
       )}
 
-      {/* Desktop sidebar */}
+      {/* Desktop sidebar: ink navy in both themes */}
       <aside
-        className={`hidden md:flex flex-col shrink-0 border-r border-line bg-surface transition-[width] duration-150 ${
+        className={`hidden md:flex flex-col shrink-0 bg-sidebar text-sidebar-text transition-[width] duration-150 ${
           collapsed ? "w-14" : "w-52"
         }`}
       >
         <NavLink
           to="/"
+          aria-label="NetMap dashboard"
           className={`flex items-center gap-2 no-underline h-14 shrink-0 ${collapsed ? "justify-center" : "px-4"}`}
         >
-          <BrandMark />
-          {!collapsed && <span className="text-primary font-bold text-[15px]">NetMap</span>}
+          <BrandMark className="text-sidebar-text" />
+          {!collapsed && <span className="text-sidebar-text font-semibold text-[15px] tracking-tight">NetMap</span>}
         </NavLink>
 
         <div className="flex-1 overflow-y-auto py-2">
           <NavItems collapsed={collapsed} />
         </div>
 
-        <div className={`shrink-0 border-t border-line p-2 flex ${collapsed ? "flex-col items-center gap-1" : "items-center gap-1"}`}>
+        <div className={`shrink-0 border-t border-sidebar-hover p-2 flex ${collapsed ? "flex-col items-center gap-1" : "items-center gap-1"}`}>
           <button
             type="button"
             onClick={toggleCollapsed}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className="inline-flex items-center justify-center w-8 h-8 rounded-md text-muted hover:text-primary hover:bg-panel-2 transition-colors cursor-pointer"
+            className={`inline-flex items-center justify-center w-8 h-8 rounded-control transition-colors cursor-pointer ${ICON_BUTTON_TONE.sidebar}`}
           >
-            <svg {...ICON_PROPS}>
-              {collapsed ? (
-                <polyline points="9 18 15 12 9 6" />
-              ) : (
-                <polyline points="15 18 9 12 15 6" />
-              )}
-            </svg>
+            {collapsed ? (
+              <ChevronRight size={ICON_SIZE} strokeWidth={ICON_STROKE} aria-hidden="true" />
+            ) : (
+              <ChevronLeft size={ICON_SIZE} strokeWidth={ICON_STROKE} aria-hidden="true" />
+            )}
           </button>
-          <ThemeToggleButton />
-          {!collapsed && <div className="ml-auto">{userControls}</div>}
+          <ThemeToggleButton tone="sidebar" />
         </div>
-        {collapsed && <div className="shrink-0 px-2 pb-2 flex justify-center">{userControls}</div>}
+        <div className={`shrink-0 px-2 pb-3 flex ${collapsed ? "justify-center" : "justify-start"}`}>{renderUserControls("sidebar")}</div>
       </aside>
 
       {/* Page content */}

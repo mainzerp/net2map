@@ -8,7 +8,7 @@ export interface CardProps extends Omit<HTMLAttributes<HTMLDivElement>, "title">
 export function Card({ title, actions, className = "", children, ...props }: CardProps) {
   return (
     <div
-      className={`bg-panel border border-line rounded-lg ${className}`}
+      className={`bg-panel border border-line rounded-card shadow-card ${className}`}
       {...props}
     >
       {(title != null || actions != null) && (

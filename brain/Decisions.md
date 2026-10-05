@@ -70,3 +70,51 @@
   `Device.rack_u_position`, `Device.u_height`, `PATCH /api/racks/{id}/layout`)
   over the list-based rack panel ordering. Reason: the elevation view needs real
   U positions (U1 bottom, overlap detection); list order cannot express that.
+
+## Review hardening (2026-10-01)
+
+- **Durable session revocation is required for security mutations.** Configured
+  Redis outages fail JWT verification closed; unavailable revocation prevents
+  account security changes from committing. No process-local fallback: it would
+  lose revocations on restart and disagree across workers. README owns operations.
+- **Session boundaries invalidate frontend state.** Logout clears credentials
+  immediately; login/logout/401 clear query and ETag caches. Requests and refreshes
+  from an earlier session cannot restore its state.
+- **Proxy trust starts at the bundled nginx edge.** Discard incoming forwarded-IP
+  chains by default so clients cannot choose their rate-limit identity. Deployments
+  with another proxy must explicitly configure trusted peers.
+- **Rack PATCH validates the resulting layout.** Omitted devices retain their
+  positions, so overlap checks include them; shrinking cannot truncate occupancy.
+
+## Security remediation and CI gate (2026-10-01)
+
+- **Dependency migrations are authorized.** Replace the incompatible legacy
+  SNMP driver and upgrade the frontend toolchain/router rather than excluding
+  advisory IDs. Preserve scan behavior and routing with import, transport and UI
+  regression checks.
+- **Security failure blocks image builds and publication.** The workflow must
+  require successful dependency and static scans before either Docker job. Scan
+  errors also block; dependency policy includes development packages and every
+  reported severity. README owns the concrete commands and operating contract.
+- **Intentional SNMP compatibility is explicit.** NetMap continues supporting
+  user-selected v2c and v3 without privacy. Only the corresponding Bandit
+  compatibility branches may carry rule-specific rationale; no global rule or
+  dependency-advisory suppression. Recommend SNMPv3 authPriv for deployments.
+- **Redis failure cannot create a second local scan owner.** Local locks are
+  reserved for intentionally Redis-free operation; configured outages fail closed.
+  Scan tasks own and drain their network/finalization work, with lease checks at
+  transaction boundaries. Redis/SQL atomic fencing remains a separate design.
+- **Live sockets share a bounded revalidation deadline.** A watchdog covers idle
+  connections while broadcasts reuse the same check deadline. Single-use tickets
+  are not consumed twice. Redis I/O has finite timeouts so outages cannot leave
+  authentication checks waiting indefinitely.
+
+## UI redesign direction (2026-10-05)
+
+- **Visual language follows Billio (warm paper, ink navy, terracotta accent).** The
+  previous palette was stock Tailwind slate/cyan and read as a generic admin template.
+  Light "paper" is the default theme; dark is a derived "ink night" variant.
+- **Typography stays plain: system font stack, no web fonts.** Character comes from
+  color, layout and the map, not a display face; also drops the Google Fonts dependency.
+- **Prototype first.** A /styleguide page and the redesigned dashboard are reviewed
+  before the shell, map, racks and motion are rebuilt.

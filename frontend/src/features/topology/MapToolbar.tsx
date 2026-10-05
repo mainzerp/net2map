@@ -118,7 +118,7 @@ export default function MapToolbar({
       </div>
 
       {/* Search */}
-      <div ref={searchRef} className="relative w-56">
+      <div ref={searchRef} className="relative w-full sm:w-56">
         <Input
           value={query}
           placeholder="Search device (name / ip)..."
@@ -136,6 +136,11 @@ export default function MapToolbar({
             }
           }}
         />
+        {open && query.trim() && matches.length === 0 && (
+          <div role="status" className="absolute left-0 right-0 top-full mt-1 z-50 rounded-md border border-line bg-panel px-3 py-2 text-xs text-muted shadow-lg">
+            No matching devices
+          </div>
+        )}
         {open && matches.length > 0 && (
           <div className="absolute left-0 right-0 top-full mt-1 z-50 rounded-md border border-line bg-panel shadow-lg overflow-hidden">
             {matches.map(d => (
@@ -160,7 +165,7 @@ export default function MapToolbar({
           {racks.map(r => {
             const active = !filters.racks || filters.racks.has(r.id);
             return (
-              <button key={r.id} type="button" onClick={() => toggleRack(r.id)} className={chipClass(active)}>
+              <button key={r.id} type="button" aria-pressed={active} onClick={() => toggleRack(r.id)} className={chipClass(active)}>
                 {r.label}
               </button>
             );
@@ -176,6 +181,7 @@ export default function MapToolbar({
               <button
                 key={c.id}
                 type="button"
+                aria-pressed={active}
                 onClick={() => toggleClass(c.id)}
                 className={chipClass(active)}
                 style={active ? { borderColor: c.color, color: c.color } : undefined}
@@ -194,14 +200,14 @@ export default function MapToolbar({
         <button
           type="button"
           onClick={clearFilters}
-          className="text-[9px] px-2 py-0.5 rounded border border-danger text-danger hover:bg-danger hover:text-white transition-colors cursor-pointer"
+          className="text-[9px] px-2 py-0.5 rounded border border-danger text-danger hover:bg-danger-soft transition-colors cursor-pointer"
         >
           Clear filters
         </button>
       )}
 
       {/* Actions + staleness */}
-      <div className="ml-auto flex items-center gap-2 shrink-0">
+      <div className="ml-auto flex items-center gap-2 flex-wrap">
         <span className="text-[10px] text-muted" title="Topology data freshness">
           updated {formatAge(updatedAt, now)}
         </span>

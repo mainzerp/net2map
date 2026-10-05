@@ -5,15 +5,17 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Backlog
 
-- Remediate 2026-09 deep code review · priority: P0 · area: full-stack
-  Source: docs/SubAgent/CODE_REVIEW_2026-09.md (40 findings, evidence verified).
-  Wave 1 (security quick wins): map-bg auth bypass, refresh revocation bypass,
-  token revocation on user disable/delete, IP validator on update, export role
-  gates, delete Port.jsx/main.jsx.
-  Wave 2: scan lock owner-id + heartbeat, retry/status ordering, retire sync
-  POST /api/scan, base64url token refresh fix, WS terminal states.
-  Verify: ruff + backend pytest + frontend typecheck/tests; re-check findings
-  by file:line from the report.
+- Persistent database fencing across Redis lease changes · priority: P2 · area: backend
+  Observed lease loss, missing-client split brain and orphan finalizers are fixed
+  in the security follow-up. Commit/post-flush checks do not provide an atomic
+  transaction spanning Redis and SQL; a persistent fencing design is separate work.
+  Verify: pause a commit across lease expiry/reacquisition and prove stale writes
+  are rejected by the database, including concurrent PostgreSQL workers.
+- Reconcile remaining historical review findings · priority: P2 · area: full-stack
+  Reports: docs/SubAgent/CODE_REVIEW_2026-09.md and CODE_REVIEW_2026-10-01.md.
+  September fixes and the October review are tracked in Testing; do not repeat
+  already-fixed auth/heartbeat/frontend work. Revalidate historical residuals
+  before promoting new changes; verify each against current code and regression tests.
 - API versioning strategy · priority: P1 · area: backend
   Outcome: versioned API surface that can evolve backward-compatibly.
   Verify: tests for versioned routes + VERSION.md entry.
@@ -39,6 +41,34 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
+- UI redesign prototype "Cartography" (Billio palette) · priority: P1 · area: frontend
+  Done: paper-light default + ink-night dark tokens (soft/sidebar/radius/shadow),
+  system font, lucide-react 1.48.0 nav icons, hardcoded chrome colors removed,
+  /styleguide page, dashboard rebuilt (status sentence, scan bar, attention list).
+  Passed: frontend typecheck, 65 vitest tests, build. Not yet viewed in a browser.
+  User review: `cd frontend && npm run dev` (backend on :8000) -> /styleguide and /
+  in both themes. Then decide phases 2-5 (shell + Ctrl+K palette, map, racks, motion).
+  Open polish: 22 ad-hoc rounded-lg panels, bg-black overlays, vendor label contrast.
+
+- Close remaining security gaps and gate CI builds (2026-10-01) · priority: P1 · area: security
+  SNMP/frontend migrations, live WebSocket revocation and scan cleanup are implemented.
+  Passed: zero dependency advisories, Bandit medium/high+parse checks, 448 backend
+  tests/Ruff, Node24 frontend typecheck/64 tests/build/browser and workflow gating.
+  Both Docker images build; all 448 backend tests also pass inside Python3.12 image.
+  Report: docs/SubAgent/SECURITY_REMEDIATION_2026-10-01.md; VERSION.md v2.1.2 unreleased.
+  User verification: hosted GitHub security gate after push, real SNMPv2c/v3 scans,
+  token revoke on live socket, populated map/rack and local Node24 development.
+  No commit, push, publication or service restart performed.
+- Deep code review, security hardening and UI polish (2026-10-01) · priority: P1 · area: full-stack
+  Fixed auth/session/WS defects, proxy headers, Redis persistence, scan retry and
+  cancellation defects, ignored scans, rack overlap/shrink and responsive/focus UI.
+  Report: docs/SubAgent/CODE_REVIEW_2026-10-01.md; unreleased VERSION.md v2.1.2.
+  Passed: isolated Python 3.12 actual requirements (420 tests), ruff, frontend
+  typecheck/64 tests/build, mocked Edge responsive/focus smoke, nginx headers/config
+  and Compose config. Dependency/runtime follow-up is tracked in the security
+  remediation card; the original report is a historical snapshot.
+  User review: login/logout, real SNMP scan/cancel, populated /map and /racks,
+  mobile navigation and light/dark themes. No deployment or release performed.
 - Code review fixes (session 2026-09-28) · priority: P1 · area: full-stack
   Backend: refresh-window revocation gap closed (TTL + REFRESH_GRACE_SECONDS,
   <= comparison), session revocation on role/deactivate/delete, WS legacy-token
@@ -51,7 +81,7 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
   drag-safe topology rebuild, useScanRuns limit key, rack clamp, vite ws proxy,
   CSP tightened, refresh-promise dedupe, CSS.escape, comparator NaN, cancel
   error toast, port-key fallback, reorder guard, bg version cache-bust.
-  Overlaps the "Remediate 2026-09 deep code review" backlog card.
+  Historical residuals are tracked under "Reconcile remaining historical review findings".
   Verify: backend 390 tests + ruff green, frontend 56 tests + tsc clean; user
   should sanity-check login/logout, a real scan run and the /network table.
   User verification pending.

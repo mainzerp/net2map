@@ -5,6 +5,7 @@ import useNetmapStore from "../../store";
 import { queryKeys, useInvalidateApi, useMapBackground, useMapSettings, type MapSettings } from "../../hooks/api";
 import { useToast } from "../ToastProvider";
 import { debounce } from "../../utils/debounce";
+import { THEME_MAP_BG_SENTINEL, resolveMapBgColor } from "../../theme/mapBackground";
 import { Button, Card } from "../ui";
 import { SectionHeader, TabError, TabLoading } from "./shared";
 
@@ -22,7 +23,8 @@ function MapSettingsTabContent() {
 
   const opacity = settings?.opacity ?? 0.3;
   const scale = settings?.scale ?? 1;
-  const bgColor = settings?.bg_color ?? "#020817";
+  const bgColor = settings?.bg_color ?? THEME_MAP_BG_SENTINEL;
+  const followsTheme = resolveMapBgColor(bgColor) === "";
 
   // Debounced saver: sliders and the color picker fire per tick, so coalesce
   // them into one PUT after the user pauses.
@@ -106,12 +108,18 @@ function MapSettingsTabContent() {
             onChange={(e) => changeSetting({ bg_color: e.target.value })}
             className="w-10 h-8 p-0.5 border border-line-strong rounded cursor-pointer bg-transparent"
           />
-          <span className="text-muted text-[11px] font-mono min-w-9">{bgColor}</span>
-          <Button size="sm" onClick={() => changeSetting({ bg_color: "#020817" })}>Reset dark</Button>
+          <span className="text-muted text-[11px] font-mono min-w-9">
+            {followsTheme ? "theme surface" : bgColor}
+          </span>
+          <Button size="sm" disabled={followsTheme} onClick={() => changeSetting({ bg_color: THEME_MAP_BG_SENTINEL })}>
+            Follow theme
+          </Button>
+          {/* White is a user data color for floor plans, not UI chrome */}
           <Button size="sm" onClick={() => changeSetting({ bg_color: "#ffffff" })}>White</Button>
         </div>
         <div className="text-muted text-[10px] mt-2">
-          Set to match your floor plan or office background for a seamless look.
+          Set to match your floor plan or office background for a seamless look. "Follow theme" uses the
+          current light or dark surface color.
         </div>
       </Card>
 

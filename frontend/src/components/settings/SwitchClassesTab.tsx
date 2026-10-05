@@ -23,7 +23,9 @@ interface ClassesTabContentProps {
   newEntryTrigger: number;
 }
 
-const EMPTY_CLASS_FORM: ClassForm = { label: "", description: "", color: "#3b82f6", allow_outside_rack: false };
+// Default for a user-chosen class color (data, not UI chrome): the palette ink
+// blue from theme/visual.ts. A native color input needs a hex value.
+const EMPTY_CLASS_FORM: ClassForm = { label: "", description: "", color: "#5a86b8", allow_outside_rack: false };
 
 function ClassesTabContent({ newEntryTrigger }: ClassesTabContentProps) {
   const { data: classes = [], isLoading } = useSwitchClasses();

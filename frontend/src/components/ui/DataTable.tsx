@@ -166,7 +166,7 @@ export function DataTable<T>({
   const visible = paginated ? processed.slice(start, start + pageSize) : processed;
 
   return (
-    <div className="bg-panel border border-line rounded-lg overflow-hidden">
+    <div className="bg-panel border border-line rounded-card shadow-card overflow-hidden">
       {(searchable || toolbar != null) && (
         <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-line">
           {searchable && (

@@ -85,16 +85,46 @@ describe("DashboardPage", () => {
       expect(screen.getByText("Dashboard")).toBeTruthy();
     });
 
-    // Stat cards render with deep-link values ("Switches" also matches the
-    // rack table header, so allow multiple matches there)
-    expect(screen.getAllByText("Switches").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Ports").length).toBeGreaterThan(0);
-    expect(screen.getByText("Links")).toBeTruthy();
-    expect(screen.getByText("Racks")).toBeTruthy();
-    expect(screen.getByText("Endpoints")).toBeTruthy();
+    // Headline status sentence derived from the data (1 online, 1 offline)
+    const headline = screen.getByRole("heading", { level: 1 });
+    expect(headline.textContent).toBe("1 switch online. 1 needs attention.");
+
+    // Secondary fact line renders the key counts as deep links
+    await waitFor(() => {
+      expect(screen.getByRole("link", { name: "0 endpoints" })).toBeTruthy();
+    });
+    expect(screen.getByRole("link", { name: "2 devices" }).getAttribute("href")).toBe("/network");
+    expect(screen.getByRole("link", { name: "1 link" }).getAttribute("href")).toBe("/map");
+    expect(screen.getByRole("link", { name: "2/3 ports up" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "1 rack" })).toBeTruthy();
+
+    // Single primary action and the composition panel
+    expect(screen.getByRole("button", { name: "Start scan" })).toBeTruthy();
+    expect(screen.getByText("Composition")).toBeTruthy();
 
     // Rack overview renders the rack label
     expect(screen.getByText("Rack-A")).toBeTruthy();
+  });
+
+  it("shows the all-online headline and empty attention state", async () => {
+    mockApiGet.mockImplementation((path: string) => {
+      if (path === "/api/topology") {
+        return Promise.resolve({
+          ...topoData,
+          nodes: topoData.nodes.map((n) => ({ ...n, ping_status: "online" })),
+        });
+      }
+      if (path === "/api/stats") return Promise.resolve(statsData);
+      if (path === "/api/endpoints") return Promise.resolve([]);
+      if (path.startsWith("/api/scan-runs")) return Promise.resolve([]);
+      return Promise.resolve({});
+    });
+    renderWithRouter(<DashboardPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("All 2 switches online.");
+    });
+    expect(screen.getByText("All devices reachable")).toBeTruthy();
   });
 
   it("lists offline devices in the attention card", async () => {
@@ -105,9 +135,9 @@ describe("DashboardPage", () => {
       expect(screen.getByText("Attention needed")).toBeTruthy();
     });
 
-    // switch-2 is offline and shows up; the switches-down stat card shows 1
+    // switch-2 is offline and shows up with an icon+word status chip
     expect(screen.getByText("switch-2")).toBeTruthy();
-    expect(screen.getByText("Switches down")).toBeTruthy();
+    expect(screen.getByText("Offline")).toBeTruthy();
   });
 
   it("shows error state with retry when the topology fetch fails", async () => {

@@ -118,7 +118,7 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
                  : (isLinked && !hl) ? "var(--primary)"
                  : active ? "rgba(0,0,0,0.75)"
                  : "var(--muted)",
-            fontFamily:"monospace", lineHeight:1, userSelect:"none",
+            fontFamily:"var(--font-mono)", lineHeight:1, userSelect:"none",
           }}>{port.if_index}</span>
         </div>
       </div>

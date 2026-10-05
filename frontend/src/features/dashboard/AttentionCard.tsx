@@ -1,53 +1,154 @@
 import { useNavigate } from "react-router-dom";
-import { Card, StatusDot } from "../../components/ui";
+import { ArrowRight, CircleCheck, CircleX, EyeOff, TriangleAlert, type LucideIcon } from "lucide-react";
 import { formatTimestamp } from "../../utils/datetime";
-import type { TopologyNode } from "../../types";
+import type { ScanRun, TopologyNode } from "../../types";
 
-// Lists devices whose last ping failed plus the count of ignored devices.
-export function AttentionCard({ nodes }: { nodes: TopologyNode[] }) {
+// Primary dashboard block: everything that needs a human look, as rows with an
+// icon+word status chip on a soft background (status never by color alone).
+
+type IssueTone = "danger" | "warning" | "neutral";
+
+const CHIP_CLASS: Record<IssueTone, string> = {
+  danger: "bg-danger-soft text-danger",
+  warning: "bg-warning-soft text-warning",
+  neutral: "bg-panel-2 text-muted",
+};
+
+function StatusChip({ tone, icon: Icon, label }: { tone: IssueTone; icon: LucideIcon; label: string }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 shrink-0 w-[76px] justify-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${CHIP_CLASS[tone]}`}
+    >
+      <Icon size={11} aria-hidden="true" />
+      {label}
+    </span>
+  );
+}
+
+function IssueRow({
+  tone,
+  icon,
+  chip,
+  title,
+  detail,
+  meta,
+  onClick,
+}: {
+  tone: IssueTone;
+  icon: LucideIcon;
+  chip: string;
+  title: React.ReactNode;
+  detail?: React.ReactNode;
+  meta?: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onClick}
+        className="group w-full flex items-center gap-3 text-left px-5 py-3 hover:bg-panel-2/60 cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+      >
+        <StatusChip tone={tone} icon={icon} label={chip} />
+        <span className="flex-1 min-w-0 flex items-baseline gap-2">
+          <span className="text-xs font-semibold text-primary truncate">{title}</span>
+          {detail != null && <span className="text-[11px] text-muted font-mono truncate">{detail}</span>}
+        </span>
+        {meta != null && <span className="hidden sm:inline text-[11px] text-muted whitespace-nowrap tabular-nums">{meta}</span>}
+        <ArrowRight
+          size={14}
+          aria-hidden="true"
+          className="shrink-0 text-muted opacity-0 group-hover:opacity-100 transition-opacity"
+        />
+      </button>
+    </li>
+  );
+}
+
+export interface AttentionCardProps {
+  nodes: TopologyNode[];
+  lastRun?: ScanRun | null;
+  className?: string;
+}
+
+export function AttentionCard({ nodes, lastRun = null, className = "" }: AttentionCardProps) {
   const navigate = useNavigate();
   const offline = nodes.filter((n) => !n.ignored && n.ping_status === "offline");
   const ignoredCount = nodes.filter((n) => n.ignored).length;
+  const unassignedCount = nodes.filter((n) => !n.ignored && !n.rack_id).length;
+  const lastScanFailed = lastRun != null && (lastRun.status === "failed" || lastRun.status === "error");
+
+  const issueCount = offline.length + (lastScanFailed ? 1 : 0) + (unassignedCount > 0 ? 1 : 0);
+  const hasRows = issueCount > 0 || ignoredCount > 0;
 
   return (
-    <Card title="Attention needed" className="h-full">
-      {offline.length === 0 && ignoredCount === 0 ? (
-        <div className="flex items-center gap-2 text-xs text-success">
-          <StatusDot status="up" />
-          All devices reachable
+    <section
+      aria-labelledby="attention-heading"
+      className={`bg-panel border border-line rounded-card shadow-card overflow-hidden ${className}`}
+    >
+      <div className="flex items-baseline justify-between gap-3 px-5 pt-4 pb-3">
+        <h2 id="attention-heading" className="m-0 text-sm font-semibold text-primary">
+          Attention needed
+        </h2>
+        <span className="text-[11px] text-muted tabular-nums">
+          {issueCount === 0 ? "Nothing open" : `${issueCount} open item${issueCount === 1 ? "" : "s"}`}
+        </span>
+      </div>
+
+      {!hasRows ? (
+        <div className="flex flex-col items-center justify-center gap-2 px-5 py-12 text-center border-t border-line">
+          <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-success-soft text-success">
+            <CircleCheck size={20} strokeWidth={1.75} aria-hidden="true" />
+          </span>
+          <div className="text-sm font-semibold text-primary">All devices reachable</div>
+          <div className="text-[11px] text-muted max-w-xs">
+            No offline switches, no failed scans and every switch is placed in a rack. Nothing needs your attention.
+          </div>
         </div>
       ) : (
-        <div className="flex flex-col gap-1">
-          {offline.map((d) => (
-            <button
-              key={d.id}
-              type="button"
-              onClick={() => navigate("/network?status=down")}
-              className="flex items-center justify-between gap-2 text-left rounded-md px-2 py-1.5 hover:bg-panel-2 cursor-pointer"
-            >
-              <span className="flex items-center gap-2 min-w-0">
-                <StatusDot status="down" />
-                <span className="text-xs font-semibold text-primary truncate">
-                  {d.sys_name || d.hostname || d.ip}
-                </span>
-                <span className="text-[11px] text-muted font-mono">{d.ip}</span>
-              </span>
-              <span className="text-[10px] text-muted whitespace-nowrap">
-                last seen {formatTimestamp(d.last_seen as string | null)}
-              </span>
-            </button>
-          ))}
-          {ignoredCount > 0 && (
-            <button
-              type="button"
-              onClick={() => navigate("/network")}
-              className="text-left text-[11px] text-muted hover:text-primary px-2 py-1 cursor-pointer"
-            >
-              {ignoredCount} ignored device{ignoredCount === 1 ? "" : "s"} excluded from scans
-            </button>
+        <ul className="m-0 p-0 list-none divide-y divide-line border-t border-line">
+          {lastScanFailed && lastRun && (
+            <IssueRow
+              tone="danger"
+              icon={CircleX}
+              chip="Failed"
+              title="Last scan failed"
+              meta={formatTimestamp(lastRun.finished_at ?? lastRun.started_at)}
+              onClick={() => navigate("/settings/scan")}
+            />
           )}
-        </div>
+          {offline.map((d) => (
+            <IssueRow
+              key={d.id}
+              tone="danger"
+              icon={CircleX}
+              chip="Offline"
+              title={d.sys_name || d.hostname || d.ip}
+              detail={d.ip}
+              meta={`last seen ${formatTimestamp(d.last_seen as string | null)}`}
+              onClick={() => navigate("/network?status=down")}
+            />
+          ))}
+          {unassignedCount > 0 && (
+            <IssueRow
+              tone="warning"
+              icon={TriangleAlert}
+              chip="No rack"
+              title={`${unassignedCount} switch${unassignedCount === 1 ? "" : "es"} not assigned to a rack`}
+              onClick={() => navigate("/network")}
+            />
+          )}
+          {ignoredCount > 0 && (
+            <IssueRow
+              tone="neutral"
+              icon={EyeOff}
+              chip="Ignored"
+              title={`${ignoredCount} ignored device${ignoredCount === 1 ? "" : "s"} excluded from scans`}
+              onClick={() => navigate("/network")}
+            />
+          )}
+        </ul>
       )}
-    </Card>
+    </section>
   );
 }
