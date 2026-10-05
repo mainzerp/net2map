@@ -71,6 +71,8 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Done
 
+- Release v2.2.0 (includes v2.1.2) · priority: done · area: release · tag v2.2.0
+  CI green, images ghcr.io/mainzerp/netmap/{backend,frontend}:v2.2.0, GitHub release.
 - Logical topology overlays (STP + VLAN, one color per VLAN id) · priority: done · area: full-stack · v2.2.0
   Limits: Cisco PVST default instance only; intra-rack links get no overlay.
 - Rack device labels beside the rack · priority: done · area: frontend · v2.2.0
