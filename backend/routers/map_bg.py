@@ -86,7 +86,7 @@ def _sanitize_svg(raw: bytes) -> bytes:
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
-@router.post("/api/map-background",
+@router.post("/map-background",
              dependencies=[require_role("admin", "operator")])
 @limiter.limit("5/minute")
 async def upload_map_background(request: Request, file: UploadFile = File(...)):
@@ -120,7 +120,7 @@ async def upload_map_background(request: Request, file: UploadFile = File(...)):
     return {"ok": True, "filename": file.filename, "size": len(contents)}
 
 
-@router.get("/api/map-background")
+@router.get("/map-background")
 def get_map_background(request: Request):
     """Return the stored background image file."""
     # Backgrounds do not need multipart ranges. Bound parsing work even on
@@ -142,7 +142,7 @@ def get_map_background(request: Request):
     )
 
 
-@router.delete("/api/map-background",
+@router.delete("/map-background",
                dependencies=[require_role("admin")])
 def delete_map_background(request: Request):
     """Remove the background image."""
@@ -151,13 +151,13 @@ def delete_map_background(request: Request):
     return {"ok": True}
 
 
-@router.get("/api/map-settings", response_model=MapSettingsOut)
+@router.get("/map-settings", response_model=MapSettingsOut)
 def get_map_settings():
     """Return persisted map background settings (opacity, scale)."""
     return _read_map_settings()
 
 
-@router.put("/api/map-settings", response_model=MapSettingsOut,
+@router.put("/map-settings", response_model=MapSettingsOut,
             dependencies=[require_role("admin", "operator")])
 def update_map_settings(body: MapSettingsUpdate, request: Request):
     """Update map background settings."""

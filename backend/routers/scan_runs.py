@@ -12,7 +12,7 @@ from shared.errors import api_error
 router = APIRouter()
 
 
-@router.get("/api/scan-runs", response_model=List[ScanRunOut])
+@router.get("/scan-runs", response_model=List[ScanRunOut])
 def list_scan_runs(limit: int = 20, db: Session = Depends(get_db)):
     clamped = max(1, min(200, limit))
     # Fetch one extra run so the oldest run in the window can be diffed
@@ -75,7 +75,7 @@ def list_scan_runs(limit: int = 20, db: Session = Depends(get_db)):
     return out
 
 
-@router.get("/api/scan-runs/{run_id}/dry-run-preview")
+@router.get("/scan-runs/{run_id}/dry-run-preview")
 def get_dry_run_preview(run_id: int, db: Session = Depends(get_db)):
     record = db.query(DryRunResult).filter(DryRunResult.scan_run_id == run_id).first()
     if not record:

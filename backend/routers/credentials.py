@@ -34,12 +34,12 @@ def _normalize_mask_sentinels(data: dict) -> None:
             data[field] = ""
 
 
-@router.get("/api/credentials", response_model=List[CredentialOut])
+@router.get("/credentials", response_model=List[CredentialOut])
 def list_credentials(db: Session = Depends(get_db)):
     return db.query(Credential).order_by(Credential.id).all()
 
 
-@router.post("/api/credentials", response_model=CredentialOut, status_code=201,
+@router.post("/credentials", response_model=CredentialOut, status_code=201,
              dependencies=[require_role("admin", "operator")])
 @limiter.limit("10/minute")
 def create_credential(body: CredentialCreate, request: Request, db: Session = Depends(get_db)):
@@ -74,7 +74,7 @@ def create_credential(body: CredentialCreate, request: Request, db: Session = De
     return cred
 
 
-@router.put("/api/credentials/{cred_id}", response_model=CredentialOut,
+@router.put("/credentials/{cred_id}", response_model=CredentialOut,
             dependencies=[require_role("admin", "operator")])
 @limiter.limit("10/minute")
 def update_credential(cred_id: int, body: CredentialUpdate, request: Request, db: Session = Depends(get_db)):
@@ -100,7 +100,7 @@ def update_credential(cred_id: int, body: CredentialUpdate, request: Request, db
     return cred
 
 
-@router.delete("/api/credentials/{cred_id}", status_code=204,
+@router.delete("/credentials/{cred_id}", status_code=204,
                dependencies=[require_role("admin")])
 @limiter.limit("10/minute")
 def delete_credential(cred_id: int, request: Request, db: Session = Depends(get_db)):

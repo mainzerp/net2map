@@ -27,7 +27,7 @@ router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
 
 
-@router.get("/api/config/export", response_model=GlobalConfigExportOut,
+@router.get("/config/export", response_model=GlobalConfigExportOut,
             dependencies=[require_role("admin", "operator")])
 @limiter.limit("10/minute")
 def export_global_config(request: Request, db: Session = Depends(get_db)):
@@ -80,7 +80,7 @@ def export_global_config(request: Request, db: Session = Depends(get_db)):
     return GlobalConfigExportOut(data=json.dumps(payload, ensure_ascii=False, indent=2))
 
 
-@router.post("/api/config/import",
+@router.post("/config/import",
              dependencies=[require_role("admin")])
 def import_global_config(body: GlobalConfigImportRequest, request: Request, db: Session = Depends(get_db)):
     try:

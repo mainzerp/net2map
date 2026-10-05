@@ -19,11 +19,11 @@ limiter = Limiter(key_func=get_remote_address)
 _TERMINAL_JOB_STATUSES = {"finished", "failed", "cancelled", "skipped", "dry_run"}
 
 
-@router.post("/api/scan", response_model=ScanResult, deprecated=True,
+@router.post("/scan", response_model=ScanResult, deprecated=True,
              dependencies=[require_role("admin", "operator")])
 @limiter.limit("2/minute")
 async def run_scan(request: Request):
-    """Synchronous scan execution. Deprecated: use POST /api/scan/jobs instead.
+    """Synchronous scan execution. Deprecated: use POST /api/v1/scan/jobs instead.
 
     Internally this dispatches through the background job path
     (scan_engine.jobs._start_job) and asynchronously polls for completion
@@ -50,7 +50,7 @@ async def run_scan(request: Request):
     api_error(504, "SCAN_TIMEOUT", "Scan did not finish within the polling window")
 
 
-@router.post("/api/scan/jobs",
+@router.post("/scan/jobs",
              dependencies=[require_role("admin", "operator")])
 @limiter.limit("5/minute")
 def start_scan_job(request: Request):
@@ -60,16 +60,16 @@ def start_scan_job(request: Request):
     return result
 
 
-@router.post("/api/scan/dry-run/jobs",
+@router.post("/scan/dry-run/jobs",
              dependencies=[require_role("admin", "operator")])
 @limiter.limit("3/minute")
 def start_dry_run_job(request: Request):
     """Start a background dry-run discovery job. Returns job ID immediately.
-    Poll /api/scan/jobs/{job_id} for results; result will contain a 'preview' key."""
+    Poll /api/v1/scan/jobs/{job_id} for results; result will contain a 'preview' key."""
     return _start_job(dry_run=True)
 
 
-@router.get("/api/scan/jobs/{job_id}")
+@router.get("/scan/jobs/{job_id}")
 def get_scan_job_status(job_id: str):
     state = get_scan_job(job_id)
     if not state:
@@ -84,7 +84,7 @@ def get_scan_job_status(job_id: str):
     }
 
 
-@router.post("/api/scan/jobs/{job_id}/cancel",
+@router.post("/scan/jobs/{job_id}/cancel",
              dependencies=[require_role("admin", "operator")])
 def cancel_scan_job(job_id: str, request: Request):
     state = get_scan_job(job_id)

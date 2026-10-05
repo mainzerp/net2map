@@ -70,7 +70,7 @@ def _endpoint_list_etag(db: Session) -> str:
     return f'"{hashlib.sha256(raw.encode()).hexdigest()[:32]}"'
 
 
-@router.get("/api/endpoints")
+@router.get("/endpoints")
 def list_endpoints(request: Request, db: Session = Depends(get_db)):
     etag = _endpoint_list_etag(db)
     if request.headers.get("if-none-match") == etag:
@@ -91,7 +91,7 @@ def list_endpoints(request: Request, db: Session = Depends(get_db)):
                     headers={"ETag": etag, "Cache-Control": "no-cache"})
 
 
-@router.get("/api/endpoints/{endpoint_id}")
+@router.get("/endpoints/{endpoint_id}")
 def get_endpoint(endpoint_id: int, db: Session = Depends(get_db)):
     ep = (
         db.query(Endpoint)
@@ -108,7 +108,7 @@ def get_endpoint(endpoint_id: int, db: Session = Depends(get_db)):
     return _build_endpoint_out(ep)
 
 
-@router.patch("/api/endpoints/bulk",
+@router.patch("/endpoints/bulk",
               dependencies=[require_role("admin", "operator")])
 def bulk_update_endpoints(body: BulkEndpointUpdate, request: Request,
                           db: Session = Depends(get_db)):
@@ -127,7 +127,7 @@ def bulk_update_endpoints(body: BulkEndpointUpdate, request: Request,
     return {"updated": count}
 
 
-@router.patch("/api/endpoints/{endpoint_id}",
+@router.patch("/endpoints/{endpoint_id}",
               dependencies=[require_role("admin", "operator")])
 def update_endpoint(endpoint_id: int, body: EndpointUpdate, request: Request,
                     db: Session = Depends(get_db)):
@@ -147,7 +147,7 @@ def update_endpoint(endpoint_id: int, body: EndpointUpdate, request: Request,
     return _build_endpoint_out(ep)
 
 
-@router.delete("/api/endpoints/{endpoint_id}",
+@router.delete("/endpoints/{endpoint_id}",
                dependencies=[require_role("admin")])
 def delete_endpoint(endpoint_id: int, request: Request,
                     db: Session = Depends(get_db)):

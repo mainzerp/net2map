@@ -15,12 +15,12 @@ from shared.errors import api_error
 router = APIRouter()
 
 
-@router.get("/api/racks", response_model=List[RackOut])
+@router.get("/racks", response_model=List[RackOut])
 def list_racks(db: Session = Depends(get_db)):
     return db.query(RackModel).order_by(RackModel.id).all()
 
 
-@router.post("/api/racks", response_model=RackOut, status_code=201,
+@router.post("/racks", response_model=RackOut, status_code=201,
              dependencies=[require_role("admin", "operator")])
 def create_rack(body: RackCreate, request: Request, db: Session = Depends(get_db)):
     rack = RackModel(**body.model_dump())
@@ -32,7 +32,7 @@ def create_rack(body: RackCreate, request: Request, db: Session = Depends(get_db
     return rack
 
 
-@router.put("/api/racks/{rack_id}", response_model=RackOut,
+@router.put("/racks/{rack_id}", response_model=RackOut,
             dependencies=[require_role("admin", "operator")])
 def update_rack(rack_id: int, body: RackUpdate, request: Request, db: Session = Depends(get_db)):
     rack = db.query(RackModel).filter(RackModel.id == rack_id).first()
@@ -57,7 +57,7 @@ def update_rack(rack_id: int, body: RackUpdate, request: Request, db: Session = 
     return rack
 
 
-@router.delete("/api/racks/{rack_id}", status_code=204,
+@router.delete("/racks/{rack_id}", status_code=204,
                dependencies=[require_role("admin")])
 def delete_rack(rack_id: int, request: Request, db: Session = Depends(get_db)):
     rack = db.query(RackModel).filter(RackModel.id == rack_id).first()
@@ -71,7 +71,7 @@ def delete_rack(rack_id: int, request: Request, db: Session = Depends(get_db)):
     _bump_topo_version()
 
 
-@router.patch("/api/racks/{rack_id}/layout",
+@router.patch("/racks/{rack_id}/layout",
               dependencies=[require_role("admin", "operator")])
 def update_rack_layout(rack_id: int, body: RackLayoutIn, request: Request, db: Session = Depends(get_db)):
     """Place devices in the rack elevation (1-based U space) in one transaction.

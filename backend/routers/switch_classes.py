@@ -15,12 +15,12 @@ from shared.errors import api_error
 router = APIRouter()
 
 
-@router.get("/api/switch-classes", response_model=List[SwitchClassOut])
+@router.get("/switch-classes", response_model=List[SwitchClassOut])
 def list_switch_classes(db: Session = Depends(get_db)):
     return db.query(SwitchClassModel).order_by(SwitchClassModel.id).all()
 
 
-@router.post("/api/switch-classes", response_model=SwitchClassOut, status_code=201,
+@router.post("/switch-classes", response_model=SwitchClassOut, status_code=201,
              dependencies=[require_role("admin", "operator")])
 def create_switch_class(body: SwitchClassCreate, request: Request, db: Session = Depends(get_db)):
     sc = SwitchClassModel(**body.model_dump())
@@ -32,7 +32,7 @@ def create_switch_class(body: SwitchClassCreate, request: Request, db: Session =
     return sc
 
 
-@router.put("/api/switch-classes/{class_id}", response_model=SwitchClassOut,
+@router.put("/switch-classes/{class_id}", response_model=SwitchClassOut,
             dependencies=[require_role("admin", "operator")])
 def update_switch_class(class_id: int, body: SwitchClassUpdate, request: Request, db: Session = Depends(get_db)):
     sc = db.query(SwitchClassModel).filter(SwitchClassModel.id == class_id).first()
@@ -65,7 +65,7 @@ def update_switch_class(class_id: int, body: SwitchClassUpdate, request: Request
     return sc
 
 
-@router.delete("/api/switch-classes/{class_id}", status_code=204,
+@router.delete("/switch-classes/{class_id}", status_code=204,
                dependencies=[require_role("admin")])
 def delete_switch_class(class_id: int, request: Request, db: Session = Depends(get_db)):
     sc = db.query(SwitchClassModel).filter(SwitchClassModel.id == class_id).first()

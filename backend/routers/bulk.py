@@ -130,7 +130,7 @@ def _serialize_bulk_rows(kind: str, rows: List[dict], fmt: str) -> str:
     return buf.getvalue()
 
 
-@router.get("/api/bulk-export/{kind}", response_model=BulkExportOut,
+@router.get("/bulk-export/{kind}", response_model=BulkExportOut,
             dependencies=[require_role("admin", "operator")])
 @limiter.limit("10/minute")
 def bulk_export(kind: str, request: Request, fmt: str = "json", db: Session = Depends(get_db)):
@@ -182,7 +182,7 @@ def bulk_export(kind: str, request: Request, fmt: str = "json", db: Session = De
     return BulkExportOut(type=kind, format=fmt, data=_serialize_bulk_rows(kind, rows, fmt))
 
 
-@router.post("/api/bulk-import/{kind}", response_model=BulkImportResult,
+@router.post("/bulk-import/{kind}", response_model=BulkImportResult,
              dependencies=[require_role("admin")])
 def bulk_import(kind: str, body: BulkImportRequest, request: Request, db: Session = Depends(get_db)):
     if kind not in {"credentials", "profiles"}:

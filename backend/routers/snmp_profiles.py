@@ -30,12 +30,12 @@ def _normalize_mask_sentinels(data: dict) -> None:
             data[field] = ""
 
 
-@router.get("/api/snmp-profiles", response_model=List[SnmpProfileOut])
+@router.get("/snmp-profiles", response_model=List[SnmpProfileOut])
 def list_snmp_profiles(db: Session = Depends(get_db)):
     return db.query(SnmpProfile).order_by(SnmpProfile.id).all()
 
 
-@router.post("/api/snmp-profiles", response_model=SnmpProfileOut, status_code=201,
+@router.post("/snmp-profiles", response_model=SnmpProfileOut, status_code=201,
              dependencies=[require_role("admin", "operator")])
 def create_snmp_profile(body: SnmpProfileCreate, request: Request, db: Session = Depends(get_db)):
     payload = body.model_dump()
@@ -54,7 +54,7 @@ def create_snmp_profile(body: SnmpProfileCreate, request: Request, db: Session =
     return profile
 
 
-@router.put("/api/snmp-profiles/{profile_id}", response_model=SnmpProfileOut,
+@router.put("/snmp-profiles/{profile_id}", response_model=SnmpProfileOut,
             dependencies=[require_role("admin", "operator")])
 def update_snmp_profile(profile_id: int, body: SnmpProfileUpdate, request: Request, db: Session = Depends(get_db)):
     profile = db.query(SnmpProfile).filter(SnmpProfile.id == profile_id).first()
@@ -82,7 +82,7 @@ def update_snmp_profile(profile_id: int, body: SnmpProfileUpdate, request: Reque
     return profile
 
 
-@router.delete("/api/snmp-profiles/{profile_id}", status_code=204,
+@router.delete("/snmp-profiles/{profile_id}", status_code=204,
                dependencies=[require_role("admin")])
 def delete_snmp_profile(profile_id: int, request: Request, db: Session = Depends(get_db)):
     profile = db.query(SnmpProfile).filter(SnmpProfile.id == profile_id).first()

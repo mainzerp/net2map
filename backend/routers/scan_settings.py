@@ -29,13 +29,13 @@ from shared.file_settings import (
 router = APIRouter()
 
 
-@router.get("/api/scan-settings", response_model=ScanSettingsOut)
+@router.get("/scan-settings", response_model=ScanSettingsOut)
 def get_scan_settings():
     """Return scan execution settings."""
     return _read_scan_settings()
 
 
-@router.put("/api/scan-settings", response_model=ScanSettingsOut,
+@router.put("/scan-settings", response_model=ScanSettingsOut,
             dependencies=[require_role("admin", "operator")])
 def update_scan_settings(body: ScanSettingsUpdate, request: Request):
     """Update scan execution settings."""
@@ -44,13 +44,13 @@ def update_scan_settings(body: ScanSettingsUpdate, request: Request):
     return result
 
 
-@router.get("/api/discovery-ranges", response_model=DiscoveryRangesOut)
+@router.get("/discovery-ranges", response_model=DiscoveryRangesOut)
 def get_discovery_ranges(db: Session = Depends(get_db)):
     """Return configured discovery scan ranges."""
     return {"ranges": _read_discovery_ranges(db)}
 
 
-@router.put("/api/discovery-ranges", response_model=DiscoveryRangesOut,
+@router.put("/discovery-ranges", response_model=DiscoveryRangesOut,
             dependencies=[require_role("admin", "operator")])
 def update_discovery_ranges(body: DiscoveryRangesUpdate, request: Request, db: Session = Depends(get_db)):
     """Save discovery scan ranges (CIDR notation or single IPs)."""
@@ -79,13 +79,13 @@ def update_discovery_ranges(body: DiscoveryRangesUpdate, request: Request, db: S
     return {"ranges": validated}
 
 
-@router.get("/api/dns-settings", response_model=DnsSettingsOut)
+@router.get("/dns-settings", response_model=DnsSettingsOut)
 def get_dns_settings():
     """Return configured DNS servers for reverse lookups."""
     return _read_dns_settings()
 
 
-@router.put("/api/dns-settings", response_model=DnsSettingsOut,
+@router.put("/dns-settings", response_model=DnsSettingsOut,
             dependencies=[require_role("admin", "operator")])
 def update_dns_settings(body: DnsSettingsUpdate, request: Request):
     """Update configured DNS servers for reverse lookups."""

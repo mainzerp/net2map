@@ -34,7 +34,7 @@ router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
 
 
-@router.post("/api/auth/login", response_model=TokenResponse)
+@router.post("/auth/login", response_model=TokenResponse)
 @limiter.limit("5/minute")
 def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
     user = db.query(User).filter(
@@ -52,12 +52,12 @@ def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
     return TokenResponse(access_token=token, role=user.role, username=user.username)
 
 
-@router.get("/api/auth/me")
+@router.get("/auth/me")
 def get_current_user(request: Request):
     return getattr(request.state, "user", {"role": "viewer", "username": "anonymous"})
 
 
-@router.post("/api/auth/ws-ticket")
+@router.post("/auth/ws-ticket")
 def create_ws_ticket(request: Request):
     """Issue a short-lived single-use ticket for WebSocket authentication.
 
@@ -82,7 +82,7 @@ def create_ws_ticket(request: Request):
     return {"ticket": ticket}
 
 
-@router.post("/api/auth/refresh", response_model=TokenResponse)
+@router.post("/auth/refresh", response_model=TokenResponse)
 @limiter.limit("10/minute")
 def refresh_token(request: Request, db: Session = Depends(get_db)):
     """Refresh a valid (or recently-expired) JWT token.
@@ -133,7 +133,7 @@ def refresh_token(request: Request, db: Session = Depends(get_db)):
     return TokenResponse(access_token=new_token, role=user.role, username=user.username)
 
 
-@router.post("/api/users", response_model=UserOut, status_code=201,
+@router.post("/users", response_model=UserOut, status_code=201,
              dependencies=[require_role("admin")])
 @limiter.limit("10/minute")
 def create_user(body: UserCreate, request: Request, db: Session = Depends(get_db)):
@@ -157,7 +157,7 @@ def create_user(body: UserCreate, request: Request, db: Session = Depends(get_db
     return user
 
 
-@router.get("/api/users", response_model=List[UserOut],
+@router.get("/users", response_model=List[UserOut],
             dependencies=[require_role("admin")])
 def list_users(db: Session = Depends(get_db)):
     return db.query(User).order_by(User.id).all()
@@ -178,7 +178,7 @@ def _guard_admin_lockout(request: Request, db: Session, user: User, removes_admi
         api_error(400, "LAST_ADMIN", "Cannot remove the last active admin account")
 
 
-@router.put("/api/users/{user_id}", response_model=UserOut,
+@router.put("/users/{user_id}", response_model=UserOut,
             dependencies=[require_role("admin")])
 @limiter.limit("10/minute")
 def update_user(user_id: int, body: UserUpdate, request: Request, db: Session = Depends(get_db)):
@@ -214,7 +214,7 @@ def update_user(user_id: int, body: UserUpdate, request: Request, db: Session = 
     return user
 
 
-@router.delete("/api/users/{user_id}", status_code=204,
+@router.delete("/users/{user_id}", status_code=204,
                dependencies=[require_role("admin")])
 @limiter.limit("10/minute")
 def delete_user(user_id: int, request: Request, db: Session = Depends(get_db)):
@@ -232,7 +232,7 @@ def delete_user(user_id: int, request: Request, db: Session = Depends(get_db)):
               {"username": username, "sessions_revoked": True})
 
 
-@router.post("/api/auth/logout")
+@router.post("/auth/logout")
 def logout_token(request: Request):
     """Blacklist the current token so it can no longer be used."""
     auth_header = request.headers.get("authorization", "")
@@ -253,7 +253,7 @@ def logout_token(request: Request):
     return {"status": "ok"}
 
 
-@router.post("/api/auth/revoke-all", dependencies=[require_role("admin")])
+@router.post("/auth/revoke-all", dependencies=[require_role("admin")])
 def revoke_all_sessions(request: Request, user_id: Optional[int] = Body(None, embed=True)):
     """Revoke all active sessions for a user (admin only).
 

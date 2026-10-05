@@ -17,12 +17,12 @@ router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
 
 
-@router.get("/api/settings", response_model=List[AppSettingOut])
+@router.get("/settings", response_model=List[AppSettingOut])
 def list_settings(db: Session = Depends(get_db)):
     return db.query(AppSetting).all()
 
 
-# Keys that may be written via PUT /api/settings/{key}. Covers every key read
+# Keys that may be written via PUT /api/v1/settings/{key}. Covers every key read
 # by the backend (scheduler, tasks, scan/dns/map settings) or written by the
 # frontend; unknown keys are rejected to prevent settings-table pollution.
 ALLOWED_SETTING_KEYS = {
@@ -42,7 +42,7 @@ ALLOWED_SETTING_KEYS = {
 }
 
 
-@router.put("/api/settings/{key}", response_model=AppSettingOut,
+@router.put("/settings/{key}", response_model=AppSettingOut,
             dependencies=[require_role("admin", "operator")])
 @limiter.limit("10/minute")
 def update_setting(key: str, body: AppSettingUpdate, request: Request, db: Session = Depends(get_db)):
@@ -60,7 +60,7 @@ def update_setting(key: str, body: AppSettingUpdate, request: Request, db: Sessi
     return setting
 
 
-@router.get("/api/stats")
+@router.get("/stats")
 def get_stats(db: Session = Depends(get_db)):
     device_count = db.query(Device).count()
     port_count = db.query(Port).count()

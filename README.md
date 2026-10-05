@@ -94,14 +94,27 @@ Optional kann die Backend-URL über `VITE_API_URL` gesetzt werden.
 3. Geräte, Links und Racks in der Map prüfen
 4. Bei Bedarf Vendor/Modell pro Gerät manuell korrigieren
 
+## API-Versionierung
+
+- Kanonischer Präfix der Backend-API ist `/api/v1` (z. B. `GET /api/v1/devices`).
+  Die OpenAPI-Dokumentation (`/docs`) listet ausschließlich die `/api/v1`-Pfade.
+- Der unversionierte Präfix `/api/...` bleibt als **veralteter Alias** erhalten und
+  liefert identische Antworten. Jede Antwort darüber enthält zusätzlich
+  `Deprecation: true` und `Link: </api/v1/...>; rel="successor-version"` (gleicher
+  Restpfad inklusive Query-String). Neue Clients sollten nur `/api/v1` verwenden.
+- Unversioniert bleiben `GET /health`, `GET /metrics` und der WebSocket
+  `/ws/scan-progress`.
+- Das Frontend arbeitet intern mit logischen `/api/...`-Pfaden und bildet sie zentral
+  in `frontend/src/api.ts` auf `/api/v1/...` ab.
+
 ## Scan-Settings und Metriken
 
 - Die Anzahl paralleler SNMP-Abfragen ist in der UI unter `Settings -> Scan` konfigurierbar.
-- Backend-API für Scan-Worker: `GET/PUT /api/scan-settings` mit `max_workers`.
+- Backend-API für Scan-Worker: `GET/PUT /api/v1/scan-settings` mit `max_workers`.
 - DNS-Resolver für PTR-Lookups sind in der UI unter `Settings -> DNS` konfigurierbar.
-- Backend-API für DNS-Server: `GET/PUT /api/dns-settings` mit `servers` (IP-Liste).
+- Backend-API für DNS-Server: `GET/PUT /api/v1/dns-settings` mit `servers` (IP-Liste).
 
-Das Scan-Ergebnis (`POST /api/scan`) enthält zusätzliche Laufzeitdaten:
+Das Scan-Ergebnis (`POST /api/v1/scan`) enthält zusätzliche Laufzeitdaten:
 
 - `max_workers`: effektiv verwendete Worker-Anzahl
 - `total_duration_ms`: Gesamtdauer für den Scanlauf

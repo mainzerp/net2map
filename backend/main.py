@@ -37,6 +37,12 @@ from routers import (
     ws,
 )
 from scan_engine import _background_scheduler
+from shared.api_version import (
+    API_LEGACY_PREFIX,
+    API_V1_PREFIX,
+    LegacyApiDeprecationMiddleware,
+    metrics_route_label,
+)
 from shared.auth import _require_auth
 from shared.metrics import REQUEST_LATENCY, REQUEST_TOTAL
 
@@ -106,10 +112,12 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         start = time.perf_counter()
         response = await call_next(request)
         duration = time.perf_counter() - start
-        # Label with the route template (e.g. /api/users/{user_id}) instead of
-        # the raw path to bound Prometheus series cardinality.
+        # Label with the route template (e.g. /api/v1/users/{user_id}) instead of
+        # the raw path to bound Prometheus series cardinality. Legacy /api alias
+        # templates are folded into their /api/v1 twin so both report one series.
         route = request.scope.get("route")
-        endpoint = getattr(route, "path", None) or "unmatched"
+        template = getattr(route, "path", None)
+        endpoint = metrics_route_label(request.scope["path"], template) if template else "unmatched"
         REQUEST_LATENCY.labels(method=request.method, endpoint=endpoint).observe(duration)
         REQUEST_TOTAL.labels(method=request.method, endpoint=endpoint, status=response.status_code).inc()
         return response
@@ -135,26 +143,41 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 app.add_middleware(MetricsMiddleware)
 if app_settings.request_log_enabled:
     app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(LegacyApiDeprecationMiddleware)
 
+# Unversioned infrastructure routes: GET /health and WebSocket /ws/scan-progress.
 app.include_router(health.router)
-app.include_router(settings.router)
-app.include_router(credentials.router)
-app.include_router(snmp_profiles.router)
-app.include_router(racks.router)
-app.include_router(switch_classes.router)
-app.include_router(switch_models.router)
-app.include_router(scan.router)
-app.include_router(scan_runs.router)
-app.include_router(topology.router)
-app.include_router(map_bg.router)
-app.include_router(scan_settings.router)
-app.include_router(bulk.router)
-app.include_router(config.router)
-app.include_router(logs.router)
-app.include_router(auth.router)
-app.include_router(audit.router)
 app.include_router(ws.router)
-app.include_router(endpoints.router)
+
+# Routers whose paths are version-relative (e.g. "/devices").
+API_ROUTERS = (
+    settings.router,
+    credentials.router,
+    snmp_profiles.router,
+    racks.router,
+    switch_classes.router,
+    switch_models.router,
+    scan.router,
+    scan_runs.router,
+    topology.router,
+    map_bg.router,
+    scan_settings.router,
+    bulk.router,
+    config.router,
+    logs.router,
+    auth.router,
+    audit.router,
+    endpoints.router,
+)
+
+# Canonical v1 mount first: Starlette matches routes in registration order, so
+# no legacy "/api/..." route can ever shadow an "/api/v1/..." route.
+for _api_router in API_ROUTERS:
+    app.include_router(_api_router, prefix=API_V1_PREFIX)
+# Deprecated un-versioned alias, hidden from OpenAPI. Deprecation/Link headers
+# are added by LegacyApiDeprecationMiddleware.
+for _api_router in API_ROUTERS:
+    app.include_router(_api_router, prefix=API_LEGACY_PREFIX, include_in_schema=False)
 
 
 @app.get("/metrics", include_in_schema=False)

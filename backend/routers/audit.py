@@ -14,7 +14,7 @@ from shared.errors import api_error
 router = APIRouter()
 
 
-@router.get("/api/audit-logs", response_model=List[AuditLogOut],
+@router.get("/audit-logs", response_model=List[AuditLogOut],
             dependencies=[require_role("admin")])
 def list_audit_logs(limit: int = 100, db: Session = Depends(get_db)):
     if limit < 1 or limit > 500:
@@ -24,7 +24,7 @@ def list_audit_logs(limit: int = 100, db: Session = Depends(get_db)):
     ).limit(limit).all()
 
 
-@router.delete("/api/audit-logs/purge",
+@router.delete("/audit-logs/purge",
                dependencies=[require_role("admin")])
 def purge_audit_logs(days: Optional[int] = None, db: Session = Depends(get_db)):
     retention = days if days is not None else settings.audit_retention_days

@@ -10,6 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.requests import HTTPConnection
 
 from config import settings
+from shared.api_version import api_relative_path
 
 _log = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ JWT_SECRET = settings.jwt_secret or settings.secret_token
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = settings.jwt_expiry_hours
 
-# How long past `exp` a token may still be refreshed (see /api/auth/refresh).
+# How long past `exp` a token may still be refreshed (see /api/v1/auth/refresh).
 # Blacklist/revocation entries must outlive this window, otherwise a revoked
 # token could still be exchanged for a fresh one during the grace period.
 REFRESH_GRACE_SECONDS = 3600
@@ -47,7 +48,19 @@ class _HttpOnlyBearer(HTTPBearer):
 
 _bearer = _HttpOnlyBearer(auto_error=False)
 
-_AUTH_EXEMPT_PATHS = {"/health", "/api/auth/login", "/api/map-background", "/api/auth/refresh"}
+# Non-API paths exempt from authentication (matched verbatim).
+_AUTH_EXEMPT_PATHS = {"/health"}
+# API paths exempt from authentication, relative to the version prefix so that
+# every mount ("/api/v1/...", the legacy "/api/..." alias, future versions)
+# shares one list.
+_AUTH_EXEMPT_API_PATHS = {"/auth/login", "/map-background", "/auth/refresh"}
+
+
+def _is_auth_exempt(path: str) -> bool:
+    if path in _AUTH_EXEMPT_PATHS:
+        return True
+    rel = api_relative_path(path)
+    return rel is not None and rel in _AUTH_EXEMPT_API_PATHS
 
 
 def create_token(user_id: int, username: str, role: str) -> str:
@@ -206,7 +219,7 @@ def _require_auth(request: HTTPConnection, credentials: HTTPAuthorizationCredent
         return  # auth disabled -- startup warning already logged
     # Authorization uses the server-parsed route path, never a URL reconstructed
     # from the untrusted Host header (which may contain path delimiters).
-    if request.scope["path"] in _AUTH_EXEMPT_PATHS:
+    if _is_auth_exempt(request.scope["path"]):
         # Soft auth: a presented token is honored (so role-guarded endpoints on
         # exempt paths still work), but an absent or invalid token is tolerated.
         if credentials:

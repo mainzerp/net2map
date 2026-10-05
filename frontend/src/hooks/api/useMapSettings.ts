@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { api, API, _getAuthHeader } from "../../api";
+import { api, apiUrl, _getAuthHeader } from "../../api";
 import useNetmapStore from "../../store";
 import { queryKeys } from "./keys";
 
@@ -30,9 +30,9 @@ export function useMapBackground() {
   return useQuery<string | null>({
     queryKey: queryKeys.mapBackground,
     queryFn: async () => {
-      const res = await fetch(`${API}/api/map-background`, { headers: _getAuthHeader() });
+      const res = await fetch(apiUrl("/api/map-background"), { headers: _getAuthHeader() });
       if (!res.ok) return null;
-      return `${API}/api/map-background?v=${useNetmapStore.getState().bgVersion}`;
+      return `${apiUrl("/api/map-background")}?v=${useNetmapStore.getState().bgVersion}`;
     },
   });
 }

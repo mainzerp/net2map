@@ -1,6 +1,6 @@
 import React, { useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, API, _getAuthHeader, extractErrorMessage } from "../../api";
+import { api, apiUrl, _getAuthHeader, extractErrorMessage } from "../../api";
 import useNetmapStore from "../../store";
 import { queryKeys, useInvalidateApi, useMapBackground, useMapSettings, type MapSettings } from "../../hooks/api";
 import { useToast } from "../ToastProvider";
@@ -55,7 +55,7 @@ function MapSettingsTabContent() {
     mutationFn: async (file: File) => {
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch(`${API}/api/map-background`, {
+      const res = await fetch(apiUrl("/api/map-background"), {
         method: "POST",
         body: fd,
         headers: _getAuthHeader(),

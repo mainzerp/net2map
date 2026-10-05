@@ -5,6 +5,27 @@
 // Set VITE_API_URL=http://host:8000 to point to a remote backend
 export const API: string = (import.meta.env.VITE_API_URL ?? "").replace(/\/+$/, "");
 
+// Canonical versioned backend API prefix. Call sites and tests keep using the
+// logical, version-less "/api/..." paths (e.g. api.get("/api/devices")); this
+// module maps them centrally onto "/api/v1/..." when building request URLs.
+// The backend still serves the un-versioned "/api/..." alias, but marks it
+// deprecated (Deprecation + Link headers). Paths already starting with
+// "/api/v1/" and non-API paths (e.g. "/health") are left unchanged; the
+// WebSocket endpoint "/ws/scan-progress" is unversioned.
+export const API_VERSION_PREFIX = "/api/v1";
+
+/** Map a logical "/api/..." path onto the canonical versioned path. */
+export function versionedPath(path: string): string {
+  if (!path.startsWith("/api/")) return path;
+  if (path === API_VERSION_PREFIX || path.startsWith(API_VERSION_PREFIX + "/")) return path;
+  return API_VERSION_PREFIX + path.slice("/api".length);
+}
+
+/** Build the full request URL (backend origin + versioned path) for a logical API path. */
+export function apiUrl(path: string): string {
+  return `${API}${versionedPath(path)}`;
+}
+
 interface ETagCacheEntry {
   etag: string;
   data: unknown;
@@ -63,7 +84,7 @@ export async function logout(): Promise<boolean> {
   clearSession();
   try {
     if (headers.Authorization) {
-      const response = await fetch(`${API}/api/auth/logout`, {
+      const response = await fetch(apiUrl("/api/auth/logout"), {
         method: "POST",
         headers,
       });
@@ -124,7 +145,7 @@ export function refreshTokenIfNeeded(): Promise<void> {
   _refreshPromise = (async () => {
     try {
       const token = getStoredToken();
-      const r = await fetch(`${API}/api/auth/refresh`, {
+      const r = await fetch(apiUrl("/api/auth/refresh"), {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
       });
@@ -182,12 +203,12 @@ export const api = {
     checkSession(version);
     const headers: Record<string, string> = { ..._getAuthHeader() };
     if (_etagCache[path]) headers["If-None-Match"] = _etagCache[path].etag;
-    const r = await fetch(`${API}${path}`, { headers });
+    const r = await fetch(apiUrl(path), { headers });
     checkSession(version);
     if (r.status === 304) {
       if (_etagCache[path]) return structuredClone(_etagCache[path].data);
       // Cache miss despite 304 - re-fetch without ETag
-      const r2 = await fetch(`${API}${path}`, { headers: { ..._getAuthHeader() } });
+      const r2 = await fetch(apiUrl(path), { headers: { ..._getAuthHeader() } });
       checkSession(version);
       await _checkOk(r2);
       const data2 = await r2.json();
@@ -223,7 +244,7 @@ async function mutate(method: string, path: string, body?: unknown): Promise<any
   const version = _sessionVersion;
   if (path !== "/api/auth/login") await refreshTokenIfNeeded();
   checkSession(version);
-  const response = await fetch(`${API}${path}`, {
+  const response = await fetch(apiUrl(path), {
     method,
     headers: { "Content-Type": "application/json", ..._getAuthHeader() },
     body: JSON.stringify(body),

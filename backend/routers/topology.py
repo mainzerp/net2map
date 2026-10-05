@@ -77,7 +77,7 @@ def _set_topo_cache(data: dict):
     _topo_cache = data
 
 
-@router.get("/api/topology")
+@router.get("/topology")
 def get_topology(request: Request, db: Session = Depends(get_db)):
     topo_version = _get_topo_version()
     topo_cache = _get_topo_cache()
@@ -131,7 +131,7 @@ def get_topology(request: Request, db: Session = Depends(get_db)):
     return Response(content=body, media_type="application/json", headers={"ETag": etag, "Cache-Control": "no-cache"})
 
 
-@router.patch("/api/topology/devices/{device_id}/position", response_model=DeviceOut,
+@router.patch("/topology/devices/{device_id}/position", response_model=DeviceOut,
               dependencies=[require_role("admin", "operator")])
 def update_device_position(
     device_id: int, body: DevicePositionUpdate, db: Session = Depends(get_db)
@@ -148,7 +148,7 @@ def update_device_position(
     return device
 
 
-@router.patch("/api/topology/racks/{rack_id}/position", response_model=RackOut,
+@router.patch("/topology/racks/{rack_id}/position", response_model=RackOut,
               dependencies=[require_role("admin", "operator")])
 def update_rack_position(
     rack_id: int, body: RackPositionUpdate, db: Session = Depends(get_db)
@@ -165,7 +165,7 @@ def update_rack_position(
     return rack
 
 
-@router.patch("/api/topology/devices/bulk-meta",
+@router.patch("/topology/devices/bulk-meta",
               dependencies=[require_role("admin", "operator")])
 def bulk_update_device_meta(body: BulkDeviceMetaUpdate, request: Request, db: Session = Depends(get_db)):
     """Bulk update ignored/rack/class for multiple devices."""
@@ -203,7 +203,7 @@ def bulk_update_device_meta(body: BulkDeviceMetaUpdate, request: Request, db: Se
     return {"updated": count}
 
 
-@router.patch("/api/topology/devices/{device_id}/meta", response_model=DeviceOut,
+@router.patch("/topology/devices/{device_id}/meta", response_model=DeviceOut,
               dependencies=[require_role("admin", "operator")])
 def update_device_meta(
     device_id: int, body: DeviceMetaUpdate, request: Request, db: Session = Depends(get_db)
@@ -281,7 +281,7 @@ def update_device_meta(
     return dout
 
 
-@router.get("/api/devices")
+@router.get("/devices")
 def list_all_devices(
     request: Request,
     db: Session = Depends(get_db),
