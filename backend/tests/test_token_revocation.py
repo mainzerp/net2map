@@ -3,6 +3,7 @@ import time
 from unittest.mock import patch
 
 import jwt as pyjwt
+import pytest
 
 from database import User
 from shared.auth import JWT_SECRET, create_token, hash_password
@@ -46,9 +47,79 @@ def _make_user(db, username, role="viewer", is_active=True):
 
 def test_logout_endpoint_returns_ok(client, jwt_headers):
     """POST /api/auth/logout returns ok status."""
-    r = client.post("/api/auth/logout", headers=jwt_headers)
+    with patch("shared.redis_client.get_redis", return_value=FakeRedis()):
+        r = client.post("/api/auth/logout", headers=jwt_headers)
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
+
+
+@pytest.mark.parametrize("path", ["/api/auth/logout", "/api/auth/revoke-all"])
+def test_revocation_without_redis_reports_failure(client, jwt_headers, path):
+    with patch("shared.redis_client.get_redis", return_value=None):
+        response = client.post(path, headers=jwt_headers)
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "AUTH_UNAVAILABLE"
+
+
+@pytest.mark.parametrize("operation", ["exists", "get"])
+@pytest.mark.parametrize("path", ["/api/auth/me", "/api/auth/refresh"])
+def test_redis_read_failure_blocks_token_authentication(client, jwt_headers, operation, path):
+    from unittest.mock import MagicMock
+
+    fake = MagicMock()
+    fake.exists.return_value = 0
+    fake.get.return_value = None
+    getattr(fake, operation).side_effect = ConnectionError("Redis unavailable")
+    with patch("shared.redis_client.get_redis", return_value=fake):
+        response = client.request("POST" if path.endswith("refresh") else "GET", path, headers=jwt_headers)
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "AUTH_UNAVAILABLE"
+
+
+def test_configured_redis_missing_client_blocks_authentication(client, jwt_headers):
+    from config import settings
+
+    with patch.object(settings, "redis_url", "redis://configured"), \
+            patch("shared.redis_client.get_redis", return_value=None):
+        response = client.get("/api/auth/me", headers=jwt_headers)
+    assert response.status_code == 503
+
+
+@pytest.mark.parametrize("updates", [{"role": "operator"}, {"is_active": False}, {"password": "Changed123"}])
+def test_failed_revocation_leaves_user_unchanged(client, db, jwt_headers, updates):
+    user = _make_user(db, "unchanged")
+    original_hash = user.hashed_pw
+    with patch("routers.auth.blacklist_all_user_tokens", return_value=False):
+        response = client.put(f"/api/users/{user.id}", json=updates, headers=jwt_headers)
+    assert response.status_code == 503
+    db.refresh(user)
+    assert user.role == "viewer"
+    assert user.is_active is True
+    assert user.hashed_pw == original_hash
+
+
+def test_failed_revocation_keeps_deleted_user(client, db, jwt_headers):
+    user = _make_user(db, "keepme")
+    with patch("routers.auth.blacklist_all_user_tokens", return_value=False):
+        response = client.delete(f"/api/users/{user.id}", headers=jwt_headers)
+    assert response.status_code == 503
+    assert db.get(User, user.id) is not None
+
+
+def test_ticket_cannot_bypass_logout(client, jwt_headers):
+    from fastapi import WebSocketException
+
+    from routers.ws import _authenticate_ws
+
+    fake = FakeRedis()
+    with patch("shared.redis_client.get_redis", return_value=fake), \
+            patch("routers.auth.get_redis", return_value=fake):
+        issued = client.post("/api/auth/ws-ticket", headers=jwt_headers)
+        assert issued.status_code == 200
+        assert client.post("/api/auth/logout", headers=jwt_headers).status_code == 200
+        with pytest.raises(WebSocketException) as exc:
+            _authenticate_ws(issued.json()["ticket"])
+        assert exc.value.code == 1008
 
 
 def test_logout_without_token_returns_401(client):

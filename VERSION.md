@@ -1,5 +1,55 @@
 # Version History
 
+## v2.1.2 -- Sitzungs-Sicherheit, Scan-Stabilitaet und UI-Polish
+
+**Type:** PATCH
+
+Arbeitsstand, noch nicht veroeffentlicht; Commit-Referenz folgt beim Commit.
+
+### Fixes
+
+- JWT-Pruefungen akzeptieren bei ausgefallenem Redis keine moeglicherweise
+  widerrufenen Tokens mehr. Fehlgeschlagene Sitzungswiderrufe liefern einen
+  Fehler; Benutzer-Aenderungen und Loeschungen werden dann nicht gespeichert.
+- WebSocket-Authentifizierung funktioniert auch beim echten Handshake;
+  Einmal-Tickets werden atomar eingeloest und erneut auf Token-Gueltigkeit geprueft.
+- Die Authentifizierung verwendet den serverseitig erkannten Pfad statt einer
+  aus dem Host-Header rekonstruierten URL. FastAPI/Starlette wurden auf
+  0.138.1/1.7.0 aktualisiert; Frontend-Abhaengigkeiten erhalten kompatible Updates.
+- Redis speichert Token-Sperren im eigenen Volume mit AOF. Nginx verwirft
+  nicht vertrauenswuerdige Forwarding-Header und liefert Security-Header auch
+  fuer das SPA-Dokument und statische Dateien aus.
+- Logout loescht die lokale Sitzung sofort. Laufende Requests und Token-Refreshes
+  koennen Daten oder Zugangsdaten der vorherigen Sitzung nicht zurueckschreiben.
+  Der React-Query-Cache wird bei einem Sitzungswechsel geleert.
+- Scan-Sperren werden auch bei langen Einzelabfragen erneuert. Ignorierte
+  Geraete bleiben bei Voll- und Discovery-Scans ausgeschlossen. Abbruch verhindert
+  weitere wartende Ping-Abfragen und Credential-Versuche; abgebrochene Dry-Runs
+  behalten ihren Abbruchstatus.
+- Ausgeschoepfte Scan-Retries und fehlgeschlagene Queue-Uebergaben erhalten
+  einen Fehlerstatus statt dauerhaft als laufend oder wartend zu erscheinen.
+- Rack-Teilupdates pruefen Kollisionen mit unveraenderten Geraeten;
+  Verkleinern eines Racks darf keine belegten Hoeheneinheiten abschneiden.
+- Mobile Ansichten, Sidebar, Login, Dialoge und Karten-Werkzeugleiste erhalten
+  verbesserte Platzaufteilung, Beschriftungen und Tastaturbedienung.
+- Der veraltete SNMP-Treiber wurde auf PySNMP 7.1.30 mit pyasn1 0.6.4 und
+  pyasn1-modules 0.4.2 migriert. Die bekannten ASN.1-Sicherheitsmeldungen sind
+  beseitigt; GET/BULK, Credential-Fallbacks und V2c/V3 bleiben erhalten.
+- React Router 7.18.4, Vite 8.3.2 und Vitest 4.1.11 ersetzen die verwundbaren
+  Frontend-Abhaengigkeiten. Der Frontend-Build verwendet jetzt Node.js 24;
+  lokale Entwicklung benoetigt Node.js 22.12 oder eine unterstuetzte neuere Version.
+- GitHub prueft Python- und Node-Abhaengigkeiten sowie den Python-Code auf
+  Sicherheitsprobleme. Jeder gemeldete Dependency-Fund oder Scan-Fehler sperrt
+  Docker-Build und Image-Push; Bandit sperrt ab Schweregrad `medium`.
+- Bestehende WebSocket-Verbindungen werden auch bei Leerlauf oder dauerhaftem
+  Nachrichtenverkehr fuenf Sekunden nach der letzten erfolgreichen Pruefung
+  erneut auf Ablauf und Widerruf geprueft; die Pruefdauer kommt zum Intervall hinzu.
+- Bei verlorener Scan-Sperre werden laufende Targets abgebrochen und Transaktionen
+  vor Commit sowie nach dem Flush erneut geprueft. Abgebrochene Finalizer werden
+  vor dem Schliessen ihrer DB-Session abgewartet; Ping-Prozesse werden beendet.
+- Ein konfigurierter Redis-Ausfall aktiviert keine lokale Ersatzsperre mehr.
+  Verbindungs- und Antwortzeiten fuer Redis sind begrenzt.
+
 ## v2.1.1 -- Offline-Erkennung bei Totalausfall
 
 **Type:** PATCH

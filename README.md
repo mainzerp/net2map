@@ -42,7 +42,8 @@ Danach ist die UI erreichbar unter:
 
 - http://localhost:3000
 
-Der Backend-Container speichert SQLite-Daten persistent im Docker-Volume `netmap-data`.
+PostgreSQL speichert die Datenbank persistent im Docker-Volume `netmap-pgdata`.
+Das Volume `netmap-data` enthaelt die unter `/data` abgelegten Dateien.
 
 Stoppen:
 
@@ -72,6 +73,9 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### Frontend
+
+Voraussetzung: Node.js 24 (wie im Docker-Build und in CI); alternativ Node.js
+22 ab Version 22.12. Das Frontend-Manifest legt diese unterstuetzten Versionen fest.
 
 ```bash
 cd frontend
@@ -117,12 +121,45 @@ To point the frontend at a different backend URL, rebuild the image:
 docker buildx build --build-arg VITE_API_URL=http://your-backend:8000 -t netmap-frontend .
 ```
 
-## Security Notes
+## Sicherheit
 
-- **Authentication**: Set `SECRET_TOKEN` in the backend environment to enable bearer token authentication. Leave empty to disable (LAN-only setups).
-- **No HTTPS**: All traffic is unencrypted HTTP. Do not use on untrusted networks. To enable HTTPS, place a reverse proxy (Traefik, Caddy, nginx) in front of the frontend container.
-- **SNMP Credentials**: API responses mask SNMP v3 passwords. However, if you enable `SECRET_TOKEN`, ensure it is kept secret.
-- **Encryption at Rest**: Set `ENCRYPTION_KEY` to encrypt SNMP passwords in the database. Generate a key with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+- **Authentifizierung:** `JWT_SECRET` aktiviert Benutzerkonten und Rollen. Der
+  statische `SECRET_TOKEN` ist ein alternativer Modus ohne JWT. Ohne beide Werte
+  sind die API-Endpunkte ohne Anmeldung erreichbar.
+- **Sitzungswiderruf:** JWT-Sperren benoetigen Redis. Bei konfiguriertem, aber
+  nicht erreichbarem Redis schlagen JWT-Pruefungen mit `503 AUTH_UNAVAILABLE`
+  fehl. Ohne Redis bleiben Login und normale JWT-Zugriffe moeglich; Logout,
+  Sitzungswiderruf sowie sicherheitsrelevante Benutzer-Aenderungen und Loeschungen
+  melden `503`, statt einen erfolgreichen Widerruf vorzutaeuschen.
+  Fehlgeschlagene Benutzer-Aenderungen werden nicht gespeichert. Die UI meldet
+  lokal trotzdem ab und weist auf einen fehlgeschlagenen Server-Widerruf hin.
+- **WebSockets:** Bestehende Scan-Verbindungen pruefen ihre urspruenglichen
+  Zugangsdaten fuenf Sekunden nach der letzten erfolgreichen Pruefung erneut,
+  auch ohne eingehende Nachrichten. Ablauf oder Widerruf schliesst die Verbindung mit Code `1008`;
+  ein ausgefallener Auth-Dienst mit `1011`. Einmal-Tickets werden nur beim
+  Verbindungsaufbau verbraucht, danach wird die zugehoerige Sitzung geprueft.
+  Redis-Verbindungen haben je zwei Sekunden Verbindungs- und Antwortzeitlimit ohne
+  automatische Wiederholung. Socket-Authentifizierung laeuft ausserhalb des
+  Event-Loops mit insgesamt fuenf Sekunden Zeitlimit; die Pruefdauer kommt zum
+  Intervall hinzu.
+- **Redis-Persistenz:** Compose verwendet `netmap-redisdata` und AOF mit
+  `appendfsync everysec`. Bei einem Absturz kann etwa eine Sekunde an Schreibvorgaengen
+  verloren gehen. Nach Verlust oder Wiederherstellung veralteter Redis-Daten
+  `JWT_SECRET` wechseln, damit zuvor gesperrte Tokens nicht erneut gueltig werden.
+- **Proxy-Vertrauen:** Nginx ersetzt eingehendes `X-Forwarded-For` durch die
+  direkte Gegenstelle. Hinter einem weiteren Reverse Proxy gilt daher dessen IP
+  fuer das Rate-Limit. Echte Client-IPs nur mit explizit konfigurierten,
+  vertrauenswuerdigen Proxy-Adressen uebernehmen; den Backend-Port nicht oeffentlich
+  freigeben.
+- **HTTPS:** TLS ueber einen Reverse Proxy vor dem Frontend bereitstellen;
+  die mitgelieferten Container bieten selbst kein HTTPS.
+- **SNMP-Zugangsdaten:** API-Antworten maskieren Communities und SNMPv3-Passwoerter.
+  `ENCRYPTION_KEY` verschluesselt diese Werte in der Datenbank. Einen Schluessel
+  erzeugt `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+- **SNMP-Protokoll:** Fuer neue Profile SNMPv3 mit Authentifizierung und
+  Verschluesselung (`authPriv`, SHA-256/AES) verwenden. V2c und V3 ohne
+  Verschluesselung bleiben fuer explizit konfigurierte Altgeraete verfuegbar;
+  Community-Strings in V2c werden im Netzwerk unverschluesselt uebertragen.
 
 ## Production Deployment
 
@@ -213,15 +250,33 @@ npm audit fix          # optional -- apply security patches
 
 Commit the updated `package-lock.json` together with any `package.json` changes.
 
-### Vulnerability Scanning
+### Sicherheitspruefungen und Build-Sperre
 
-Periodically audit dependencies for known vulnerabilities:
+Der GitHub-Workflow `.github/workflows/ci.yml` prueft bei Pushes auf `main`,
+bei `v*`-Tags und bei Pull Requests gegen `main`:
+
+- `pip-audit`: alle aufgeloesten Backend-Abhaengigkeiten, ohne Advisory-Ausnahmen.
+- `npm audit`: alle Schweregrade, einschliesslich Entwicklungsabhaengigkeiten.
+- Bandit: Python-Produktionscode ab Schweregrad `medium`, alle Konfidenzstufen;
+  Testdateien sind ausgenommen. Die bewusst unterstuetzten SNMP-Altprotokolle
+  tragen ausschliesslich begruendete Ausnahmen fuer ihre jeweilige Regel.
+
+Ein Fund oder ein Scan-Fehler laesst `security-scan` scheitern. Beide Docker-Jobs
+(`docker-build` und `docker-push`) benoetigen dessen erfolgreichen Abschluss;
+fehlgeschlagene, abgebrochene oder uebersprungene Scans verhindern Build und Push.
+Image-Pushes bleiben auf `v*`-Tags beschraenkt. Die Job-Berechtigungen sind auf
+Lesen reduziert; nur der Publish-Job erhaelt Schreibzugriff auf Packages.
+
+Die gleichen Pruefungen lokal ausfuehren:
 
 ```bash
 # Python backend
-pip install pip-audit
-pip-audit -r backend/requirements.txt
+pip install pip-audit==2.10.1 bandit==1.9.4
+pip-audit -r backend/requirements.txt --strict
+bandit -r backend --exclude backend/tests --severity-level medium --confidence-level all
 
 # Frontend
-cd frontend && npm audit
+cd frontend
+npm ci --include=dev
+npm audit --include=dev --audit-level=info
 ```

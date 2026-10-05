@@ -72,7 +72,13 @@ def create_ws_ticket(request: Request):
     if not r:
         api_error(503, "REDIS_UNAVAILABLE", "Ticket service unavailable; use token auth")
     ticket = secrets.token_urlsafe(32)
-    r.set(f"ws_ticket:{ticket}", json.dumps(user), ex=30)
+    # Retain the originating credential server-side so ticket consumption can
+    # recheck expiration and revocation after logout or a security change.
+    token = request.headers.get("authorization", "")[7:]
+    try:
+        r.set(f"ws_ticket:{ticket}", json.dumps({"token": token}), ex=30)
+    except Exception:
+        api_error(503, "REDIS_UNAVAILABLE", "Ticket service unavailable")
     return {"ticket": ticket}
 
 
@@ -189,10 +195,6 @@ def update_user(user_id: int, body: UserUpdate, request: Request, db: Session = 
     password_changed = "password" in updates
     if password_changed:
         updates["hashed_pw"] = hash_password(updates.pop("password"))
-    for k, v in updates.items():
-        setattr(user, k, v)
-    db.commit()
-    db.refresh(user)
     details = {"fields": list(body.model_dump(exclude_none=True).keys())}
     # Security-relevant changes must kill existing sessions: a deactivated
     # user, a changed role (stale role claim), or a new password.
@@ -201,8 +203,13 @@ def update_user(user_id: int, body: UserUpdate, request: Request, db: Session = 
         or ("role" in updates and updates["role"] != old_role)
         or password_changed
     ):
-        blacklist_all_user_tokens(user.id)
+        if not blacklist_all_user_tokens(user.id):
+            api_error(503, "AUTH_UNAVAILABLE", "Session revocation service unavailable; user was not changed")
         details["sessions_revoked"] = True
+    for k, v in updates.items():
+        setattr(user, k, v)
+    db.commit()
+    db.refresh(user)
     log_audit(request, "update", "user", str(user_id), details)
     return user
 
@@ -216,10 +223,11 @@ def delete_user(user_id: int, request: Request, db: Session = Depends(get_db)):
         api_error(404, "USER_NOT_FOUND", "User not found")
     _guard_admin_lockout(request, db, user, removes_admin=True)
     username = user.username
+    # Revoke before committing the deletion, and never claim success on failure.
+    if not blacklist_all_user_tokens(user_id):
+        api_error(503, "AUTH_UNAVAILABLE", "Session revocation service unavailable; user was not deleted")
     db.delete(user)
     db.commit()
-    # A deleted user must not keep working sessions (incl. the refresh window)
-    blacklist_all_user_tokens(user_id)
     log_audit(request, "delete", "user", str(user_id),
               {"username": username, "sessions_revoked": True})
 
@@ -238,8 +246,9 @@ def logout_token(request: Request):
         if jti:
             import time
             remaining = max(0, exp - int(time.time()))
-            blacklist_token(jti, remaining)
-    except Exception:
+            if not blacklist_token(jti, remaining):
+                api_error(503, "AUTH_UNAVAILABLE", "Session revocation service unavailable")
+    except pyjwt.InvalidTokenError:
         pass  # Token already invalid/expired -- no-op
     return {"status": "ok"}
 
@@ -253,6 +262,7 @@ def revoke_all_sessions(request: Request, user_id: Optional[int] = Body(None, em
     """
     user = getattr(request.state, "user", {})
     target_id = user_id if user_id is not None else user.get("id", 0)
-    blacklist_all_user_tokens(target_id)
+    if not blacklist_all_user_tokens(target_id):
+        api_error(503, "AUTH_UNAVAILABLE", "Session revocation service unavailable")
     log_audit(request, "revoke_all_tokens", "user", str(target_id), {})
     return {"status": "ok", "user_id": target_id}

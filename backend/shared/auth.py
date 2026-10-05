@@ -7,6 +7,7 @@ import bcrypt
 import jwt
 from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from starlette.requests import HTTPConnection
 
 from config import settings
 
@@ -37,7 +38,14 @@ if not JWT_SECRET and not _LEGACY_TOKEN:
 # unknown usernames, so response timing does not reveal whether a user exists.
 DUMMY_PASSWORD_HASH = "$2b$12$43/hneyCbrcdSGlerxj3M.rM1tEO9kzfsp4NT2v2eRpmA3GmFoowa"
 
-_bearer = HTTPBearer(auto_error=False)
+class _HttpOnlyBearer(HTTPBearer):
+    async def __call__(self, request: HTTPConnection):
+        if request.scope["type"] == "websocket":
+            return None
+        return await super().__call__(request)
+
+
+_bearer = _HttpOnlyBearer(auto_error=False)
 
 _AUTH_EXEMPT_PATHS = {"/health", "/api/auth/login", "/api/map-background", "/api/auth/refresh"}
 
@@ -87,11 +95,20 @@ def is_token_blacklisted(jti: str) -> bool:
     from shared.redis_client import get_redis
     r = get_redis()
     if not r:
+        if settings.redis_url:
+            _revocation_unavailable()
         return False
     try:
         return r.exists(f"token_blacklist:{jti}") > 0
     except Exception:
-        return False
+        _revocation_unavailable()
+
+
+def _revocation_unavailable():
+    raise HTTPException(
+        status_code=503,
+        detail={"error": {"code": "AUTH_UNAVAILABLE", "message": "Session revocation service unavailable"}},
+    )
 
 
 def blacklist_all_user_tokens(user_id: int) -> bool:
@@ -116,6 +133,8 @@ def _is_user_revoked(user_id: int, token_iat: int) -> bool:
     from shared.redis_client import get_redis
     r = get_redis()
     if not r:
+        if settings.redis_url:
+            _revocation_unavailable()
         return False
     try:
         revoked_at = r.get(f"token_revoke_all:{user_id}")
@@ -125,7 +144,7 @@ def _is_user_revoked(user_id: int, token_iat: int) -> bool:
             return True
         return False
     except Exception:
-        return False
+        _revocation_unavailable()
 
 
 def _set_user_from_token(request: Request, token: str):
@@ -171,7 +190,7 @@ def _set_user_from_token(request: Request, token: str):
             detail={"error": {"code": "AUTH_EXPIRED", "message": "Token expired"}},
             headers={"WWW-Authenticate": "Bearer"},
         )
-    except jwt.InvalidTokenError:
+    except (jwt.InvalidTokenError, KeyError, TypeError, ValueError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"error": {"code": "AUTH_INVALID", "message": "Invalid token"}},
@@ -179,18 +198,23 @@ def _set_user_from_token(request: Request, token: str):
         )
 
 
-def _require_auth(request: Request, credentials: HTTPAuthorizationCredentials = Security(_bearer)):
+def _require_auth(request: HTTPConnection, credentials: HTTPAuthorizationCredentials = Security(_bearer)):
+    if request.scope["type"] == "websocket":
+        return  # WebSocket routes authenticate their single-use ticket themselves.
     if not JWT_SECRET and not _LEGACY_TOKEN:
         request.state.user = {"id": 0, "username": "anonymous", "role": "admin"}
         return  # auth disabled -- startup warning already logged
-    if request.url.path in _AUTH_EXEMPT_PATHS:
+    # Authorization uses the server-parsed route path, never a URL reconstructed
+    # from the untrusted Host header (which may contain path delimiters).
+    if request.scope["path"] in _AUTH_EXEMPT_PATHS:
         # Soft auth: a presented token is honored (so role-guarded endpoints on
         # exempt paths still work), but an absent or invalid token is tolerated.
         if credentials:
             try:
                 _set_user_from_token(request, credentials.credentials)
-            except HTTPException:
-                pass
+            except HTTPException as exc:
+                if exc.status_code != 401:
+                    raise
         return
     if not credentials:
         raise HTTPException(

@@ -39,6 +39,13 @@ def update_rack(rack_id: int, body: RackUpdate, request: Request, db: Session = 
     if not rack:
         api_error(404, "RACK_NOT_FOUND", "Rack not found")
     payload = body.model_dump(exclude_unset=True)
+    height = payload.get("height_u")
+    if height is not None:
+        occupied = db.query(Device).filter(
+            Device.rack_id == rack_id, Device.rack_u_position.isnot(None),
+        ).all()
+        if any(d.rack_u_position + d.u_height - 1 > height for d in occupied):
+            api_error(409, "U_POSITION_OUT_OF_RANGE", "Rack height would exclude an assigned device")
     # No rack field is nullable; explicit null values are ignored
     for k, v in payload.items():
         if v is not None:
@@ -99,14 +106,20 @@ def update_rack_layout(rack_id: int, body: RackLayoutIn, request: Request, db: S
                 f"but rack {rack_id} only has {rack.height_u}U",
             )
 
-    # Overlap check on entries sorted by position
-    ordered = sorted(body.entries, key=lambda e: e.rack_u_position)
+    # PATCH leaves omitted devices in place; validate the complete resulting layout.
+    positions = [(e.rack_u_position, e.u_height, e.device_id) for e in body.entries]
+    positions.extend(
+        (d.rack_u_position, d.u_height, d.id)
+        for d in db.query(Device).filter(Device.rack_id == rack_id).all()
+        if d.id not in devices and d.rack_u_position is not None
+    )
+    ordered = sorted(positions)
     for prev, cur in zip(ordered, ordered[1:]):
-        if cur.rack_u_position <= prev.rack_u_position + prev.u_height - 1:
+        if cur[0] <= prev[0] + prev[1] - 1:
             api_error(
                 409, "U_OVERLAP",
-                f"Devices {prev.device_id} and {cur.device_id} overlap in U-space",
-                details=[{"device_ids": [prev.device_id, cur.device_id]}],
+                f"Devices {prev[2]} and {cur[2]} overlap in U-space",
+                details=[{"device_ids": [prev[2], cur[2]]}],
             )
 
     for e in body.entries:

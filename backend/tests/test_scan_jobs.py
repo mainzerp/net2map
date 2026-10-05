@@ -146,6 +146,30 @@ class TestScanLockTokens:
             _st.release_scan_lock(token, "macs")
 
 
+@patch("shared.state.get_redis", return_value=None)
+def test_configured_redis_outage_never_uses_local_scan_lock(_mock_redis, monkeypatch):
+    import shared.redis_client
+
+    monkeypatch.setattr(shared.redis_client, "REDIS_URL", "redis://configured-test")
+    local_lock = MagicMock()
+    monkeypatch.setattr(_st, "_LOCAL_SCAN_LOCK", local_lock)
+    monkeypatch.setattr(_st, "_LOCAL_LOCK_TOKEN", "old-local-token")
+    assert _st.acquire_scan_lock("full", timeout=0) is None
+    assert _st.renew_scan_lock("old-local-token") is False
+    assert _st.can_dispatch_scan("full") is False
+    _st.release_scan_lock("old-local-token", "full")
+    assert _st._LOCAL_LOCK_TOKEN == "old-local-token"
+    local_lock.acquire.assert_not_called()
+    local_lock.release.assert_not_called()
+
+
+def test_dispatch_check_fails_closed_on_redis_error(monkeypatch):
+    redis = MagicMock()
+    redis.get.side_effect = ConnectionError("Redis unavailable")
+    monkeypatch.setattr(_st, "get_redis", lambda: redis)
+    assert _st.can_dispatch_scan("full") is False
+
+
 # ---------------------------------------------------------------------------
 # Structured log buffer
 # ---------------------------------------------------------------------------

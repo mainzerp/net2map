@@ -296,6 +296,15 @@ class TestSvgSanitizerHardening:
 class TestMapBackgroundDeliveryHeaders:
     """GET /api/map-background sets hardening headers."""
 
+    def test_many_ranges_are_rejected_before_file_response(self, client):
+        response = client.get("/api/map-background", headers={"Range": "bytes=" + ",".join(["0-1"] * 1000)})
+        assert response.status_code == 416
+        assert response.json()["error"]["code"] == "INVALID_RANGE"
+
+    def test_duplicate_range_headers_are_rejected(self, client):
+        response = client.get("/api/map-background", headers=[("Range", "bytes=0-1"), ("Range", "bytes=3-4")])
+        assert response.status_code == 416
+
     def test_get_sets_csp_and_inline_disposition(self, client, jwt_headers, tmp_path, monkeypatch):
         monkeypatch.setattr("shared.file_settings.MAP_BG_DIR", str(tmp_path))
         monkeypatch.setattr("routers.map_bg.MAP_BG_DIR", str(tmp_path))

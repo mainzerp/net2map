@@ -74,3 +74,37 @@ def test_update_rack_partial_keeps_other_fields(client, auth_headers, db):
     db.expire_all()
     rack = db.query(RackModel).filter(RackModel.id == rack_id).first()
     assert rack.description == "keep"
+
+
+
+def test_partial_layout_rejects_collision_with_unchanged_device(client, auth_headers, db):
+    from database import Device, Rack
+
+    rack = Rack(label="Rack", height_u=42)
+    db.add(rack)
+    db.flush()
+    first = Device(ip="10.0.0.1", rack_id=rack.id, rack_u_position=1, u_height=2)
+    second = Device(ip="10.0.0.2", rack_id=rack.id, rack_u_position=5, u_height=2)
+    db.add_all([first, second])
+    db.commit()
+    response = client.patch(f"/api/racks/{rack.id}/layout", headers=auth_headers, json={
+        "entries": [{"device_id": second.id, "rack_u_position": 2, "u_height": 2}],
+    })
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "U_OVERLAP"
+    db.refresh(second)
+    assert second.rack_u_position == 5
+
+
+def test_rack_shrink_rejects_truncating_device(client, auth_headers, db):
+    from database import Device, Rack
+
+    rack = Rack(label="Rack", height_u=42)
+    db.add(rack)
+    db.flush()
+    db.add(Device(ip="10.0.0.1", rack_id=rack.id, rack_u_position=20, u_height=2))
+    db.commit()
+    response = client.put(f"/api/racks/{rack.id}", headers=auth_headers, json={"height_u": 20})
+    assert response.status_code == 409
+    db.refresh(rack)
+    assert rack.height_u == 42

@@ -4,15 +4,28 @@ import json
 import logging
 import threading
 import time
-from typing import Optional, Set
+from dataclasses import dataclass, field
+from typing import Optional
 
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, WebSocketException
+import anyio
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, WebSocketException
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
 
-# Active WebSocket connections
-_clients: Set[WebSocket] = set()
+AUTH_RECHECK_SECONDS = 5.0
+AUTH_CHECK_TIMEOUT_SECONDS = 5.0
+
+
+@dataclass
+class _WsCredential:
+    token: str
+    recheck_at: float
+    validation_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
+# Credentials are resolved once so single-use tickets are never consumed again.
+_clients: dict[WebSocket, _WsCredential] = {}
 _clients_lock = asyncio.Lock()
 
 # Event loop that owns the WebSocket connections (captured on first connect).
@@ -34,13 +47,62 @@ async def broadcast_scan_update(data: dict) -> None:
     closed = []
     for ws in clients:
         try:
+            if not await _validate_connection(ws):
+                continue
             await ws.send_text(message)
+        except WebSocketException as exc:
+            # Remove before closing so concurrent broadcasts stop delivering data.
+            async with _clients_lock:
+                _clients.pop(ws, None)
+            try:
+                await ws.close(code=exc.code, reason=exc.reason)
+            except Exception:
+                pass
         except Exception:
             closed.append(ws)
     if closed:
         async with _clients_lock:
             for ws in closed:
-                _clients.discard(ws)
+                _clients.pop(ws, None)
+
+
+async def _validate_connection(ws: WebSocket) -> bool:
+    credential = _clients.get(ws)
+    if credential is None:
+        return False
+    async with credential.validation_lock:
+        if _clients.get(ws) is not credential:
+            return False
+        if time.monotonic() >= credential.recheck_at:
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(_validate_ws_credential, credential.token),
+                    timeout=AUTH_CHECK_TIMEOUT_SECONDS,
+                )
+            except TimeoutError as exc:
+                raise WebSocketException(code=1011, reason="Authentication service unavailable") from exc
+            # A broadcast may have closed this connection while the check ran.
+            if _clients.get(ws) is not credential:
+                return False
+            credential.recheck_at = time.monotonic() + AUTH_RECHECK_SECONDS
+        return True
+
+
+async def _watch_auth(ws: WebSocket) -> None:
+    """Revalidate idle connections independently of incoming message traffic."""
+    while True:
+        credential = _clients.get(ws)
+        if credential is None:
+            return
+        # Broadcasts may advance the deadline; sleep to that exact deadline so
+        # sharing their cached check cannot extend the revocation window.
+        await asyncio.sleep(max(0, credential.recheck_at - time.monotonic()))
+        if not await _validate_connection(ws):
+            return
+
+
+async def _drain_connection_tasks(*tasks: asyncio.Task) -> None:
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def broadcast_scan_update_sync(data: dict) -> None:
@@ -87,7 +149,7 @@ def _update_subscriber_thread(loop: asyncio.AbstractEventLoop) -> None:
     """Forward Redis pub/sub scan updates to the local WebSocket clients."""
     from scan_engine.broadcast import SCAN_UPDATES_CHANNEL
     from shared.redis_client import get_redis
-    while True:
+    while not loop.is_closed():
         try:
             r = get_redis()
             if not r:
@@ -95,7 +157,8 @@ def _update_subscriber_thread(loop: asyncio.AbstractEventLoop) -> None:
             pubsub = r.pubsub(ignore_subscribe_messages=True)
             try:
                 pubsub.subscribe(SCAN_UPDATES_CHANNEL)
-                for msg in pubsub.listen():
+                while not loop.is_closed():
+                    msg = pubsub.get_message(timeout=1.0)
                     if not msg or msg.get("type") != "message":
                         continue
                     try:
@@ -119,30 +182,60 @@ async def scan_progress_ws(ws: WebSocket, token: str = Query(default="")):
     global _main_loop
 
     # Validate token if auth is enabled
-    _authenticate_ws(token)
+    try:
+        credential_token = await asyncio.wait_for(
+            asyncio.to_thread(_authenticate_ws, token), timeout=AUTH_CHECK_TIMEOUT_SECONDS
+        )
+    except TimeoutError as exc:
+        raise WebSocketException(code=1011, reason="Authentication service unavailable") from exc
 
     await ws.accept()
     _main_loop = asyncio.get_running_loop()
     _ensure_update_subscriber()
     async with _clients_lock:
-        _clients.add(ws)
+        _clients[ws] = _WsCredential(credential_token, time.monotonic() + AUTH_RECHECK_SECONDS)
 
     _log.info("WebSocket client connected (%d total)", len(_clients))
+    auth_task = asyncio.create_task(_watch_auth(ws))
+    receive_task = asyncio.create_task(ws.receive_text())
     try:
         while True:
-            # Keep connection alive; client may send pings or close
-            await ws.receive_text()
+            done, _ = await asyncio.wait({auth_task, receive_task}, return_when=asyncio.FIRST_COMPLETED)
+            if auth_task in done:
+                auth_task.result()
+                break
+            receive_task.result()
+            receive_task = asyncio.create_task(ws.receive_text())
+    except WebSocketException as exc:
+        async with _clients_lock:
+            _clients.pop(ws, None)
+        await ws.close(code=exc.code, reason=exc.reason)
     except WebSocketDisconnect:
         pass
     except Exception:
-        pass
+        await ws.close(code=1011, reason="Connection service unavailable")
     finally:
-        async with _clients_lock:
-            _clients.discard(ws)
+        # Remove synchronously before any cancellable cleanup await. A second
+        # shutdown cancellation must never leave an authenticated broadcast entry.
+        _clients.pop(ws, None)
+        auth_task.cancel()
+        receive_task.cancel()
+        # Starlette cancels its AnyIO scope when peers disconnect; shield the
+        # owned task drain so repeated scope cancellation cannot interrupt it.
+        with anyio.CancelScope(shield=True):
+            cleanup_task = asyncio.create_task(_drain_connection_tasks(auth_task, receive_task))
+            while not cleanup_task.done():
+                try:
+                    await asyncio.shield(cleanup_task)
+                except asyncio.CancelledError:
+                    # Native asyncio cancellation bypasses AnyIO's shield.
+                    # Keep draining the owned tasks before propagating shutdown.
+                    continue
+            cleanup_task.result()
         _log.info("WebSocket client disconnected (%d remaining)", len(_clients))
 
 
-def _authenticate_ws(token: str) -> None:
+def _authenticate_ws(token: str) -> str:
     """Validate token for WebSocket connections.
 
     Accepts either a single-use ticket (preferred) or a raw JWT (fallback).
@@ -156,7 +249,7 @@ def _authenticate_ws(token: str) -> None:
     from shared.auth import _LEGACY_TOKEN, JWT_SECRET
 
     if not JWT_SECRET and not _LEGACY_TOKEN:
-        return  # auth disabled
+        return ""  # auth disabled
 
     if not token:
         raise WebSocketException(code=1008, reason="Authentication required")
@@ -170,12 +263,27 @@ def _authenticate_ws(token: str) -> None:
             # Atomic single-use consume (GETDEL, Redis >= 6.2)
             ticket_data = r.getdel(ticket_key)
         except Exception:
-            # Fallback for servers without GETDEL support
-            ticket_data = r.get(ticket_key)
-            if ticket_data:
-                r.delete(ticket_key)
+            # Never replace atomic consumption with GET + DELETE: concurrent
+            # connections could replay the same supposedly single-use ticket.
+            raise WebSocketException(code=1011, reason="Authentication service unavailable")
         if ticket_data:
-            return  # ticket valid
+            try:
+                token = json.loads(ticket_data)["token"]
+            except (KeyError, TypeError, ValueError):
+                raise WebSocketException(code=1008, reason="Invalid ticket")
+            # Continue through the originating credential's expiry/revocation
+            # checks: a ticket must not outlive the session that minted it.
+
+    _validate_ws_credential(token)
+    return token
+
+
+def _validate_ws_credential(token: str) -> None:
+    """Check the originating credential without consuming a WebSocket ticket."""
+    from shared.auth import _LEGACY_TOKEN, JWT_SECRET
+
+    if not JWT_SECRET and not _LEGACY_TOKEN:
+        return
 
     # Legacy single-token -- empty unless JWT_SECRET is unset, so it is never
     # an accepted credential once JWT auth is configured.
@@ -201,5 +309,9 @@ def _authenticate_ws(token: str) -> None:
             raise WebSocketException(code=1008, reason="All sessions have been revoked")
     except WebSocketException:
         raise
+    except HTTPException as exc:
+        if exc.status_code == 503:
+            raise WebSocketException(code=1011, reason="Authentication service unavailable") from exc
+        raise WebSocketException(code=1008, reason="Invalid or expired token") from exc
     except Exception:
         raise WebSocketException(code=1008, reason="Invalid or expired token")

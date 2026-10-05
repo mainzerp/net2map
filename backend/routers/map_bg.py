@@ -121,8 +121,13 @@ async def upload_map_background(request: Request, file: UploadFile = File(...)):
 
 
 @router.get("/api/map-background")
-def get_map_background():
+def get_map_background(request: Request):
     """Return the stored background image file."""
+    # Backgrounds do not need multipart ranges. Bound parsing work even on
+    # older Starlette installations vulnerable to quadratic range merging.
+    ranges = request.headers.getlist("range")
+    if len(ranges) > 1 or any(len(value) > 128 or "," in value for value in ranges):
+        api_error(416, "INVALID_RANGE", "Only a single bounded byte range is supported")
     path = _find_bg_file()
     if not path:
         api_error(404, "NO_BACKGROUND_IMAGE", "No background image set")

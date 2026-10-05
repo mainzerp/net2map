@@ -16,7 +16,9 @@ User-selected 2026-09-15 (top priorities):
    and an ops/deployment guide, clean up loose ends (stray root scripts, stale
    `frontend/package.json` version).
 
-Order of attack: API versioning design first (contract work that unblocks the rest),
-then responsive layout, then theme toggle; docs land alongside each change rather than
-as a separate campaign. NAC/VLAN-provisioning ideas stay parked in the roadmap Idea
-Bank until promoted.
+Current focus (user request, 2026-10-01): close the remaining review security gaps,
+migrate vulnerable SNMP/frontend dependencies and block GitHub image builds when
+security scans fail. API versioning and SNMPv3 discovery remain next
+priorities; responsive layout and theme switching need user verification rather
+than initial implementation. Docs land alongside each change. NAC/VLAN-provisioning
+ideas stay parked in the roadmap Idea Bank until promoted.

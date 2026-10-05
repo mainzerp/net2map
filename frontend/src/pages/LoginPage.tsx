@@ -27,10 +27,11 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-surface">
+    <div className="min-h-dvh flex items-center justify-center bg-surface p-4">
       <form
         onSubmit={handleSubmit}
-        className="w-[340px] p-8 rounded-xl border border-line bg-panel"
+        aria-busy={loading}
+        className="w-full max-w-sm p-6 sm:p-8 rounded-xl border border-line-strong bg-panel shadow-xl"
       >
         <div className="text-center mb-6">
           <svg className="inline-block" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -42,10 +43,11 @@ export default function LoginPage() {
           <h2 className="text-primary text-lg font-bold mt-2">
             NetMap Login
           </h2>
+          <p className="mt-2 text-xs text-muted">Sign in to explore your network.</p>
         </div>
 
         {error && (
-          <div className="px-3 py-2 mb-4 rounded-md bg-panel-2 border border-danger text-danger text-xs">
+          <div role="alert" className="px-3 py-2 mb-4 rounded-md bg-panel-2 border border-danger text-danger text-xs">
             {error}
           </div>
         )}

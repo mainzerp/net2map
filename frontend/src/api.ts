@@ -12,6 +12,24 @@ interface ETagCacheEntry {
 
 // ETag cache for GET requests that support conditional fetching
 const _etagCache: Record<string, ETagCacheEntry> = {};
+let _sessionVersion = 0;
+export const SESSION_CHANGED_EVENT = "netmap-session-changed";
+
+function resetSessionCaches(): void {
+  _sessionVersion += 1;
+  _clearEtagCache();
+  window.dispatchEvent(new Event(SESSION_CHANGED_EVENT));
+}
+
+function clearSession(): void {
+  localStorage.removeItem("auth_token");
+  localStorage.removeItem("auth_user");
+  resetSessionCaches();
+}
+
+function checkSession(version: number): void {
+  if (version !== _sessionVersion) throw new Error("Session changed; request discarded");
+}
 
 function _clearEtagCache(): void {
   Object.keys(_etagCache).forEach(k => { delete _etagCache[k]; });
@@ -36,23 +54,25 @@ export function _getAuthHeader(): Record<string, string> {
 export function login(token: string, user: { username: string; role: string }): void {
   localStorage.setItem("auth_token", token);
   localStorage.setItem("auth_user", JSON.stringify(user));
+  resetSessionCaches();
 }
 
-export async function logout(): Promise<void> {
+export async function logout(): Promise<boolean> {
+  const headers = _getAuthHeader();
+  // Local logout must complete even while the revocation request is pending.
+  clearSession();
   try {
-    const headers = _getAuthHeader();
     if (headers.Authorization) {
-      await fetch(`${API}/api/auth/logout`, {
+      const response = await fetch(`${API}/api/auth/logout`, {
         method: "POST",
         headers,
       });
+      return response.ok;
     }
   } catch {
-    // Best-effort -- still clear local state even if backend call fails
+    return false;
   }
-  localStorage.removeItem("auth_token");
-  localStorage.removeItem("auth_user");
-  _clearEtagCache();
+  return true;
 }
 
 export function getStoredUser(): { username: string; role: string } | null {
@@ -100,6 +120,7 @@ export function refreshTokenIfNeeded(): Promise<void> {
   if (!isTokenExpiringSoon(30)) return Promise.resolve();
   if (!getStoredToken()) return Promise.resolve();
   if (_refreshPromise) return _refreshPromise;
+  const version = _sessionVersion;
   _refreshPromise = (async () => {
     try {
       const token = getStoredToken();
@@ -109,8 +130,9 @@ export function refreshTokenIfNeeded(): Promise<void> {
       });
       if (!r.ok) return;  // refresh failed -- let normal 401 handling take over
       const data = await r.json();
-      if (data.access_token) {
-        login(data.access_token, { username: data.username, role: data.role });
+      if (data.access_token && version === _sessionVersion && getStoredToken() === token) {
+        localStorage.setItem("auth_token", data.access_token);
+        localStorage.setItem("auth_user", JSON.stringify({ username: data.username, role: data.role }));
       }
     } catch (_) {
       // Silently fail -- next API call will trigger 401 redirect if truly expired
@@ -132,8 +154,7 @@ export function setApiNavigate(fn: NavigateFn): void {
 async function _checkOk(r: Response): Promise<Response> {
   if (!r.ok) {
     if (r.status === 401) {
-      localStorage.removeItem("auth_token");
-      localStorage.removeItem("auth_user");
+      clearSession();
       if (window.location.pathname !== "/login") {
         if (_navigateFn) {
           _navigateFn("/login", { replace: true });
@@ -156,21 +177,27 @@ async function _checkOk(r: Response): Promise<Response> {
 
 export const api = {
   get: async (path: string): Promise<any> => {
+    const version = _sessionVersion;
     await refreshTokenIfNeeded();
+    checkSession(version);
     const headers: Record<string, string> = { ..._getAuthHeader() };
     if (_etagCache[path]) headers["If-None-Match"] = _etagCache[path].etag;
     const r = await fetch(`${API}${path}`, { headers });
+    checkSession(version);
     if (r.status === 304) {
       if (_etagCache[path]) return structuredClone(_etagCache[path].data);
       // Cache miss despite 304 - re-fetch without ETag
       const r2 = await fetch(`${API}${path}`, { headers: { ..._getAuthHeader() } });
+      checkSession(version);
       await _checkOk(r2);
       const data2 = await r2.json();
+      checkSession(version);
       return data2;
     }
     await _checkOk(r);
     const etag = r.headers.get("ETag");
     const data = await r.json();
+    checkSession(version);
     if (etag) {
       _etagCache[path] = { etag, data: structuredClone(data) };
       const keys = Object.keys(_etagCache);
@@ -184,13 +211,30 @@ export const api = {
     }
     return data;
   },
-  post:  async (path: string, body?: unknown): Promise<any> => { await refreshTokenIfNeeded(); const data = await fetch(`${API}${path}`, { method:"POST",   headers:{"Content-Type":"application/json", ..._getAuthHeader()}, body: JSON.stringify(body) }).then(_checkOk).then(r => r.json()); _invalidateRelated(path); return data; },
-  put:   async (path: string, body?: unknown): Promise<any> => { await refreshTokenIfNeeded(); const data = await fetch(`${API}${path}`, { method:"PUT",    headers:{"Content-Type":"application/json", ..._getAuthHeader()}, body: JSON.stringify(body) }).then(_checkOk).then(r => r.json()); _invalidateRelated(path); return data; },
-  patch: async (path: string, body?: unknown): Promise<any> => { await refreshTokenIfNeeded(); const data = await fetch(`${API}${path}`, { method:"PATCH",  headers:{"Content-Type":"application/json", ..._getAuthHeader()}, body: JSON.stringify(body) }).then(_checkOk).then(r => r.json()); _invalidateRelated(path); return data; },
-  del:   async (path: string): Promise<void> => { await refreshTokenIfNeeded(); await fetch(`${API}${path}`, { method:"DELETE", headers:{ ..._getAuthHeader() } }).then(_checkOk); _invalidateRelated(path); },
+  post: (path: string, body?: unknown): Promise<any> => mutate("POST", path, body),
+  put: (path: string, body?: unknown): Promise<any> => mutate("PUT", path, body),
+  patch: (path: string, body?: unknown): Promise<any> => mutate("PATCH", path, body),
+  del: (path: string): Promise<void> => mutate("DELETE", path),
   /** Invalidate one or more ETag cache entries so the next GET fetches fresh data. */
   invalidate: (...paths: string[]): void => { paths.forEach(p => { delete _etagCache[p]; }); },
 };
+
+async function mutate(method: string, path: string, body?: unknown): Promise<any> {
+  const version = _sessionVersion;
+  if (path !== "/api/auth/login") await refreshTokenIfNeeded();
+  checkSession(version);
+  const response = await fetch(`${API}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", ..._getAuthHeader() },
+    body: JSON.stringify(body),
+  });
+  checkSession(version);
+  await _checkOk(response);
+  const data = method === "DELETE" || response.status === 204 ? undefined : await response.json();
+  checkSession(version);
+  _invalidateRelated(path);
+  return data;
+}
 
 // ── SNMP protocol constants ──────────────────────────────────────────────────
 // Visual constants (CABLE_COLORS, VENDOR_*, speedLabel/speedColor) live in

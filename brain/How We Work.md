@@ -14,8 +14,10 @@ work is done; only the user moves them to `Done`.
 - Frontend: `cd frontend && npm run typecheck` and `npm test` (vitest, run mode).
 - Full stack smoke: `docker compose up --build -d` -- UI at http://localhost:3000.
 
-CI (`.github/workflows/ci.yml`) runs lint + backend tests + frontend tests on push/PR
-to `main`; on `v*` tags it builds and pushes images to
+CI (`.github/workflows/ci.yml`) runs security scans, lint, backend tests and frontend
+typecheck/tests on push/PR to `main` and release tags. Image build/publication
+requires successful security checks; the concrete policy and local commands live
+in README's security checks section. Successful `v*` tags publish images to
 `ghcr.io/mainzerp/netmap/{backend,frontend}`.
 
 ## Standards

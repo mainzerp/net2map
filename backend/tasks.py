@@ -4,6 +4,8 @@ import logging
 import time
 from datetime import datetime, timezone
 
+from celery.exceptions import Retry
+
 from celery_app import celery_app
 from database import SessionLocal
 from scan_engine import _execute_scan
@@ -52,6 +54,7 @@ def run_scan_task(self, job_id: str, dry_run: bool = False, scan_type: str = "fu
     cancel_event = _RedisCancelEvent(job_id)
     db = SessionLocal()
     result = None
+    terminal_error = None
     loop = asyncio.new_event_loop()
     try:
         asyncio.set_event_loop(loop)
@@ -71,8 +74,13 @@ def run_scan_task(self, job_id: str, dry_run: bool = False, scan_type: str = "fu
         update_scan_job(job_id, {"status": "retrying"})
         try:
             self.retry(exc=exc)
-        except self.MaxRetriesExceededError:
-            pass
+        except Retry:
+            raise
+        except Exception as retry_exc:
+            # Celery raises the original error when retry(exc=...) is exhausted,
+            # and can also fail to enqueue the retry. Both are terminal states.
+            _log_event(logging.ERROR, "celery.task.retry_failed", job_id=job_id, error=str(retry_exc))
+            terminal_error = retry_exc
     finally:
         release_scan_lock(lock_token, scan_type)
         db.close()
@@ -90,6 +98,9 @@ def run_scan_task(self, job_id: str, dry_run: bool = False, scan_type: str = "fu
         "result": result_dict,
         "status": result.status if result.status in {"finished", "cancelled", "dry_run"} else "failed",
     })
+    if terminal_error is not None:
+        # Keep Celery's task state consistent with the persisted NetMap job.
+        raise terminal_error
 
 
 _last_dispatch = {"discovery": 0, "links": 0, "macs": 0}

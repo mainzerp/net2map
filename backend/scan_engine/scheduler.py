@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from database import AppSetting, SessionLocal
 from scan_engine.event_loop import _get_bg_loop
 from scan_engine.executor import _execute_scan
-from shared.state import _log_event, can_dispatch_scan, set_scan_job
+from shared.state import _log_event, can_dispatch_scan, set_scan_job, update_scan_job
 
 # Wake event: set this to interrupt the scheduler sleep early (e.g. when
 # settings change and the scheduler should re-evaluate intervals immediately).
@@ -56,6 +56,7 @@ def _dispatch_scheduled_scan(scan_type: str):
 
     from shared.redis_client import get_redis
     if get_redis():
+        job_id = None
         try:
             from tasks import run_scan_task
             job_id = str(uuid.uuid4())
@@ -71,6 +72,12 @@ def _dispatch_scheduled_scan(scan_type: str):
             _log_event(logging.INFO, "scheduler.%s.dispatched" % scan_type, backend="celery")
             return
         except Exception as exc:
+            if job_id is not None:
+                update_scan_job(job_id, {
+                    "status": "failed",
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "result": {"errors": ["Failed to enqueue scheduled scan"]},
+                })
             _log_event(logging.WARNING, "scheduler.celery_fallback", error=str(exc), scan_type=scan_type)
 
     # Direct execution fallback (also needs lock). The scan itself runs on the

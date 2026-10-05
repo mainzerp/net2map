@@ -1,14 +1,17 @@
 """Core scan execution engine -- the async _execute_scan function."""
 import asyncio
 import contextlib
+import functools
 import logging
 import re
+import threading
 import time
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from database import (
@@ -57,6 +60,72 @@ _LOCK_RENEW_INTERVAL_SEC = 120
 _DRY_RUN_PREVIEW_ATTR = "_dry_run_preview"
 
 
+class ScanOwnershipLost(RuntimeError):
+    """The scan must stop after losing its distributed lease."""
+
+
+class ScanFinalizationAborted(RuntimeError):
+    """An externally cancelled coroutine must stop its worker transaction."""
+
+
+class _ScanLease:
+    def __init__(self, token):
+        self.token = token
+        self.lost = threading.Event()
+        self.aborted = threading.Event()
+
+    def check(self):
+        if self.lost.is_set():
+            raise ScanOwnershipLost("Scan lock ownership was lost")
+        if self.aborted.is_set():
+            raise ScanFinalizationAborted("Scan finalization was cancelled")
+        if self.token and not renew_scan_lock(self.token):
+            self.lost.set()
+            raise ScanOwnershipLost("Scan lock ownership was lost")
+
+
+def _guard_scan_transactions(finalize):
+    """Require the current lease at each commit, including nested persistence helpers."""
+    @functools.wraps(finalize)
+    def guarded(db, **kwargs):
+        lease = kwargs.get("lease") or _ScanLease(kwargs.get("lock_token"))
+        kwargs["lease"] = lease
+
+        def before_commit(session):
+            lease.check()
+
+        def after_flush(session, flush_context):
+            # A large flush can outlive the lease checked by before_commit.
+            lease.check()
+
+        event.listen(db, "before_commit", before_commit)
+        event.listen(db, "after_flush_postexec", after_flush)
+        try:
+            lease.check()
+            return finalize(db, **kwargs)
+        except BaseException:
+            db.rollback()
+            raise
+        finally:
+            event.remove(db, "before_commit", before_commit)
+            event.remove(db, "after_flush_postexec", after_flush)
+
+    return guarded
+
+
+async def _drain_scan_task(task):
+    """Wait through repeated cancellation until owned background work has stopped."""
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            continue
+        except Exception:
+            break
+    with contextlib.suppress(asyncio.CancelledError, Exception):
+        task.result()
+
+
 def attach_dry_run_preview(result: ScanResult, preview: list) -> None:
     """Attach a dry-run preview list to a ScanResult (not serialized)."""
     result.__dict__[_DRY_RUN_PREVIEW_ATTR] = preview
@@ -81,11 +150,37 @@ async def _execute_scan(
     scan_started = time.perf_counter()
     final_status = "failed"
     SCAN_ACTIVE.inc()
+    lease = _ScanLease(lock_token)
+    body_task = None
+
+    async def renew_lock():
+        while True:
+            await asyncio.sleep(_LOCK_RENEW_INTERVAL_SEC)
+            lease.check()
+
+    # Renew independently of target completion, including a single slow SNMP walk.
+    renew_task = asyncio.create_task(renew_lock()) if lock_token else None
     try:
-        result = await _execute_scan_body(db, cancel_event, corr, scan_mode, dry_run, lock_token, scan_started)
+        lease.check()
+        body_task = asyncio.create_task(
+            _execute_scan_body(db, cancel_event, corr, scan_mode, dry_run, lock_token, scan_started, lease)
+        )
+        if renew_task is not None:
+            await asyncio.wait({body_task, renew_task}, return_when=asyncio.FIRST_COMPLETED)
+            if renew_task.done():
+                renew_task.result()
+        result = await asyncio.shield(body_task)
         final_status = result.status
         return result
     finally:
+        if body_task is not None:
+            if not body_task.done():
+                lease.aborted.set()
+                body_task.cancel()
+            await _drain_scan_task(body_task)
+        if renew_task is not None:
+            renew_task.cancel()
+            await _drain_scan_task(renew_task)
         # Metrics live in finally so exceptions (e.g. from asyncio.gather)
         # can never leak the SCAN_ACTIVE gauge or skip SCAN_TOTAL/SCAN_DURATION.
         duration_ms = int((time.perf_counter() - scan_started) * 1000)
@@ -102,7 +197,9 @@ async def _execute_scan_body(
     dry_run: bool,
     lock_token: Optional[str],
     scan_started: float,
+    lease: _ScanLease,
 ) -> ScanResult:
+    ignored_ips = {d.ip for d in db.query(Device.ip).filter(Device.ignored.is_(True)).all()}
     if scan_mode in {"ports", "links", "macs"}:
         # Only scan credentials that are already in the Device table and not ignored
         known_ips = {d.ip for d in db.query(Device.ip).filter(Device.ignored.is_(False)).all()}
@@ -111,7 +208,7 @@ async def _execute_scan_body(
         ).order_by(Credential.ip, Credential.priority).all()
     else:
         credentials = db.query(Credential).filter(
-            Credential.enabled.is_(True)
+            Credential.enabled.is_(True), Credential.ip.notin_(ignored_ips)
         ).order_by(Credential.ip, Credential.priority).all()
 
     # Group credentials by IP for fallback chain support
@@ -134,7 +231,7 @@ async def _execute_scan_body(
             # Load all profiles to try for each range IP
             all_profiles = db.query(SnmpProfile).order_by(SnmpProfile.id).all()
             for ip in range_ips:
-                if ip in cred_ips:
+                if ip in cred_ips or ip in ignored_ips:
                     continue  # already covered by existing credential
                 if all_profiles:
                     profiles_data = [
@@ -279,7 +376,14 @@ async def _execute_scan_body(
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=max(1, timeout_sec + 1))
             except asyncio.TimeoutError:
                 proc.kill()
+                await proc.wait()
                 return False, 0
+            except asyncio.CancelledError:
+                if proc.returncode is None:
+                    with contextlib.suppress(ProcessLookupError):
+                        proc.kill()
+                await proc.wait()
+                raise
             if proc.returncode != 0:
                 return False, 0
             out = (stdout.decode(errors="replace") + "\n" + stderr.decode(errors="replace")).lower()
@@ -301,6 +405,8 @@ async def _execute_scan_body(
             ip = target["ip"]
             label = target["label"]
             is_probe = target.get("is_range_probe", False)
+            if cancel_event and cancel_event.is_set():
+                return ip, label, None, "cancelled", 0, False, 0, is_probe, None
             ping_ok, ping_rtt = await _ping_host_async(ip)
 
             # For range probes: skip SNMP scan if host does not respond to ping
@@ -316,6 +422,8 @@ async def _execute_scan_body(
             if is_probe:
                 profiles_to_try = target.get("profiles_to_try", [])
                 for prof in profiles_to_try:
+                    if cancel_event and cancel_event.is_set():
+                        break
                     try:
                         data = await scan_switch(
                             ip=ip,
@@ -345,6 +453,8 @@ async def _execute_scan_body(
             all_cred_sets = [target] + target.get("fallback_creds", [])
             last_error = "no SNMP response"
             for cred_set in all_cred_sets:
+                if cancel_event and cancel_event.is_set():
+                    break
                 try:
                     data = await scan_switch(
                         ip=ip,
@@ -382,122 +492,111 @@ async def _execute_scan_body(
 
     total_targets = len(scan_targets)
     scanned_count = 0
-    last_lock_renew = time.time()
-    # as_completed (not gather): progress broadcasts and scan-lock renewals
-    # must happen while the scan runs, not only after the slowest target
-    # finishes -- otherwise long scans lose the lock and progress stalls.
-    target_coros = [_scan_target_async(t, sem) for t in scan_targets]
-    for completed in asyncio.as_completed(target_coros):
-        ip, label, data, error_msg, duration_ms, ping_ok, ping_rtt, is_probe, matched_profile_id = await completed
-        scanned_count += 1
-        ping_by_ip[ip] = (ping_ok, ping_rtt)
-        if data:
-            switch_data[ip] = data
-            if is_probe:
-                range_found_ips.append(ip)
-                range_matched_profile[ip] = matched_profile_id
-            _log_event(
-                logging.INFO,
-                "scan.switch.result",
-                correlation_id=corr,
-                ip=ip,
-                label=label,
-                success=True,
-                ping_ok=ping_ok,
-                ping_rtt_ms=ping_rtt,
-                duration_ms=duration_ms,
-                range_probe=is_probe,
-            )
-            switch_metrics.append(ScanSwitchMetric(
-                ip=ip, label=label, duration_ms=duration_ms, success=True, error=""
-            ))
-        else:
-            # Suppress noisy "no ping" errors for range probes (expected for most hosts)
-            if error_msg and error_msg not in ("cancelled", "no ping") and not is_probe:
-                if ping_ok:
-                    errors.append(f"{ip}: {error_msg} (ping ok)")
-                else:
-                    errors.append(f"{ip}: {error_msg}")
-            if is_probe and error_msg == "no profile suitable" and ping_ok:
-                range_no_profile_ips.append(ip)
-            if not is_probe or (error_msg and error_msg not in ("cancelled", "no ping")):
+    # Keep explicit task ownership so parent exceptions cannot leave targets running.
+    target_tasks = [asyncio.create_task(_scan_target_async(t, sem)) for t in scan_targets]
+    try:
+        for completed in asyncio.as_completed(target_tasks):
+            ip, label, data, error_msg, duration_ms, ping_ok, ping_rtt, is_probe, matched_profile_id = await completed
+            scanned_count += 1
+            ping_by_ip[ip] = (ping_ok, ping_rtt)
+            if data:
+                switch_data[ip] = data
+                if is_probe:
+                    range_found_ips.append(ip)
+                    range_matched_profile[ip] = matched_profile_id
                 _log_event(
-                    logging.WARNING if (error_msg and error_msg not in ("cancelled", "no ping") and not is_probe) else logging.DEBUG,
+                    logging.INFO,
                     "scan.switch.result",
                     correlation_id=corr,
                     ip=ip,
                     label=label,
-                    success=False,
+                    success=True,
                     ping_ok=ping_ok,
                     ping_rtt_ms=ping_rtt,
                     duration_ms=duration_ms,
-                    error=error_msg,
                     range_probe=is_probe,
                 )
-            if not is_probe:
                 switch_metrics.append(ScanSwitchMetric(
-                    ip=ip, label=label, duration_ms=duration_ms,
-                    success=False, error=error_msg or "no SNMP response"
+                    ip=ip, label=label, duration_ms=duration_ms, success=True, error=""
                 ))
+            else:
+                # Suppress noisy "no ping" errors for range probes (expected for most hosts)
+                if error_msg and error_msg not in ("cancelled", "no ping") and not is_probe:
+                    if ping_ok:
+                        errors.append(f"{ip}: {error_msg} (ping ok)")
+                    else:
+                        errors.append(f"{ip}: {error_msg}")
+                if is_probe and error_msg == "no profile suitable" and ping_ok:
+                    range_no_profile_ips.append(ip)
+                if not is_probe or (error_msg and error_msg not in ("cancelled", "no ping")):
+                    _log_event(
+                        logging.WARNING if (error_msg and error_msg not in ("cancelled", "no ping") and not is_probe) else logging.DEBUG,
+                        "scan.switch.result",
+                        correlation_id=corr,
+                        ip=ip,
+                        label=label,
+                        success=False,
+                        ping_ok=ping_ok,
+                        ping_rtt_ms=ping_rtt,
+                        duration_ms=duration_ms,
+                        error=error_msg,
+                        range_probe=is_probe,
+                    )
+                if not is_probe:
+                    switch_metrics.append(ScanSwitchMetric(
+                        ip=ip, label=label, duration_ms=duration_ms,
+                        success=False, error=error_msg or "no SNMP response"
+                    ))
 
-        # Broadcast progress to WebSocket clients
-        _broadcast_progress(scanned_count, total_targets, ip, bool(data), corr)
+            # Broadcast progress to WebSocket clients
+            _broadcast_progress(scanned_count, total_targets, ip, bool(data), corr)
 
-        # Renew the distributed scan lock periodically (TTL is shorter than
-        # long-running scans; renewal is ownership-checked and cheap).
-        if lock_token and (time.time() - last_lock_renew) > _LOCK_RENEW_INTERVAL_SEC:
-            renew_scan_lock(lock_token)
-            last_lock_renew = time.time()
+    finally:
+        for task in target_tasks:
+            if not task.done():
+                task.cancel()
+        await _drain_scan_task(asyncio.ensure_future(asyncio.gather(*target_tasks, return_exceptions=True)))
 
     total_duration_ms = int((time.perf_counter() - scan_started) * 1000)
     switch_metrics.sort(key=lambda m: m.duration_ms, reverse=True)
     status = "cancelled" if (cancel_event and cancel_event.is_set()) else "finished"
 
-    if lock_token:
-        renew_scan_lock(lock_token)
+    lease.check()
 
-    async def _renew_scan_lock_until_done() -> None:
-        """Keep the distributed scan lock alive while the DB rebuild runs.
-
-        _finalize_scan_db can exceed the lock TTL on large rebuilds; without
-        periodic renewal another scan could acquire the lock mid-write.
-        """
-        while True:
-            await asyncio.sleep(_LOCK_RENEW_INTERVAL_SEC)
-            if lock_token:
-                renew_scan_lock(lock_token)
-
-    renew_task = asyncio.create_task(_renew_scan_lock_until_done()) if lock_token else None
+    # The synchronous SQLAlchemy rebuild phase runs in a worker thread so the
+    # shared background event loop stays responsive for WebSocket broadcasts
+    # and other coroutines while ports/links/endpoints are rewritten.
+    finalization_task = asyncio.create_task(asyncio.to_thread(
+        _finalize_scan_db,
+        db,
+        dry_run=dry_run,
+        scan_mode=scan_mode,
+        corr=corr,
+        cancel_event=cancel_event,
+        switch_data=switch_data,
+        ping_by_ip=ping_by_ip,
+        range_found_ips=range_found_ips,
+        range_matched_profile=range_matched_profile,
+        range_no_profile_ips=range_no_profile_ips,
+        errors=errors,
+        status=status,
+        total_duration_ms=total_duration_ms,
+        scanned=len(scan_targets),
+        workers=workers,
+        switch_metrics=switch_metrics,
+        lock_token=lock_token,
+        lease=lease,
+    ))
     try:
-        # The synchronous SQLAlchemy rebuild phase runs in a worker thread so the
-        # shared background event loop stays responsive for WebSocket broadcasts
-        # and other coroutines while ports/links/endpoints are rewritten.
-        result, dry_run_preview = await asyncio.to_thread(
-            _finalize_scan_db,
-            db,
-            dry_run=dry_run,
-            scan_mode=scan_mode,
-            corr=corr,
-            cancel_event=cancel_event,
-            switch_data=switch_data,
-            ping_by_ip=ping_by_ip,
-            range_found_ips=range_found_ips,
-            range_matched_profile=range_matched_profile,
-            range_no_profile_ips=range_no_profile_ips,
-            errors=errors,
-            status=status,
-            total_duration_ms=total_duration_ms,
-            scanned=len(scan_targets),
-            workers=workers,
-            switch_metrics=switch_metrics,
-            lock_token=lock_token,
-        )
-    finally:
-        if renew_task is not None:
-            renew_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await renew_task
+        result, dry_run_preview = await asyncio.shield(finalization_task)
+    except asyncio.CancelledError:
+        lease.aborted.set()
+        # to_thread cannot stop a running thread. Drain it before the caller closes
+        # the Session or releases the scan lock; commit guards reject further writes.
+        await _drain_scan_task(finalization_task)
+        raise
 
+    lease.check()
     if dry_run:
         attach_dry_run_preview(result, dry_run_preview)
         return result
@@ -511,6 +610,7 @@ async def _execute_scan_body(
     return result
 
 
+@_guard_scan_transactions
 def _finalize_scan_db(
     db: Session,
     *,
@@ -530,6 +630,7 @@ def _finalize_scan_db(
     workers: int,
     switch_metrics: List[ScanSwitchMetric],
     lock_token: Optional[str],
+    lease: _ScanLease,
 ) -> tuple:
     """Synchronous DB rebuild phase -- runs in a worker thread via
     asyncio.to_thread (see _execute_scan_body).
@@ -584,7 +685,7 @@ def _finalize_scan_db(
             max_workers=workers,
             total_duration_ms=total_duration_ms,
             switch_metrics=switch_metrics,
-            status="dry_run",
+            status="cancelled" if status == "cancelled" else "dry_run",
         )
 
         # Persist dry-run result to database
@@ -598,8 +699,7 @@ def _finalize_scan_db(
         result.run_id = run_id
         return result, dry_run_preview
 
-    if lock_token:
-        renew_scan_lock(lock_token)
+    lease.check()
 
     # ── Auto-create credentials for IPs discovered via range probes ──────────
     if range_found_ips:
@@ -613,6 +713,7 @@ def _finalize_scan_db(
                 p.id: p for p in db.query(SnmpProfile).filter(SnmpProfile.id.in_(profile_ids)).all()
             }
         for found_ip in range_found_ips:
+            lease.check()
             if found_ip in existing_cred_ips:
                 continue
             sw = switch_data.get(found_ip)
@@ -669,6 +770,7 @@ def _finalize_scan_db(
     vendor_overrides: Dict[str, str] = {}
 
     for ip in update_ips:
+        lease.check()
         sw = switch_data.get(ip)
         ping_ok, ping_rtt = ping_by_ip.get(ip, (False, 0))
         ping_status = "online" if ping_ok else "offline"
@@ -783,12 +885,12 @@ def _finalize_scan_db(
                     }
 
                 for ip, sw in switch_data.items():
+                    lease.check()
                     if cancel_event and cancel_event.is_set():
                         db.rollback()
                         status = "cancelled"
                         break
-                    if lock_token:
-                        renew_scan_lock(lock_token)
+                    lease.check()
 
                     device = devices_by_ip.get(ip)
                     if not device:
@@ -906,6 +1008,8 @@ def _finalize_scan_db(
                             db.add_all(new_assocs)
                     db.commit()
                     ports_committed = True
+            except (ScanOwnershipLost, ScanFinalizationAborted):
+                raise
             except Exception:
                 db.rollback()
                 log.exception("Error during port update, rolled back")
@@ -938,6 +1042,7 @@ def _finalize_scan_db(
                 port_lookup: Dict[str, Dict[str, str]] = {}
                 port_suffix_lookup: Dict[str, Dict[str, str]] = {}
                 for ip, sw in switch_data.items():
+                    lease.check()
                     port_lookup[ip] = {}
                     for iface in sw.interfaces.values():
                         # Primary key: ifDescr (canonical)
@@ -1007,6 +1112,8 @@ def _finalize_scan_db(
                         link_count += 1
                 if not links_cancelled:
                     db.commit()
+            except (ScanOwnershipLost, ScanFinalizationAborted):
+                raise
             except Exception:
                 db.rollback()
                 log.exception("Error during link update, rolled back")

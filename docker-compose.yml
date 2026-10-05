@@ -36,6 +36,9 @@ services:
     image: redis:7-alpine
     container_name: netmap-redis
     restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - netmap-redisdata:/data
     networks:
       - netmap
     deploy:
@@ -177,6 +180,7 @@ services:
 volumes:
   netmap-data:
   netmap-pgdata:
+  netmap-redisdata:
 
 networks:
   netmap:

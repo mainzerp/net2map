@@ -1,6 +1,6 @@
 """SNMP scanner - SNMPv2c / SNMPv3, vendor-aware (Aruba CX + FS.com + generic).
 
-Fully async: all SNMP I/O uses pysnmp.hlapi.asyncio so the event loop is
+Fully async: all SNMP I/O uses pysnmp.hlapi.v3arch.asyncio so the event loop is
 never blocked. scan_switch() is now a coroutine; call it with await.
 """
 import asyncio
@@ -10,35 +10,31 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
-# Auth / privacy constants (sync module exports these, async module does not)
-from pysnmp.hlapi import (
+from pysnmp.hlapi.v3arch.asyncio import (
+    USM_AUTH_HMAC96_MD5,
+    USM_AUTH_HMAC96_SHA,
+    USM_AUTH_HMAC128_SHA224,
+    USM_AUTH_HMAC192_SHA256,
+    USM_AUTH_HMAC256_SHA384,
+    USM_AUTH_HMAC384_SHA512,
+    USM_AUTH_NONE,
+    USM_PRIV_CBC56_DES,
+    USM_PRIV_CBC168_3DES,
+    USM_PRIV_CFB128_AES,
+    USM_PRIV_CFB192_AES,
+    USM_PRIV_CFB256_AES,
+    USM_PRIV_NONE,
     CommunityData,
-    UsmUserData,
-    usm3DESEDEPrivProtocol,
-    usmAesCfb128Protocol,
-    usmAesCfb192Protocol,
-    usmAesCfb256Protocol,
-    usmDESPrivProtocol,
-    usmHMAC128SHA224AuthProtocol,
-    usmHMAC192SHA256AuthProtocol,
-    usmHMAC256SHA384AuthProtocol,
-    usmHMAC384SHA512AuthProtocol,
-    usmHMACMD5AuthProtocol,
-    usmHMACSHAAuthProtocol,
-    usmNoAuthProtocol,
-    usmNoPrivProtocol,
-)
-
-# Async SNMP command generators
-from pysnmp.hlapi.asyncio import (
     ContextData,
     ObjectIdentity,
     ObjectType,
     SnmpEngine,
     UdpTransportTarget,
-    bulkCmd,
-    getCmd,
+    UsmUserData,
+    bulk_cmd,
+    get_cmd,
 )
+from pysnmp.proto.rfc1905 import EndOfMibView, NoSuchInstance, NoSuchObject
 
 # Vendor detection and pure parsing helpers live in pysnmp-free modules so
 # they stay unit-testable without pysnmp.
@@ -73,20 +69,20 @@ class Vendor(str, Enum):
 # --- Protocol maps ------------------------------------------------------------
 
 AUTH_PROTOCOLS = {
-    "MD5":    usmHMACMD5AuthProtocol,
-    "SHA":    usmHMACSHAAuthProtocol,
-    "SHA-224": usmHMAC128SHA224AuthProtocol,
-    "SHA-256": usmHMAC192SHA256AuthProtocol,  # "192" in the constant name refers to HMAC key size, not hash size
-    "SHA-384": usmHMAC256SHA384AuthProtocol,
-    "SHA-512": usmHMAC384SHA512AuthProtocol,
+    "MD5":    USM_AUTH_HMAC96_MD5,
+    "SHA":    USM_AUTH_HMAC96_SHA,
+    "SHA-224": USM_AUTH_HMAC128_SHA224,
+    "SHA-256": USM_AUTH_HMAC192_SHA256,  # "192" in the constant name refers to HMAC key size, not hash size
+    "SHA-384": USM_AUTH_HMAC256_SHA384,
+    "SHA-512": USM_AUTH_HMAC384_SHA512,
 }
 
 PRIV_PROTOCOLS = {
-    "DES":    usmDESPrivProtocol,
-    "3DES":   usm3DESEDEPrivProtocol,
-    "AES-128": usmAesCfb128Protocol,
-    "AES-192": usmAesCfb192Protocol,
-    "AES-256": usmAesCfb256Protocol,
+    "DES":    USM_PRIV_CBC56_DES,
+    "3DES":   USM_PRIV_CBC168_3DES,
+    "AES-128": USM_PRIV_CFB128_AES,
+    "AES-192": USM_PRIV_CFB192_AES,
+    "AES-256": USM_PRIV_CFB256_AES,
 }
 
 # --- OID constants ------------------------------------------------------------
@@ -192,37 +188,41 @@ def build_auth(
 ):
     """Return a pysnmp auth object (CommunityData or UsmUserData)."""
     if snmp_version in (SnmpVersion.V2C, "v2c"):
-        return CommunityData(community, mpModel=1)  # mpModel=1 -> SNMPv2c
+        # SNMPv2c remains available for devices configured with community credentials.
+        return CommunityData(community, mpModel=1)  # nosec B508
 
     # SNMPv3
     sl = v3_security_level
     if sl in (SecurityLevel.NO_AUTH_NO_PRIV, "noAuthNoPriv"):
-        return UsmUserData(
+        # Explicit user-selected noAuthNoPriv device compatibility.
+        return UsmUserData(  # nosec B509
             v3_username,
-            authProtocol=usmNoAuthProtocol,
-            privProtocol=usmNoPrivProtocol,
+            authProtocol=USM_AUTH_NONE,
+            privProtocol=USM_PRIV_NONE,
         )
     if sl in (SecurityLevel.AUTH_NO_PRIV, "authNoPriv"):
-        return UsmUserData(
+        # Explicit user-selected authNoPriv device compatibility.
+        return UsmUserData(  # nosec B509
             v3_username,
             authKey=v3_auth_password,
-            authProtocol=AUTH_PROTOCOLS.get(v3_auth_protocol, usmHMACSHAAuthProtocol),
-            privProtocol=usmNoPrivProtocol,
+            authProtocol=AUTH_PROTOCOLS.get(v3_auth_protocol, USM_AUTH_HMAC96_SHA),
+            privProtocol=USM_PRIV_NONE,
         )
     # authPriv (default)
-    return UsmUserData(
+    # authPriv defaults to SHA-256 and AES-128; maps preserve explicit user selection.
+    return UsmUserData(  # nosec B509
         v3_username,
         authKey=v3_auth_password,
         privKey=v3_priv_password,
-        authProtocol=AUTH_PROTOCOLS.get(v3_auth_protocol, usmHMACSHAAuthProtocol),
-        privProtocol=PRIV_PROTOCOLS.get(v3_priv_protocol, usmAesCfb128Protocol),
+        authProtocol=AUTH_PROTOCOLS.get(v3_auth_protocol, USM_AUTH_HMAC192_SHA256),
+        privProtocol=PRIV_PROTOCOLS.get(v3_priv_protocol, USM_PRIV_CFB128_AES),
     )
 
 
 # --- Low-level async SNMP helpers ---------------------------------------------
 
-def _transport(ip: str, port: int = 161, timeout: int = 3, retries: int = 1):
-    return UdpTransportTarget((ip, port), timeout=timeout, retries=retries)
+async def _transport(ip: str, port: int = 161, timeout: int = 3, retries: int = 1):
+    return await UdpTransportTarget.create((ip, port), timeout=timeout, retries=retries)
 
 
 async def snmp_get(ip: str, port: int, auth,
@@ -237,14 +237,14 @@ async def snmp_get(ip: str, port: int, auth,
     if own_engine:
         engine = SnmpEngine()
     try:
-        error_indication, error_status, _, var_binds = await getCmd(
-            engine, auth, _transport(ip, port, timeout, retries), ContextData(), *objects
+        error_indication, error_status, _, var_binds = await get_cmd(
+            engine, auth, await _transport(ip, port, timeout, retries), ContextData(), *objects
         )
         if error_indication or error_status:
             return result
-        for row in var_binds:
-            # pysnmp-lextudio 5.x: each row is [ObjectType]; older versions: ObjectType
-            vb = row[0] if isinstance(row, (list, tuple)) else row
+        for vb in var_binds:
+            if isinstance(vb[1], (EndOfMibView, NoSuchInstance, NoSuchObject)):
+                continue
             result[str(vb[0])] = _decode_snmp_str(vb[1])
     except Exception as exc:
         exc_type = type(exc).__name__
@@ -257,7 +257,7 @@ async def snmp_get(ip: str, port: int, auth,
     finally:
         if own_engine:
             try:
-                engine.transportDispatcher.closeDispatcher()
+                engine.close_dispatcher()
             except Exception:
                 pass
     return result
@@ -270,11 +270,8 @@ async def snmp_bulk_walk(ip: str, port: int, auth,
                          engine: Optional[SnmpEngine] = None) -> List[Tuple[str, str]]:
     """Async SNMPv2c/v3 GETBULK walk. Returns [(oid_str, value_str)].
 
-    pysnmp-lextudio 5.x changed bulkCmd to return a single awaitable future
-    per call (not an async iterator). Each element in var_binds is a list
-    containing one ObjectType. We loop manually, advancing the start OID with
-    each successful response until we leave the requested subtree or reach
-    max_rows.
+    Advance the cursor through flat PySNMP ObjectType responses. Stop on an
+    exhausted subtree, a non-increasing OID, or the row limit.
     """
     rows: List[Tuple[str, str]] = []
     current_oid = oid
@@ -285,8 +282,8 @@ async def snmp_bulk_walk(ip: str, port: int, auth,
     try:
         while len(rows) < max_rows:
             try:
-                error_indication, error_status, _, var_binds = await bulkCmd(
-                    engine, auth, _transport(ip, port, timeout, retries), ContextData(),
+                error_indication, error_status, _, var_binds = await bulk_cmd(
+                    engine, auth, await _transport(ip, port, timeout, retries), ContextData(),
                     0, bulk_size,
                     ObjectType(ObjectIdentity(current_oid)),
                 )
@@ -301,12 +298,12 @@ async def snmp_bulk_walk(ip: str, port: int, auth,
                 break
 
             advanced = False
-            # In pysnmp-lextudio 5.x var_binds is a list of lists (one sub-list
-            # per repetition), each sub-list containing one ObjectType instance.
-            for row in var_binds:
-                # row is either [ObjectType] or ObjectType depending on version
-                vb = row[0] if isinstance(row, (list, tuple)) else row
+            for vb in var_binds:
+                if isinstance(vb[1], (EndOfMibView, NoSuchInstance, NoSuchObject)):
+                    return rows
                 vb_oid = str(vb[0])
+                if tuple(map(int, vb_oid.split('.'))) <= tuple(map(int, current_oid.split('.'))):
+                    return rows
                 vb_val = _decode_snmp_str(vb[1])
                 # Stop if we have left the requested subtree
                 if not vb_oid.startswith(oid + ".") and vb_oid != oid:
@@ -322,7 +319,7 @@ async def snmp_bulk_walk(ip: str, port: int, auth,
     finally:
         if own_engine:
             try:
-                engine.transportDispatcher.closeDispatcher()
+                engine.close_dispatcher()
             except Exception:
                 pass
     return rows
@@ -347,8 +344,8 @@ async def snmp_bulk_walk_raw(ip: str, port: int, auth,
     try:
         while len(rows) < max_rows:
             try:
-                error_indication, error_status, _, var_binds = await bulkCmd(
-                    engine, auth, _transport(ip, port, timeout, retries), ContextData(),
+                error_indication, error_status, _, var_binds = await bulk_cmd(
+                    engine, auth, await _transport(ip, port, timeout, retries), ContextData(),
                     0, bulk_size,
                     ObjectType(ObjectIdentity(current_oid)),
                 )
@@ -363,9 +360,12 @@ async def snmp_bulk_walk_raw(ip: str, port: int, auth,
                 break
 
             advanced = False
-            for row in var_binds:
-                vb = row[0] if isinstance(row, (list, tuple)) else row
+            for vb in var_binds:
+                if isinstance(vb[1], (EndOfMibView, NoSuchInstance, NoSuchObject)):
+                    return rows
                 vb_oid = str(vb[0])
+                if tuple(map(int, vb_oid.split('.'))) <= tuple(map(int, current_oid.split('.'))):
+                    return rows
                 try:
                     vb_val = bytes(vb[1])
                 except Exception:
@@ -383,7 +383,7 @@ async def snmp_bulk_walk_raw(ip: str, port: int, auth,
     finally:
         if own_engine:
             try:
-                engine.transportDispatcher.closeDispatcher()
+                engine.close_dispatcher()
             except Exception:
                 pass
     return rows
@@ -540,7 +540,7 @@ async def scan_switch(
         )
     finally:
         try:
-            session_engine.transportDispatcher.closeDispatcher()
+            session_engine.close_dispatcher()
         except Exception:
             pass
 

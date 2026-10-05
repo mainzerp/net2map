@@ -11,6 +11,7 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
+from shared import redis_client
 from shared.redis_client import get_redis
 
 # ── In-memory fallbacks (used when Redis is unavailable) ─────────────────────
@@ -314,7 +315,10 @@ def acquire_scan_lock(scan_type: str, timeout: int = 300) -> Optional[str]:
 
     r = get_redis()
     if not r:
-        # In-memory fallback -- simple blocking lock, no priority logic
+        if redis_client.REDIS_URL:
+            # A process-local fallback cannot serialize distributed workers.
+            return None
+        # Redis is deliberately disabled: single-process locking only.
         acquired = _LOCAL_SCAN_LOCK.acquire(timeout=timeout)
         if acquired:
             _LOCAL_ACTIVE_SCAN = scan_type
@@ -374,6 +378,8 @@ def release_scan_lock(token: str, scan_type: str = "") -> None:
 
     r = get_redis()
     if not r:
+        if redis_client.REDIS_URL:
+            return
         if _LOCAL_LOCK_TOKEN == token:
             _LOCAL_ACTIVE_SCAN = None
             _LOCAL_LOCK_TOKEN = None
@@ -401,6 +407,8 @@ def renew_scan_lock(token: str, ttl: int = _SCAN_LOCK_TTL) -> bool:
     """
     r = get_redis()
     if not r:
+        if redis_client.REDIS_URL:
+            return False
         # In-memory fallback has no TTL -- nothing to renew
         return _LOCAL_LOCK_TOKEN == token
     try:
@@ -431,6 +439,8 @@ def can_dispatch_scan(scan_type: str) -> bool:
 
     r = get_redis()
     if not r:
+        if redis_client.REDIS_URL:
+            return False
         if _LOCAL_ACTIVE_SCAN is not None:
             return False
         return True
@@ -451,6 +461,6 @@ def can_dispatch_scan(scan_type: str) -> bool:
                 return False
 
     except Exception:
-        pass
+        return False
 
     return True

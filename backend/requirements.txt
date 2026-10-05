@@ -1,4 +1,5 @@
-fastapi==0.115.5
+fastapi==0.138.1
+starlette==1.7.0
 uvicorn[standard]==0.32.1
 sqlalchemy==2.0.36
 alembic==1.13.3
@@ -6,12 +7,10 @@ pydantic==2.9.2
 pydantic-settings>=2.0.0
 python-multipart>=0.0.7
 psycopg2-binary>=2.9.9
-# pysnmp-lextudio: maintained community fork of the abandoned pysnmp library.
-# Original pysnmp (<=4.4.12) is unmaintained since 2019.
-# Monitor: https://github.com/lextudio/pysnmp for updates.
-pysnmp-lextudio==5.0.34
-pyasn1==0.4.8
-pyasn1-modules==0.2.8
+# Maintained PySNMP driver and patched ASN.1 decoder.
+pysnmp==7.1.30
+pyasn1==0.6.4
+pyasn1-modules==0.4.2
 cryptography>=42.0.0
 dnspython>=2.6.1
 defusedxml>=0.7.1

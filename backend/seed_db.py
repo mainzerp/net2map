@@ -10,16 +10,21 @@ Topology
     • 3× Aruba CX switches   (Access, vendor = "aruba_cx")
         – 2× Aruba CX 6300M connected to FS TOR-1
         – 1× Aruba CX 6200F  connected to FS TOR-2
+    • 1× UniFi AP            (outside rack, vendor = "unifi")
+        – class "Access Point" has allow_outside_rack=True, so the AP is
+          rendered on the map without a rack assignment
 
 Links (stored as TopologyLink / LLDP)
     • Within rack  : FS TOR-1 ↔ FS TOR-2  (100G inter-switch trunk)
     • Within rack  : Aruba-1/2 → FS TOR-1  (10G uplink)
     • Within rack  : Aruba-3   → FS TOR-2  (10G uplink)
+    • Within rack  : AP eth0   → one Aruba access port (2.5G, rotating)
     • Inter-rack   : ring A→B→C→D→E→A via FS TOR-2 100G uplink ports
 
 Credentials
     • One SNMPv3 credential per FS TOR switch   (authPriv / SHA-256 / AES-128)
     • One SNMPv3 credential per Aruba CX switch (authPriv / SHA-256 / AES-256)
+    • One SNMPv2c credential per AP             (community "public")
 """
 import os
 import random
@@ -83,6 +88,19 @@ CLUSTER_OFFSETS = [
     (  0,  45),   # Aruba CX-2  → TOR-1
     ( 70,  45),   # Aruba CX-3  → TOR-2
 ]
+
+# Access points sit below the rack cluster on the map (no rack assignment).
+AP_OFFSET = (0, 115)
+
+AP_MODELS = [
+    {"model": "UniFi U6 Pro",        "descr": "UniFi U6 Pro, UniFi OS 6.6.77"},
+    {"model": "UniFi U7 Pro",        "descr": "UniFi U7 Pro, UniFi OS 7.0.15"},
+    {"model": "UniFi U6 Enterprise", "descr": "UniFi U6 Enterprise, UniFi OS 6.6.77"},
+]
+
+# Rack elevation placement (1-based U, same order as CLUSTER_OFFSETS):
+# TOR switches at the top, access switches below a patch-panel gap.
+RACK_U_POSITIONS = [42, 41, 38, 37, 36]
 
 # ─── Switch templates ─────────────────────────────────────────────────────────
 
@@ -229,10 +247,12 @@ def seed(db: Session):
     cls_acc = SwitchClass(label="Access",        color="#22c55e", description="Access-layer switches")
     cls_agg = SwitchClass(label="Aggregation",   color="#f59e0b", description="Distribution / aggregation switches")
     cls_cor = SwitchClass(label="Core",          color="#8b5cf6", description="Core / backbone switches")
-    for sc in [cls_tor, cls_acc, cls_agg, cls_cor]:
+    cls_ap  = SwitchClass(label="Access Point",  color="#ec4899", description="Wireless access points",
+                         allow_outside_rack=True)
+    for sc in [cls_tor, cls_acc, cls_agg, cls_cor, cls_ap]:
         db.add(sc)
     db.flush()
-    print(f"  [OK] Classes: {cls_tor.label}, {cls_acc.label}, {cls_agg.label}, {cls_cor.label}")
+    print(f"  [OK] Classes: {cls_tor.label}, {cls_acc.label}, {cls_agg.label}, {cls_cor.label}, {cls_ap.label}")
 
     # ── 0c. Managed Racks ───────────────────────────────────────────────────
     print("Creating managed racks …")
@@ -272,6 +292,7 @@ def seed(db: Session):
             map_x     = cx + ox,
             map_y     = cy + oy,
             rack_id   = mr.id,
+            rack_u_position = RACK_U_POSITIONS[0],
             class_id  = cls_tor.id,
             label     = f"{rack['label']} TOR-1 -- {FS_MODEL}",
             enabled   = True,
@@ -293,6 +314,7 @@ def seed(db: Session):
             map_x     = cx + ox,
             map_y     = cy + oy,
             rack_id   = mr.id,
+            rack_u_position = RACK_U_POSITIONS[1],
             class_id  = cls_tor.id,
             label     = f"{rack['label']} TOR-2 -- {FS_MODEL}",
             enabled   = True,
@@ -307,6 +329,7 @@ def seed(db: Session):
         aruba1 = Device(
             sys_name  = f"aruba-{rack_id}-acc1",
             ip        = make_ip(2),
+            rack_u_position = RACK_U_POSITIONS[2],
             sys_descr = ARUBA_CX_6300["descr"],
             model     = ARUBA_CX_6300["model"],
             vendor    = "aruba_cx",
@@ -328,6 +351,7 @@ def seed(db: Session):
         aruba2 = Device(
             sys_name  = f"aruba-{rack_id}-acc2",
             ip        = make_ip(3),
+            rack_u_position = RACK_U_POSITIONS[3],
             sys_descr = ARUBA_CX_6300["descr"],
             model     = ARUBA_CX_6300["model"],
             vendor    = "aruba_cx",
@@ -349,6 +373,7 @@ def seed(db: Session):
         aruba3 = Device(
             sys_name  = f"aruba-{rack_id}-acc3",
             ip        = make_ip(4),
+            rack_u_position = RACK_U_POSITIONS[4],
             sys_descr = ARUBA_CX_6200["descr"],
             model     = ARUBA_CX_6200["model"],
             vendor    = "aruba_cx",
@@ -365,12 +390,53 @@ def seed(db: Session):
         for p in make_aruba_6200_ports(aruba3.id, ri, 4):
             db.add(p)
 
+        # ── UniFi AP  (outside rack — class allows it) ─────────────────────
+        ap_tpl = AP_MODELS[ri % len(AP_MODELS)]
+        ap = Device(
+            sys_name  = f"ap-{rack_id}-01",
+            ip        = make_ip(99),        # 192.168.<rack>.100
+            sys_descr = ap_tpl["descr"],
+            model     = ap_tpl["model"],
+            vendor    = "unifi",
+            location  = f"{location} / ceiling",
+            map_x     = cx + AP_OFFSET[0],
+            map_y     = cy + AP_OFFSET[1],
+            rack_id   = None,               # outside-rack placement
+            class_id  = cls_ap.id,
+            label     = f"{rack['label']} AP -- {ap_tpl['model']}",
+            enabled   = True,
+        )
+        db.add(ap)
+        db.flush()
+        db.add(Port(
+            device_id   = ap.id,
+            if_index    = 1,
+            if_descr    = "eth0",
+            if_alias    = "uplink",
+            speed_mbps  = 2_500,
+            oper_status = 1,
+            vlan        = 1,
+        ))
+
         devices_by_rack[rack_id] = {
             "fs1": fs1, "fs2": fs2,
             "aruba1": aruba1, "aruba2": aruba2, "aruba3": aruba3,
+            "ap": ap,
         }
 
         # ── Credentials ─────────────────────────────────────────────────────
+        db.add(Credential(
+            label        = f"{rack['label']} AP -- {ap.model}",
+            ip           = ap.ip,
+            snmp_port    = 161,
+            enabled      = True,
+            device_id    = ap.id,
+            profile_id   = None,
+            snmp_version = "v2c",
+            community    = "public",
+        ))
+        cred_counter += 1
+
         for sw, role in [(fs1,"TOR-1"),(fs2,"TOR-2"),(aruba1,"ACC-1"),(aruba2,"ACC-2"),(aruba3,"ACC-3")]:
             is_fs = sw.vendor == "fs"
             db.add(Credential(
@@ -422,7 +488,7 @@ def seed(db: Session):
         ))
         links_added += 2
 
-    for rack in RACKS:
+    for ri, rack in enumerate(RACKS):
         d = devices_by_rack[rack["id"]]
         fs1, fs2 = d["fs1"], d["fs2"]
         a1, a2, a3 = d["aruba1"], d["aruba2"], d["aruba3"]
@@ -438,6 +504,10 @@ def seed(db: Session):
 
         # Aruba ACC-3 uplink → FS TOR-2 (port 1)
         add_link(a3, "1/1/49", fs2, "Eth1/1", "10G")
+
+        # AP eth0 uplink → rotating Aruba access port
+        uplink_sw = [a1, a2, a3][ri % 3]
+        add_link(d["ap"], "eth0", uplink_sw, "1/1/3", "2.5G")
 
     # Inter-rack ring: FS TOR-2 port 22 → next rack FS TOR-1 port 22
     for i, rack in enumerate(RACKS):
@@ -461,13 +531,28 @@ def seed(db: Session):
     print(f"\n{'─'*52}")
     print(f"  SNMP Profiles  : {total_profiles:>4}  (2 global profiles)")
     print(f"  Managed Racks  : {total_racks:>4}  (Rack A-E)")
-    print(f"  Switch Classes : {total_cls:>4}  (TOR, Access, Aggregation, Core)")
-    print(f"  Devices        : {total_dev:>4}  (10 FS TOR + 15 Aruba CX)")
+    print(f"  Switch Classes : {total_cls:>4}  (TOR, Access, Aggregation, Core, AP)")
+    print(f"  Devices        : {total_dev:>4}  (10 FS TOR + 15 Aruba CX + 5 UniFi AP)")
     print(f"  Ports          : {total_port:>4}")
     print(f"  LLDP links     : {total_link:>4}")
-    print(f"  Credentials    : {total_cred:>4}  (SNMPv3 authPriv)")
+    print(f"  Credentials    : {total_cred:>4}  (SNMPv3 switches, SNMPv2c APs)")
     print(f"{'─'*52}")
     print("  Seed complete")
+
+    # Invalidate the topology cache: the /api/topology ETag is derived from the
+    # version counter only, so direct DB writes stay invisible to clients (304)
+    # until the version changes. The scan engine does this via
+    # _bump_topo_version(); the seed must do the same.
+    try:
+        from shared.redis_client import get_redis
+        r = get_redis()
+        if r:
+            r.incr("netmap:topo_version")
+            print("  [OK] Topology cache invalidated (topo_version bumped)")
+        else:
+            print("  [NOTE] No Redis configured; restart the backend to invalidate the topology cache")
+    except Exception as exc:
+        print(f"  [NOTE] Could not bump topo_version: {exc}")
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────

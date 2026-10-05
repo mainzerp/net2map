@@ -1,0 +1,33 @@
+# Demo instance override: runs a second, isolated NetMap stack alongside the
+# main instance. Separate containers, volumes and network via the compose
+# project name; seeded with dummy data from backend/seed_db.py.
+#
+# Usage:
+#   docker compose -p netmap-demo -f docker-compose.yml -f docker-compose.demo.yml up -d
+#   docker compose -p netmap-demo -f docker-compose.yml -f docker-compose.demo.yml exec backend python seed_db.py
+#   docker compose -p netmap-demo -f docker-compose.yml -f docker-compose.demo.yml down -v   # tear down incl. data
+#
+# Frontend: http://localhost:3200  (main instance stays on :3000)
+services:
+  postgres:
+    container_name: netmap-demo-postgres
+
+  redis:
+    container_name: netmap-demo-redis
+
+  backend:
+    image: switch-map-backend   # reuse already-built image, no rebuild
+    container_name: netmap-demo-backend
+
+  celery-worker:
+    image: switch-map-backend
+    container_name: netmap-demo-celery
+
+  celery-beat:
+    image: switch-map-backend
+    container_name: netmap-demo-celery-beat
+
+  frontend:
+    image: switch-map-frontend
+    container_name: netmap-demo-frontend
+    ports: !override ["3200:80"]

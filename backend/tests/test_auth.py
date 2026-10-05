@@ -78,6 +78,11 @@ def test_missing_token_returns_401(client):
     assert r.json()["error"]["code"] == "AUTH_MISSING"
 
 
+def test_host_header_cannot_make_protected_route_auth_exempt(client):
+    response = client.get("/api/credentials", headers={"Host": "attacker/health?"})
+    assert response.status_code == 401
+
+
 def test_expired_jwt_token_returns_401(client, db):
     """An expired JWT token returns 401."""
     from datetime import datetime, timedelta, timezone
@@ -407,6 +412,8 @@ def test_cannot_delete_last_active_admin(client, auth_headers, db):
 
 def test_deactivate_admin_allowed_when_other_admin_active(client, auth_headers, db):
     """Deactivating an admin succeeds when another active admin exists."""
+    from unittest.mock import patch
+
     for name in ("admin_a", "admin_b"):
         db.add(User(
             username=name, email=f"{name}@test.com",
@@ -414,6 +421,7 @@ def test_deactivate_admin_allowed_when_other_admin_active(client, auth_headers, 
         ))
     db.commit()
     target = _get_user_id(db, "admin_a")
-    r = client.put(f"/api/users/{target}", json={"is_active": False}, headers=auth_headers)
+    with patch("routers.auth.blacklist_all_user_tokens", return_value=True):
+        r = client.put(f"/api/users/{target}", json={"is_active": False}, headers=auth_headers)
     assert r.status_code == 200
     assert r.json()["is_active"] is False
