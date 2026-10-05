@@ -3,7 +3,7 @@
 Both modules are deliberately free of pysnmp dependencies so they can be
 imported directly in the test environment (pysnmp is mocked/broken there).
 """
-from scanners.detection import detect_vendor
+from scanners.detection import VENDOR_OIDS, detect_vendor, oid_has_prefix
 from scanners.parsing import _oid_to_vlan_mac_qbridge, resolve_fdb_candidates
 
 
@@ -30,6 +30,78 @@ class TestDetectVendorOids:
 
     def test_h3c_enterprise_oid_is_not_aruba_cx(self):
         assert detect_vendor("H3C S5120 Switch", "1.3.6.1.4.1.25506.1.1") == "generic"
+
+
+class TestDetectVendorOidBoundaries:
+    """sysObjectID prefixes must match on OID arc boundaries only."""
+
+    def test_enterprise_9999_is_not_cisco(self):
+        assert detect_vendor("some switch", "1.3.6.1.4.1.9999.1.2") == "generic"
+
+    def test_enterprise_90_is_not_cisco(self):
+        assert detect_vendor("some switch", "1.3.6.1.4.1.90") == "generic"
+
+    def test_enterprise_9999_falls_back_to_keywords(self):
+        assert detect_vendor("FS S5860-20SQ Switch", "1.3.6.1.4.1.9999.1") == "fs"
+
+    def test_cisco_subtree_still_cisco(self):
+        assert detect_vendor("some switch", "1.3.6.1.4.1.9.1.2695") == "cisco"
+
+    def test_exact_prefix_equality_matches(self):
+        for prefix, vendor in VENDOR_OIDS.items():
+            assert detect_vendor("", prefix) == vendor
+
+    def test_longer_enterprise_numbers_do_not_match(self):
+        for prefix in VENDOR_OIDS:
+            assert detect_vendor("", prefix + "7.1") == "generic"
+
+    def test_leading_dot_and_whitespace_normalized(self):
+        assert detect_vendor("", " .1.3.6.1.4.1.9.1.1208 ") == "cisco"
+        assert detect_vendor("", ".1.3.6.1.4.1.9999.1") == "generic"
+
+    def test_every_vendor_detected_by_representative_oid(self):
+        representative = {
+            "aruba_cx": "1.3.6.1.4.1.47196.4.1.1.1.100",
+            "fs": "1.3.6.1.4.1.52642.2.1.45.1",
+            "unifi": "1.3.6.1.4.1.41112.1.6",
+            "cisco": "1.3.6.1.4.1.9.1.1208",
+        }
+        assert set(representative) == set(VENDOR_OIDS.values())
+        for vendor, oid in representative.items():
+            assert detect_vendor("Mysterious black box", oid) == vendor
+
+    def test_oid_takes_precedence_over_keywords(self):
+        assert detect_vendor("Cisco IOS Software", "1.3.6.1.4.1.47196.1") == "aruba_cx"
+
+
+class TestOidHasPrefix:
+    def test_equal(self):
+        assert oid_has_prefix("1.3.6.1.4.1.9", "1.3.6.1.4.1.9")
+
+    def test_child(self):
+        assert oid_has_prefix("1.3.6.1.4.1.9.1", "1.3.6.1.4.1.9")
+
+    def test_not_on_boundary(self):
+        assert not oid_has_prefix("1.3.6.1.4.1.9999", "1.3.6.1.4.1.9")
+
+    def test_shorter_oid(self):
+        assert not oid_has_prefix("1.3.6.1.4.1", "1.3.6.1.4.1.9")
+
+    def test_empty_inputs(self):
+        assert not oid_has_prefix("", "1.3.6.1.4.1.9")
+        assert not oid_has_prefix("1.3.6.1.4.1.9", "")
+        assert not oid_has_prefix(None, "1.3.6.1.4.1.9")
+
+    def test_longest_prefix_wins(self, monkeypatch):
+        import scanners.detection as detection
+
+        monkeypatch.setattr(
+            detection,
+            "VENDOR_OIDS",
+            {"1.3.6.1.4.1.9": "cisco", "1.3.6.1.4.1.9.6": "cisco_sb"},
+        )
+        assert detection.detect_vendor("", "1.3.6.1.4.1.9.6.1.95") == "cisco_sb"
+        assert detection.detect_vendor("", "1.3.6.1.4.1.9.1.1208") == "cisco"
 
 
 class TestDetectVendorKeywords:

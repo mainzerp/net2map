@@ -38,16 +38,49 @@ _VENDOR_KEYWORD_RES: Dict[str, List["re.Pattern"]] = {
 }
 
 
+def _normalize_oid(oid: str) -> str:
+    """Strip surrounding whitespace and a leading dot from a dotted OID."""
+    return (oid or "").strip().lstrip(".")
+
+
+def oid_has_prefix(oid: str, prefix: str) -> bool:
+    """Return True if ``oid`` equals ``prefix`` or lies beneath it.
+
+    Matching respects arc boundaries: ``1.3.6.1.4.1.9`` matches
+    ``1.3.6.1.4.1.9`` and ``1.3.6.1.4.1.9.1.1208`` but not
+    ``1.3.6.1.4.1.9999.1``.
+    """
+    oid = _normalize_oid(oid)
+    prefix = _normalize_oid(prefix)
+    if not oid or not prefix:
+        return False
+    return oid == prefix or oid.startswith(prefix + ".")
+
+
+def _vendor_from_oid(sys_object_id: str) -> str:
+    """Map a sysObjectID to a vendor via VENDOR_OIDS; longest prefix wins.
+
+    Returns an empty string when no enterprise prefix matches.
+    """
+    best_prefix = ""
+    best_vendor = ""
+    for prefix, vendor in VENDOR_OIDS.items():
+        if oid_has_prefix(sys_object_id, prefix) and len(prefix) > len(best_prefix):
+            best_prefix, best_vendor = prefix, vendor
+    return best_vendor
+
+
 def detect_vendor(sys_descr: str, sys_object_id: str) -> str:
     """Identify vendor from sysDescr and sysObjectID.
 
-    sysObjectID mappings are intentionally conservative (see VENDOR_OIDS);
-    keyword matching uses word-boundary-anchored regexes. Ambiguous devices
-    fall back to "generic".
+    sysObjectID mappings are intentionally conservative (see VENDOR_OIDS) and
+    matched on OID arc boundaries with longest-prefix-wins; keyword matching
+    uses word-boundary-anchored regexes. Ambiguous devices fall back to
+    "generic".
     """
-    for prefix, vendor in VENDOR_OIDS.items():
-        if sys_object_id.startswith(prefix):
-            return vendor
+    oid_vendor = _vendor_from_oid(sys_object_id)
+    if oid_vendor:
+        return oid_vendor
     for vendor, patterns in _VENDOR_KEYWORD_RES.items():
         if any(p.search(sys_descr or "") for p in patterns):
             return vendor
