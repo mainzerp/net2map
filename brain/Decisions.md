@@ -4,7 +4,7 @@
 
 - **Brain created; AGENTS.md adapted.** `brain/roadmap.md` is the live pipeline board;
   `todo.md` is frozen as a legacy checklist and points here. Reason: one pipeline
-  owner, no double bookkeeping.
+  owner, no double bookkeeping. (2026-10-06: `todo.md` removed in the repo cleanup.)
 - **Doc map.** `docs/README.md` created as the doc map. `docs/SubAgent/` keeps AI-agent
   ANALYSIS/PLAN working notes (session artifacts, not maintained user docs).
   `README.md` and `BACKUP.md` stay German because they are user-facing; agent-facing
@@ -174,3 +174,26 @@
   the terracotta/danger band 350..60 stays free); lightness/chroma are theme tokens
   (`--vlan-l/-c/-soft-l/-soft-c`) holding >= 4.85:1 on all surfaces. The golden angle
   was rejected: it puts common ids (10/99, 1/200) almost on the same hue.
+
+## Backlog sweep (2026-10-06)
+
+- **Scan lock fencing in the database.** Acquiring `scan:lock` atomically
+  increments `netmap:fence:scan:lock` (one Lua script) and the lock token becomes
+  `<owner>:<fence>`. Every transaction under `@_guard_scan_transactions` first
+  upserts `lease_fences` with `ON CONFLICT ... WHERE token <= excluded.token`;
+  zero rows means a newer holder exists, so the transaction rolls back with
+  `StaleLeaseError` (a `ScanOwnershipLost`). The counter is floored at Redis time
+  in microseconds so a Redis data loss cannot restart tokens below the stored
+  fence and block all future scans. Redis checks stay as the cheap early exit.
+- **sysObjectID matching respects OID boundaries** and the longest prefix wins.
+- **`/health` is liveness only (DB + Redis).** It is the container healthcheck,
+  so a missing Celery worker must not block the frontend; `/health?deep=1` adds
+  the worker ping and returns 503 without workers.
+- **OpenAPI UI public by default** (`OPENAPI_ENABLED=true`): the pages are static
+  and every API call still needs a bearer token. The docs paths get their own CSP
+  (jsDelivr assets plus the inline-script hash), the SPA keeps its strict CSP.
+- **Logout validates its own token** and is exempt from the global auth
+  dependency, so logging out with an expired or revoked token is idempotent (200)
+  while garbage tokens get 401.
+- **Scheduler and rate limits are shared through Redis**, with in-memory fallback
+  when Redis is unavailable, so multiple workers no longer dispatch or count twice.

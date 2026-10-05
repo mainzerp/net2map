@@ -20,6 +20,8 @@ Das Projekt besteht aus einem FastAPI-Backend (Scan, Persistenz, API) und einem 
 - `frontend/` – React + Vite + TypeScript (Tailwind v4, TanStack Query, React Flow), ausgeliefert über Nginx im Docker-Setup
 - `docker-compose.yml` – Startet Frontend und Backend gemeinsam
 
+Weitere Dokumentation (Englisch): `docs/API.md` (API-Referenz), `docs/OPERATIONS.md` (Betrieb, Deployment, Umgebungsvariablen); Uebersicht in `docs/README.md`.
+
 ## Schnellstart mit Docker
 
 Voraussetzung: Docker + Docker Compose
@@ -41,6 +43,19 @@ docker compose up --build -d
 Danach ist die UI erreichbar unter:
 
 - http://localhost:3000
+- API-Dokumentation (OpenAPI/Swagger UI): http://localhost:3000/docs (abschaltbar
+  mit `OPENAPI_ENABLED=false`; API-Aufrufe erfordern weiterhin ein Token)
+
+Optionale Einstellungen (z. B. `LOG_LEVEL`, `JWT_EXPIRY_HOURS`,
+`AUDIT_RETENTION_DAYS`, `UVICORN_WORKERS`) stehen kommentiert in `.env.example`
+und werden von Compose an die Container weitergereicht.
+
+Vorgebaute Images aus der GitHub Container Registry (fuer `v*`-Tags) statt
+lokalem Build:
+
+```bash
+NETMAP_VERSION=v1.2.3 docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
+```
 
 PostgreSQL speichert die Datenbank persistent im Docker-Volume `netmap-pgdata`.
 Das Volume `netmap-data` enthaelt die unter `/data` abgelegten Dateien.
@@ -97,13 +112,15 @@ Optional kann die Backend-URL über `VITE_API_URL` gesetzt werden.
 ## API-Versionierung
 
 - Kanonischer Präfix der Backend-API ist `/api/v1` (z. B. `GET /api/v1/devices`).
-  Die OpenAPI-Dokumentation (`/docs`) listet ausschließlich die `/api/v1`-Pfade.
+  Die OpenAPI-Dokumentation (`/docs`, im Docker-Setup http://localhost:3000/docs)
+  listet ausschließlich die `/api/v1`-Pfade.
 - Der unversionierte Präfix `/api/...` bleibt als **veralteter Alias** erhalten und
   liefert identische Antworten. Jede Antwort darüber enthält zusätzlich
   `Deprecation: true` und `Link: </api/v1/...>; rel="successor-version"` (gleicher
   Restpfad inklusive Query-String). Neue Clients sollten nur `/api/v1` verwenden.
 - Unversioniert bleiben `GET /health`, `GET /metrics` und der WebSocket
-  `/ws/scan-progress`.
+  `/ws/scan-progress`. `GET /health` prueft nur Datenbank und Redis (Container-
+  Healthcheck); `GET /health?deep=1` prueft zusaetzlich die Celery-Worker.
 - Das Frontend arbeitet intern mit logischen `/api/...`-Pfaden und bildet sie zentral
   in `frontend/src/api.ts` auf `/api/v1/...` ab.
 

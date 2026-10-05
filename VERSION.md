@@ -4,7 +4,8 @@
 
 **Type:** MINOR
 
-Arbeitsstand, noch nicht veroeffentlicht; Prototyp fuer das UI-Redesign.
+Veroeffentlicht am 2026-10-06 als Tag `v2.2.0` (Images unter
+`ghcr.io/mainzerp/netmap/backend` und `/frontend`). Enthaelt auch v2.1.2.
 
 ### Features
 
@@ -85,12 +86,34 @@ Arbeitsstand, noch nicht veroeffentlicht; Prototyp fuer das UI-Redesign.
 - Auth-Ausnahmen (Login, Refresh, Kartenhintergrund) gelten fuer beide
   Praefixe; Prometheus-Metriken fassen `/api/x` und `/api/v1/x` in einer Serie
   (`/api/v1/x`) zusammen.
+- Datenbank-Fencing fuer die Scan-Sperre: Jede Sperrvergabe erhaelt ein
+  steigendes Fencing-Token; die Datenbank (`lease_fences`, Migration 020)
+  verwirft Schreibvorgaenge eines Scans, dessen Sperre inzwischen neu vergeben
+  wurde. Metrik `netmap_stale_lease_rejections_total`.
+- Herstellererkennung per sysObjectID beachtet OID-Grenzen (`1.3.6.1.4.1.9999`
+  ist kein Cisco mehr); der laengste Praefix gewinnt.
+- Review-Funde behoben: IP-Pruefung beim Credential-Update, Schutz vor
+  CSV-Formel-Injection im Export, Logout antwortet bei ungueltigem Token mit 401,
+  SNMP-Walks bis 10000 Zeilen mit Warnung bei Abschneiden, Credential-Profile
+  einmal pro Scan, `last_seen` fuer nur per Ping erreichbare Geraete,
+  Scheduler-Dispatch und Rate-Limits ueber Redis statt pro Worker.
+- Frontend: ETag-Cache als LRU, Logs-Seite mit Seitenumbruch (100 pro Seite),
+  `VITE_API_TOKEN` entfernt, Login alternativ mit Zugangs-Token.
+- Betrieb: `/docs`, `/redoc` und `/openapi.json` ueber Port 3000 erreichbar
+  (`OPENAPI_ENABLED`); `/health` haengt nicht mehr von Celery ab
+  (`/health?deep=1` prueft die Worker); weitere Einstellungen ueber Compose
+  setzbar; Aufbewahrung der Audit-Logs liest die Einstellung aus der Datenbank;
+  `docker-compose.ghcr.yml` fuer die veroeffentlichten Images; Demo-Seeding
+  repariert. Neue Doku `docs/API.md` und `docs/OPERATIONS.md`.
+- Aufgeraeumt: `bundle_debug.js`, `todo.md` und `fix_encoding.py` entfernt,
+  `migrate_sqlite_to_pg.py` liegt jetzt unter `scripts/`; Versionsangaben in
+  `frontend/package.json` und der OpenAPI-Beschreibung auf 2.2.0.
 
 ## v2.1.2 -- Sitzungs-Sicherheit, Scan-Stabilitaet und UI-Polish
 
 **Type:** PATCH
 
-Arbeitsstand, noch nicht veroeffentlicht; Commit-Referenz folgt beim Commit.
+Commit `a5cbaa4`; ohne eigenen Tag, veroeffentlicht zusammen mit v2.2.0.
 
 ### Fixes
 

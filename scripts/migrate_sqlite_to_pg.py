@@ -5,8 +5,10 @@ One-shot migration script: copy all data from the old SQLite database
 The SQLite and PostgreSQL schemas are identical (created by the same Alembic
 migrations), so this is a straight column-for-column copy.
 
-Usage inside the running backend container:
-    SQLITE_PATH=/data/netmap.db PG_HOST=postgres python /app/migrate_sqlite_to_pg.py
+Usage inside the running backend container (the script is not part of the image):
+    docker compose cp scripts/migrate_sqlite_to_pg.py backend:/tmp/migrate_sqlite_to_pg.py
+    docker compose exec -e SQLITE_PATH=/data/netmap.db -e PG_HOST=postgres backend \
+        python /tmp/migrate_sqlite_to_pg.py
 """
 
 import os

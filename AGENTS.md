@@ -259,8 +259,8 @@ Rules of thumb:
   (background scan pipeline: executor, jobs, scheduler, event_loop, ping, dns,
   broadcast), `scanners/` (vendor SNMP scanners: aruba_cx, cisco, fs_scanner, generic,
   opnsense, unifi; plus detection/parsing helpers), `shared/`
-  (auth, crypto, audit, metrics, redis_client, state), `alembic/versions/` (16 migrations),
-  `tests/` (26 test modules), plus `config.py`, `database.py`, `schemas.py`,
+  (auth, crypto, audit, metrics, redis_client, state), `alembic/versions/` (migrations 001-020),
+  `tests/` (pytest suite), plus `config.py`, `database.py`, `schemas.py`,
   `celery_app.py`, `tasks.py`, `seed_db.py`, legacy `snmp_scanner.py`.
 - `frontend/` — React 18 + Vite + TypeScript SPA served by nginx; entry
   `index.html` → `src/main.tsx` (lazy-loaded pages); owning doc: `docs/README.md`.
@@ -286,10 +286,9 @@ Rules of thumb:
 - `.github/workflows/ci.yml` — CI: ruff + backend pytest + frontend vitest; on `v*`
   tags pushes images to `ghcr.io/mainzerp/netmap`.
 - Root files: `README.md` (product overview/quickstart, German), `VERSION.md`
-  (version carrier), `BACKUP.md` (backup/restore manual), `todo.md` (legacy frozen
-  checklist; roadmap lives in `brain/roadmap.md`), one-shot scripts
-  (`fix_encoding.py`, `migrate_sqlite_to_pg.py`) and debug leftovers
-  (`bundle_debug.js`).
+  (version carrier), `BACKUP.md` (backup/restore manual). The roadmap lives in
+  `brain/roadmap.md` (the legacy `todo.md` was removed). The one-shot
+  SQLite-to-PostgreSQL copy lives in `scripts/migrate_sqlite_to_pg.py`.
 
 Module layout and contracts live in the repo's owning docs (see the Docs Discipline
 table); project mission and naming context live in `brain/Mission.md`. `brain/` holds

@@ -16,6 +16,9 @@ work is done; only the user moves them to `Done`.
   `docker run --rm --entrypoint sh -e DATABASE_URL=sqlite:///./test.db -e SECRET_TOKEN=test-token switch-map-backend -c "cd /app && python -m pytest tests/ -q -o addopts=''"`.
   Do not run tests inside the live `netmap-backend` container: its compose env
   (Redis, JWT) breaks test assumptions.
+- Backend code changes must also rebuild the workers: compose services are
+  `backend`, `celery-worker`, `celery-beat` (`docker compose up -d --build backend
+  celery-worker celery-beat`); the worker otherwise keeps running old code.
 - Frontend: `cd frontend && npm run typecheck` and `npm test` (vitest, run mode).
 - Full stack smoke: `docker compose up --build -d` -- UI at http://localhost:3000.
 

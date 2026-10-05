@@ -10,6 +10,8 @@ owns and the reading order. It does not own any topic itself.
 2. `BACKUP.md` — database backup/restore manual.
 3. `VERSION.md` — release history; single source of truth for the version.
 4. `brain/BRAIN.md` — project brain: mission, goals, decisions, roadmap.
+5. `docs/OPERATIONS.md` — when deploying, updating or troubleshooting the stack.
+6. `docs/API.md` — when working on backend endpoints or API clients.
 
 ## What lives where
 
@@ -25,7 +27,8 @@ owns and the reading order. It does not own any topic itself.
 | `brain/How We Work.md` | Build rhythm and verification commands |
 | `brain/Decisions.md` | Decisions with rationale |
 | `brain/roadmap.md` | Live pipeline board (Backlog / In Progress / Testing / Done / Idea Bank) |
-| `todo.md` | Legacy frozen checklist — superseded by `brain/roadmap.md` |
+| `docs/API.md` | API reference: versioning, auth/RBAC, WebSocket ticket flow, error format, endpoint tables per router, central schemas (English) |
+| `docs/OPERATIONS.md` | Ops/deployment: containers and ports, env var reference, setup, update/rollback, health/metrics, logs, demo stack, troubleshooting (English; backup commands stay in `BACKUP.md`) |
 
 ## Subfolder
 
@@ -33,12 +36,6 @@ owns and the reading order. It does not own any topic itself.
   produced during past feature work (auto-refresh bug, code review, endpoint table,
   TS migration, ruff fixes, ...). They are session artifacts: read for background,
   do not treat them as current contracts, and do not update them retroactively.
-
-## Planned docs (not yet written)
-
-- API reference — the 18 backend routers have no reference documentation yet.
-- Ops/deployment guide — environment variables beyond `.env.example`, update/rollback
-  flow, backup pointer to `BACKUP.md`.
 
 ## Rules
 

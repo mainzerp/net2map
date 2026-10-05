@@ -5,35 +5,52 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Backlog
 
-
-- Persistent database fencing across Redis lease changes · priority: P2 · area: backend
-  Observed lease loss, missing-client split brain and orphan finalizers are fixed
-  in the security follow-up. Commit/post-flush checks do not provide an atomic
-  transaction spanning Redis and SQL; a persistent fencing design is separate work.
-  Verify: pause a commit across lease expiry/reacquisition and prove stale writes
-  are rejected by the database, including concurrent PostgreSQL workers.
-- Reconcile remaining historical review findings · priority: P2 · area: full-stack
-  Reports: docs/SubAgent/CODE_REVIEW_2026-09.md and CODE_REVIEW_2026-10-01.md.
-  September fixes and the October review are done (v2.1.1/v2.1.2); do not repeat
-  already-fixed auth/heartbeat/frontend work. Revalidate historical residuals
-  before promoting new changes; verify each against current code and regression tests.
-- API reference doc · priority: P2 · area: docs
-  18 routers currently have no reference documentation.
-- Ops/deployment guide · priority: P2 · area: docs
-  Env vars beyond `.env.example`; update/rollback flow; backup pointer to BACKUP.md.
-- Vendor detection prefix boundary · priority: P2 · area: backend
-  `backend/scanners/detection.py:48-49` matches sysObjectID prefixes without a dot
-  boundary (`1.3.6.1.4.1.9999` detected as Cisco `...4.1.9`). Fix + regression test.
-- Repo cleanup · priority: P3 · area: repo
-  Remove stray root files (`bundle_debug.js`), stale `frontend/package.json`
-  version, decide fate of one-shot scripts. (Dead `frontend/src/main.jsx` and
-  `Port.jsx` already removed in the v2.0.0 frontend rework.)
+- Token storage in localStorage (review #32) · priority: P3 · area: frontend
+  Deferred design decision: move the JWT to an httpOnly cookie (needs CSRF design).
+- Frontend major upgrades (Vite, React Router) · priority: P3 · area: frontend
+  Advisory residue from the October review; separate migration effort.
+- Cisco PVST per-VLAN STP instances · priority: P3 · area: backend
+  Needs community@vlan / v3 context `vlan-<id>` walks per VLAN.
 
 ## In Progress
 
 (none)
 
 ## Testing
+
+- Historical review findings fixed · priority: P2 · area: full-stack
+  Done: CredentialUpdate ip validated like create; CSV formula-injection escaping
+  with import round-trip; logout 401 on garbage, 200 idempotent (path exempt from
+  global auth); SNMP walk cap 10000 with WARNING on truncation; profiles built
+  once per scan; ping-only devices refresh last_seen; scheduler dispatch claim in
+  Redis; stale scan jobs pruned; frontend ETag LRU, Logs pagination (100/page),
+  VITE_API_TOKEN removed, typed api helpers, new "Use an access token" login option.
+  Passed: 691 backend tests (clean container), 190 frontend tests, build.
+  Review: login/logout, Logs page paging, CSV export/import, single-token login.
+- Ops fixes and repo cleanup · priority: P2 · area: ops
+  Done: /docs, /redoc, /openapi.json via nginx (OPENAPI_ENABLED, own CSP); demo
+  mounts seed_db.py; compose passes LOG_LEVEL/JWT_EXPIRY_HOURS/AUDIT_RETENTION_DAYS/
+  REQUEST_LOG_ENABLED/UVICORN_*/OPENAPI_ENABLED; purge reads the DB setting;
+  /health no longer depends on Celery (`?deep=1` does); rate limits in Redis;
+  docker-compose.ghcr.yml. Removed bundle_debug.js, todo.md, fix_encoding.py;
+  migrate script -> scripts/; versions 2.2.0 in package.json and main.py.
+  Verified live: /docs Swagger 200, /health and ?deep=1 ok.
+  Review: open :3000/docs and :3000/redoc in the browser (CSP), demo seeding.
+
+- Persistent database fencing for the scan lock · priority: P2 · area: backend
+  Done: fence token per acquisition (Lua INCR, floored at Redis time), migration
+  020 `lease_fences` (applied on local stack), fence upsert as first statement of
+  every guarded transaction, StaleLeaseError -> lease-loss path, metric
+  `netmap_stale_lease_rejections_total`. Passed: 619 backend tests (clean
+  container), stale-writer scenario on SQLite. Not run: real concurrent PostgreSQL.
+  Review: run a normal scan on :3000, it must finish as before.
+- Vendor detection prefix boundary · priority: P2 · area: backend
+  Done: OID boundary + longest prefix in `scanners/detection.py`, 15 tests.
+  Review: devices keep their vendor after the next scan.
+- API reference and ops guide · priority: P2 · area: docs
+  Done: `docs/API.md` (19 routers, auth, WS, schemas), `docs/OPERATIONS.md`
+  (env vars, update, rollback, troubleshooting); doc map + README link.
+  Review: read both docs.
 
 - API versioning (/api/v1 + deprecated /api alias) · priority: P1 · area: backend
   Done: decorators without /api, routers mounted under /api/v1 (OpenAPI) and /api
