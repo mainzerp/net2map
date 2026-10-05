@@ -21,10 +21,9 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
   18 routers currently have no reference documentation.
 - Ops/deployment guide · priority: P2 · area: docs
   Env vars beyond `.env.example`; update/rollback flow; backup pointer to BACKUP.md.
-- Logical topology overlays · priority: P3 · area: frontend
-  Toggle map views for STP root paths, blocked ports, VLAN topologies.
-  Note: the map now runs on React Flow (@xyflow/react) -- overlays build on
-  `src/features/topology` (TopologyCanvas, graph.ts, edges/).
+- Vendor detection prefix boundary · priority: P2 · area: backend
+  `backend/scanners/detection.py:48-49` matches sysObjectID prefixes without a dot
+  boundary (`1.3.6.1.4.1.9999` detected as Cisco `...4.1.9`). Fix + regression test.
 - Repo cleanup · priority: P3 · area: repo
   Remove stray root files (`bundle_debug.js`), stale `frontend/package.json`
   version, decide fate of one-shot scripts. (Dead `frontend/src/main.jsx` and
@@ -55,6 +54,8 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Done
 
+- Logical topology overlays (STP + VLAN, one color per VLAN id) · priority: done · area: full-stack · v2.2.0
+  Limits: Cisco PVST default instance only; intra-rack links get no overlay.
 - Rack device labels beside the rack · priority: done · area: frontend · v2.2.0
 - Cartography phase 4-5: racks (stylized port tiles) and motion · priority: done · area: frontend · v2.2.0
 - Hide Auto-Layout when a floor-plan background is set · priority: done · area: frontend · v2.2.0

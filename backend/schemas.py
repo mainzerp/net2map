@@ -1,7 +1,7 @@
 """Pydantic schemas for request / response validation."""
 import re
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import (
     BaseModel,
@@ -400,6 +400,11 @@ class PortOut(BaseModel):
     endpoint_count: int = 0
     vlan:        Optional[int] = 0
     tagged_vlans: Optional[List[int]] = None
+    # disabled|blocking|listening|learning|forwarding|broken (BRIDGE-MIB)
+    stp_state:   Optional[str] = None
+    # root|designated|blocked|disabled (derived from state and root port)
+    stp_role:    Optional[str] = None
+    stp_path_cost: Optional[int] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -468,6 +473,33 @@ class DeviceBase(BaseModel):
         return default
 
 
+class StpInfo(BaseModel):
+    """Bridge-level spanning tree summary (default instance)."""
+    protocol:  str = "unknown"            # stp|rstp|mstp|unknown
+    bridge_id: Optional[str] = None       # "<prio hex4>.<mac hex12>", e.g. "8000.aabbccddeeff"
+    root_id:   Optional[str] = None
+    root_cost: Optional[int] = None
+    root_port: Optional[str] = None       # port name toward the root; None on the root bridge
+    is_root:   bool = False
+
+
+def build_stp_info(protocol, bridge_id, root_id, root_cost, root_port) -> Optional[StpInfo]:
+    """Build StpInfo from the Device STP columns; None when no STP data exists."""
+    if bridge_id is None and root_id is None and protocol is None:
+        return None
+    is_root = bool(bridge_id and root_id and bridge_id == root_id) or (
+        not root_port and root_cost == 0
+    )
+    return StpInfo(
+        protocol=protocol or "unknown",
+        bridge_id=bridge_id,
+        root_id=root_id,
+        root_cost=root_cost,
+        root_port=root_port or None,
+        is_root=is_root,
+    )
+
+
 class DeviceOut(DeviceBase):
     model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
@@ -481,6 +513,15 @@ class DeviceOut(DeviceBase):
     u_height:      int = 1
     ports_per_row: Optional[int] = None   # resolved from switch_model
     total_ports:   Optional[int] = None   # port cutoff: ports beyond this index are hidden
+    stp:           Optional[StpInfo] = None
+    vlan_names:    Dict[str, str] = Field(default_factory=dict)
+
+    # Raw Device STP columns: input only, folded into ``stp`` below.
+    stp_protocol:  Optional[str] = Field(default=None, exclude=True)
+    stp_bridge_id: Optional[str] = Field(default=None, exclude=True)
+    stp_root_id:   Optional[str] = Field(default=None, exclude=True)
+    stp_root_cost: Optional[int] = Field(default=None, exclude=True)
+    stp_root_port: Optional[str] = Field(default=None, exclude=True)
 
     @field_validator("u_height", mode="before")
     @classmethod
@@ -488,6 +529,22 @@ class DeviceOut(DeviceBase):
         # u_height is declared on DeviceOut (not DeviceBase); NULL must map
         # to the 1U default rather than fail the int validation.
         return 1 if v is None else v
+
+    @field_validator("vlan_names", mode="before")
+    @classmethod
+    def _coerce_vlan_names(cls, v):
+        if not isinstance(v, dict):
+            return {}
+        return {str(k): str(name) for k, name in v.items() if name is not None}
+
+    @model_validator(mode="after")
+    def _build_stp(self):
+        if self.stp is None:
+            self.stp = build_stp_info(
+                self.stp_protocol, self.stp_bridge_id, self.stp_root_id,
+                self.stp_root_cost, self.stp_root_port,
+            )
+        return self
 
 
 class RackPositionUpdate(BaseModel):

@@ -16,6 +16,7 @@ import {
   type DataTableColumn,
 } from "../components/ui";
 import { CABLE_COLORS, VENDOR_COLOR, VENDOR_LABEL, speedColor, speedLabel } from "../theme/visual";
+import { vlanColor } from "../features/topology/vlanColor";
 
 // Design-system review page ("Cartography"). Reachable at /styleguide behind
 // the normal auth shell; intentionally not linked from the navigation.
@@ -115,6 +116,7 @@ const SAMPLE_COLUMNS: DataTableColumn<SampleRow>[] = [
 const BADGE_TONES: BadgeTone[] = ["neutral", "accent", "success", "warning", "danger"];
 const TOAST_TYPES: ToastType[] = ["success", "error", "warning", "info"];
 const SPEEDS = [100, 1000, 10000, 25000, 100000];
+const VLAN_SAMPLE_IDS = [1, 10, 20, 30, 40, 99, 100, 200];
 
 export default function StyleguidePage() {
   const { theme, toggleTheme } = useTheme();
@@ -196,6 +198,32 @@ export default function StyleguidePage() {
               </span>
             ))}
           </div>
+        </div>
+      </Section>
+
+      <Section
+        title="Map layers"
+        hint="features/topology/vlanColor.ts: one stable hue per VLAN id (terracotta/red band excluded); STP uses overlay-stp."
+      >
+        <div className="flex flex-wrap gap-3" data-testid="vlan-palette">
+          {VLAN_SAMPLE_IDS.map((id) => {
+            const c = vlanColor(id);
+            return (
+              <span key={id} className="inline-flex items-center gap-1.5 text-xs">
+                <span className="w-6 h-2 rounded-full" style={{ background: c.stroke }} aria-hidden="true" />
+                <span
+                  className="rounded-full border px-1.5 font-mono font-semibold text-[10px] tabular-nums"
+                  style={{ borderColor: c.stroke, backgroundColor: c.soft, color: c.stroke }}
+                >
+                  {id}
+                </span>
+              </span>
+            );
+          })}
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted">
+            <span className="w-6 h-2 rounded-full bg-overlay-stp" aria-hidden="true" />
+            STP
+          </span>
         </div>
       </Section>
 

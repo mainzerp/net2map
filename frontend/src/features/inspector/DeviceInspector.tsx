@@ -5,7 +5,7 @@ import { useDevices, useTopology } from "../../hooks/api";
 import { searchWithInspect, useInspector } from "../../hooks/useInspector";
 import useNetmapStore from "../../store";
 import { speedLabel } from "../../theme/visual";
-import { Badge, Button, StatusDot } from "../../components/ui";
+import { Badge, Button, StatusDot, type BadgeTone } from "../../components/ui";
 import type { PortInfo } from "../../types";
 import {
   FactList,
@@ -30,6 +30,30 @@ interface Neighbor {
 
 function portName(port: PortInfo): string {
   return port.name || port.if_descr || port.port_id;
+}
+
+// Compact STP chip: the role when known (root/designated/blocked), else the
+// state; the tooltip lists role, state and path cost.
+function stpTone(port: PortInfo): BadgeTone {
+  if (port.stp_role === "blocked" || port.stp_state === "blocking" || port.stp_state === "broken") return "danger";
+  if (port.stp_state === "listening" || port.stp_state === "learning") return "warning";
+  if (port.stp_role === "root" || port.stp_role === "designated" || port.stp_state === "forwarding") return "success";
+  return "neutral";
+}
+
+function StpChip({ port }: { port: PortInfo }) {
+  const text = port.stp_role ?? port.stp_state;
+  if (!text) return <span className="text-muted">-</span>;
+  const title = [
+    port.stp_role ? `Role: ${port.stp_role}` : null,
+    port.stp_state ? `State: ${port.stp_state}` : null,
+    port.stp_path_cost != null ? `Path cost: ${port.stp_path_cost}` : null,
+  ].filter(Boolean).join(", ");
+  return (
+    <Badge tone={stpTone(port)} className="px-1.5 py-0 text-[9px]" title={title}>
+      {text}
+    </Badge>
+  );
 }
 
 export default function DeviceInspector({ id, titleId }: { id: number; titleId: string }) {
@@ -79,6 +103,9 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
   if (isLoading || (!device && devicesQuery.isLoading)) return <InspectorLoading titleId={titleId} />;
   if (!device) return <InspectorNotFound titleId={titleId} what="Switch" onClose={close} />;
 
+  const showVlan = ports.some((p) => p.vlan != null || (p.tagged_vlans?.length ?? 0) > 0);
+  const showStp = ports.some((p) => p.stp_state != null || p.stp_role != null);
+  const stp = device.stp ?? null;
   const upCount = ports.filter((p) => p.oper_status === 1).length;
   const downCount = ports.length - upCount;
   const upPercent = ports.length > 0 ? Math.round((upCount / ports.length) * 100) : 0;
@@ -143,6 +170,21 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
         />
       </InspectorSection>
 
+      {stp && (
+        <InspectorSection title="Spanning tree">
+          <FactList
+            facts={[
+              { label: "Protocol", value: stp.protocol === "unknown" ? "Unknown" : stp.protocol.toUpperCase() },
+              { label: "Root bridge", value: stp.is_root ? "Yes" : "No" },
+              { label: "Root port", value: stp.is_root ? null : stp.root_port, mono: true },
+              { label: "Root cost", value: stp.root_cost != null ? String(stp.root_cost) : null, mono: true },
+              { label: "Bridge ID", value: stp.bridge_id, mono: true },
+              { label: "Root ID", value: stp.root_id, mono: true },
+            ]}
+          />
+        </InspectorSection>
+      )}
+
       <InspectorSection
         title="Ports"
         aside={
@@ -168,14 +210,20 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
                   <th className="px-2 py-1.5 text-left font-semibold">Port</th>
                   <th className="px-2 py-1.5 text-left font-semibold">Status</th>
                   <th className="px-2 py-1.5 text-right font-semibold">Speed</th>
-                  <th className="px-2 py-1.5 text-right font-semibold">VLAN</th>
+                  {showVlan && <th className="px-2 py-1.5 text-right font-semibold">VLAN</th>}
+                  {showStp && <th className="px-2 py-1.5 text-left font-semibold">STP</th>}
                   <th className="px-2 py-1.5 text-right font-semibold">Endp.</th>
                 </tr>
               </thead>
               <tbody>
                 {ports.map((port) => {
                   const up = port.oper_status === 1;
-                  const tagged = port.tagged_vlans?.length ? `Tagged: ${port.tagged_vlans.join(", ")}` : undefined;
+                  const taggedList = port.tagged_vlans ?? [];
+                  const tagged = taggedList.length ? `Tagged: ${taggedList.join(", ")}` : undefined;
+                  const vlanText = [
+                    port.vlan != null ? String(port.vlan) : null,
+                    taggedList.length ? `${taggedList.length} tagged` : null,
+                  ].filter(Boolean).join(" + ") || "-";
                   return (
                     <tr key={port.id ?? port.port_id} className="border-t border-line">
                       <td className="px-2 py-1 font-mono text-primary truncate max-w-32">{portName(port)}</td>
@@ -188,10 +236,16 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
                       <td className="px-2 py-1 text-right font-mono text-muted">
                         {port.speed_mbps ? speedLabel(port.speed_mbps) : "-"}
                       </td>
-                      <td className="px-2 py-1 text-right font-mono text-muted" title={tagged}>
-                        {port.vlan ?? "-"}
-                        {tagged ? "+" : ""}
-                      </td>
+                      {showVlan && (
+                        <td className="px-2 py-1 text-right font-mono text-muted whitespace-nowrap" title={tagged}>
+                          {vlanText}
+                        </td>
+                      )}
+                      {showStp && (
+                        <td className="px-2 py-1">
+                          <StpChip port={port} />
+                        </td>
+                      )}
                       <td className="px-2 py-1 text-right font-mono text-muted">{port.endpoint_count || 0}</td>
                     </tr>
                   );

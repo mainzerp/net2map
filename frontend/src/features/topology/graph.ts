@@ -10,6 +10,7 @@ import type {
   RackInfo,
   SwitchClass,
   FilterState,
+  PortInfo,
 } from "../../types";
 import { CABLE_COLORS, speedColor, speedLabelToMbps } from "../../theme/visual";
 
@@ -198,13 +199,19 @@ export type LinkStatus = "up" | "down" | "unknown";
 
 const normPortId = (s: string | undefined | null): string => (s || "").trim().toLowerCase();
 
-function portOperStatus(device: TopologyNode | undefined, port: string): number | null {
+// Resolve an LLDP/CDP port label to the device's PortInfo by name, port_id or
+// ifDescr (case-insensitive); null when the device or port is unknown.
+export function resolvePort(device: TopologyNode | undefined, port: string | null | undefined): PortInfo | null {
   if (!device) return null;
   const key = normPortId(port);
   if (!key) return null;
-  const match = (device.ports || []).find(
+  return (device.ports || []).find(
     p => normPortId(p.name) === key || normPortId(p.port_id) === key || normPortId(p.if_descr) === key,
-  );
+  ) ?? null;
+}
+
+function portOperStatus(device: TopologyNode | undefined, port: string): number | null {
+  const match = resolvePort(device, port);
   return match ? match.oper_status : null;
 }
 

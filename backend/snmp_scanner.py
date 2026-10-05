@@ -40,7 +40,7 @@ from pysnmp.proto.rfc1905 import EndOfMibView, NoSuchInstance, NoSuchObject
 # Vendor detection and pure parsing helpers live in pysnmp-free modules so
 # they stay unit-testable without pysnmp.
 from scanners.detection import detect_vendor
-from scanners.parsing import _hex_to_mac, resolve_fdb_candidates
+from scanners.parsing import _hex_to_mac, build_stp_info, parse_vlan_names, resolve_fdb_candidates
 
 log = logging.getLogger(__name__)
 
@@ -157,6 +157,24 @@ OID_NETSNMP_ENTERPRISE = "1.3.6.1.4.1.8072"
 OID_DOT1Q_PVID = "1.3.6.1.2.1.17.7.1.4.5.1.1"  # dot1qPvid
 OID_DOT1Q_VLAN_STATIC_EGRESS   = "1.3.6.1.2.1.17.7.1.4.3.1.2"  # dot1qVlanStaticEgressPorts
 OID_DOT1Q_VLAN_STATIC_UNTAGGED = "1.3.6.1.2.1.17.7.1.4.3.1.4"  # dot1qVlanStaticUntaggedPorts
+OID_DOT1Q_VLAN_STATIC_NAME     = "1.3.6.1.2.1.17.7.1.4.3.1.1"  # dot1qVlanStaticName (index = VLAN id)
+
+# Spanning tree (BRIDGE-MIB dot1dStp / RSTP-MIB), default instance only
+OID_DOT1D_BASE_BRIDGE_ADDRESS   = "1.3.6.1.2.1.17.1.1.0"   # dot1dBaseBridgeAddress (6-octet MAC)
+OID_DOT1D_STP_PROTOCOL_SPEC     = "1.3.6.1.2.1.17.2.1.0"   # dot1dStpProtocolSpecification (3 = ieee8021d)
+OID_DOT1D_STP_PRIORITY          = "1.3.6.1.2.1.17.2.2.0"   # dot1dStpPriority
+OID_DOT1D_STP_DESIGNATED_ROOT   = "1.3.6.1.2.1.17.2.5.0"   # dot1dStpDesignatedRoot (8-octet BridgeId)
+OID_DOT1D_STP_ROOT_COST         = "1.3.6.1.2.1.17.2.6.0"   # dot1dStpRootCost
+OID_DOT1D_STP_ROOT_PORT         = "1.3.6.1.2.1.17.2.7.0"   # dot1dStpRootPort (bridge port, 0 = root)
+OID_DOT1D_STP_VERSION           = "1.3.6.1.2.1.17.2.16.0"  # RSTP-MIB dot1dStpVersion (0 stp, 2 rstp, 3 mstp)
+OID_DOT1D_STP_PORT_STATE        = "1.3.6.1.2.1.17.2.15.1.3"  # dot1dStpPortState (index = bridge port)
+OID_DOT1D_STP_PORT_PATH_COST    = "1.3.6.1.2.1.17.2.15.1.5"  # dot1dStpPortPathCost (index = bridge port)
+
+STP_SCALAR_OIDS = (
+    OID_DOT1D_BASE_BRIDGE_ADDRESS, OID_DOT1D_STP_PROTOCOL_SPEC, OID_DOT1D_STP_PRIORITY,
+    OID_DOT1D_STP_DESIGNATED_ROOT, OID_DOT1D_STP_ROOT_COST, OID_DOT1D_STP_ROOT_PORT,
+    OID_DOT1D_STP_VERSION,
+)
 
 
 # --- Data classes -------------------------------------------------------------
@@ -170,6 +188,9 @@ class IfInfo:
     oper_status: int = 2
     vlan:        int = 0
     tagged_vlans: List[int] = field(default_factory=list)
+    stp_state:     Optional[str] = None
+    stp_role:      Optional[str] = None
+    stp_path_cost: Optional[int] = None
 
 
 @dataclass
@@ -195,6 +216,10 @@ class SwitchData:
     arp_table:      Dict[str, str]     = field(default_factory=dict)  # mac -> ip
     mac_ifindex:    Dict[str, int]     = field(default_factory=dict)  # mac -> ifIndex
     engine_id:      str = ""   # snmpEngineID.0 as lowercase hex ("" if unavailable)
+    # Bridge-level STP summary (keys: protocol, bridge_id, root_id, root_cost,
+    # root_port) or None when the device reports no STP data.
+    stp:            Optional[dict] = None
+    vlan_names:     Dict[str, str] = field(default_factory=dict)  # "vlan id" -> name
 
 
 # --- Credentials builder ------------------------------------------------------
@@ -360,6 +385,40 @@ async def snmp_get_raw(ip: str, port: int, auth,
                 continue
     except Exception as exc:
         log.debug("snmp_get_raw %s: %s: %s", ip, type(exc).__name__, exc)
+    finally:
+        if own_engine:
+            try:
+                engine.close_dispatcher()
+            except Exception:
+                pass
+    return result
+
+
+async def snmp_get_values(ip: str, port: int, auth,
+                          *oids: str,
+                          timeout: int = 3,
+                          retries: int = 1,
+                          engine: Optional[SnmpEngine] = None) -> Dict[str, object]:
+    """Async GET returning the undecoded pysnmp values, for requests that mix
+    INTEGER and binary OCTET STRING objects (e.g. BRIDGE-MIB STP scalars).
+    Errors and missing objects yield an empty / partial dict."""
+    result: Dict[str, object] = {}
+    objects = [ObjectType(ObjectIdentity(o)) for o in oids]
+    own_engine = engine is None
+    if own_engine:
+        engine = SnmpEngine()
+    try:
+        error_indication, error_status, _, var_binds = await get_cmd(
+            engine, auth, await _transport(ip, port, timeout, retries), ContextData(), *objects
+        )
+        if error_indication or error_status:
+            return result
+        for vb in var_binds:
+            if isinstance(vb[1], (EndOfMibView, NoSuchInstance, NoSuchObject)):
+                continue
+            result[str(vb[0])] = vb[1]
+    except Exception as exc:
+        log.debug("snmp_get_values %s: %s: %s", ip, type(exc).__name__, exc)
     finally:
         if own_engine:
             try:
@@ -625,6 +684,101 @@ async def _read_engine_id(ip: str, snmp_port: int, auth, snmp_timeout: int,
         log.debug("snmpEngineID read failed for %s: %s", ip, exc)
         return ""
     return engine_id_to_hex(raw.get(OID_SNMP_ENGINE_ID))
+
+
+# --- Spanning tree / VLAN names -----------------------------------------------
+
+async def _collect_stp_and_vlan_names(
+    sw: SwitchData,
+    ip: str,
+    snmp_port: int,
+    auth,
+    snmp_timeout: int,
+    snmp_retries: int,
+    engine: SnmpEngine,
+    bridge_to_ifindex: Dict[int, int],
+) -> None:
+    """Fill sw.stp, sw.vlan_names and the per-interface STP fields.
+
+    Best effort: missing MIBs, noSuchObject and timeouts leave the fields at
+    their defaults (None / {}); this never raises. One GET reads the STP
+    scalars (in parallel with the VLAN name walk); the two per-port STP walks
+    only run when the device answered at least one STP scalar.
+
+    Only the default spanning tree instance is read with the plain
+    community / context. Cisco PVST+ / Rapid-PVST+ per-VLAN instances would
+    require community@vlan (v2c) or context "vlan-<id>" (v3) and are out of
+    scope.
+    """
+    try:
+        if not get_scanner(sw.vendor).supports_stp():
+            stp_scalars: Dict[str, object] = {}
+            name_rows = await snmp_bulk_walk(
+                ip, snmp_port, auth, OID_DOT1Q_VLAN_STATIC_NAME,
+                timeout=snmp_timeout, retries=snmp_retries, engine=engine,
+            )
+        else:
+            stp_scalars, name_rows = await asyncio.gather(
+                snmp_get_values(
+                    ip, snmp_port, auth, *STP_SCALAR_OIDS,
+                    timeout=snmp_timeout, retries=snmp_retries, engine=engine,
+                ),
+                snmp_bulk_walk(
+                    ip, snmp_port, auth, OID_DOT1Q_VLAN_STATIC_NAME,
+                    timeout=snmp_timeout, retries=snmp_retries, engine=engine,
+                ),
+            )
+        sw.vlan_names = parse_vlan_names(name_rows)
+    except Exception:
+        log.debug("STP scalar / VLAN name read failed for %s", ip)
+        return
+
+    if not stp_scalars:
+        return
+
+    try:
+        state_rows, cost_rows = await asyncio.gather(
+            snmp_bulk_walk(
+                ip, snmp_port, auth, OID_DOT1D_STP_PORT_STATE,
+                timeout=snmp_timeout, retries=snmp_retries, engine=engine,
+            ),
+            snmp_bulk_walk(
+                ip, snmp_port, auth, OID_DOT1D_STP_PORT_PATH_COST,
+                timeout=snmp_timeout, retries=snmp_retries, engine=engine,
+            ),
+        )
+        if (state_rows or cost_rows) and not bridge_to_ifindex:
+            bp_rows = await snmp_bulk_walk(
+                ip, snmp_port, auth, OID_DOT1D_BASE_PORT_IF_INDEX,
+                timeout=snmp_timeout, retries=snmp_retries, engine=engine,
+            )
+            for oid_s, ifindex_val in bp_rows:
+                try:
+                    bridge_to_ifindex[int(_last_n(oid_s, 1)[0])] = int(ifindex_val)
+                except ValueError:
+                    continue
+
+        port_names = {idx: iface.descr for idx, iface in sw.interfaces.items() if iface.descr}
+        sw.stp, per_ifindex = build_stp_info(
+            stp_scalars, state_rows, cost_rows, bridge_to_ifindex, port_names,
+            oid_priority=OID_DOT1D_STP_PRIORITY,
+            oid_base_address=OID_DOT1D_BASE_BRIDGE_ADDRESS,
+            oid_designated_root=OID_DOT1D_STP_DESIGNATED_ROOT,
+            oid_root_cost=OID_DOT1D_STP_ROOT_COST,
+            oid_root_port=OID_DOT1D_STP_ROOT_PORT,
+            oid_version=OID_DOT1D_STP_VERSION,
+            oid_protocol_spec=OID_DOT1D_STP_PROTOCOL_SPEC,
+        )
+        for ifindex, info in per_ifindex.items():
+            iface = sw.interfaces.get(ifindex)
+            if iface is None:
+                continue
+            iface.stp_state = info["state"]
+            iface.stp_role = info["role"]
+            iface.stp_path_cost = info["path_cost"]
+        log.debug("STP for %s: %s, %d ports", ip, sw.stp, len(per_ifindex))
+    except Exception:
+        log.debug("STP walk failed for %s (BRIDGE-MIB dot1dStp not supported)", ip)
 
 
 # --- Main async scan function -------------------------------------------------
@@ -998,6 +1152,11 @@ async def _scan_switch_inner(
 
     except Exception:
         log.debug("VLAN walk failed for %s (Q-BRIDGE-MIB not supported)", ip)
+
+    # -- 7. Spanning tree + VLAN names - best effort ----------------------------
+    await _collect_stp_and_vlan_names(
+        sw, ip, snmp_port, auth, snmp_timeout, snmp_retries, engine, bridge_to_ifindex,
+    )
 
     log.info("Scanned %s (%s) vendor=%s: %d ifaces, %d LLDP nbrs",
              ip, sw.sys_name, sw.vendor, len(sw.interfaces), len(sw.lldp_neighbors))

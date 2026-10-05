@@ -38,6 +38,15 @@ Arbeitsstand, noch nicht veroeffentlicht; Prototyp fuer das UI-Redesign.
 - Geraetename und Typenbezeichnung stehen rechts neben dem Rack auf Hoehe des
   Geraets, verbunden ueber eine Hinweislinie; Hover hebt Front und Beschriftung
   gemeinsam hervor, Klick oeffnet die Details.
+- Logische Karten-Ebenen ueber den Schalter "Layer" (`Off | STP | VLAN`):
+  STP zeigt Root-Bridge, Pfade zur Root (mit Richtungspfeil) und blockierte
+  Links; VLAN hebt fuer eine gewaehlte VLAN die tragenden Links und Geraete
+  hervor (tagged/untagged unterscheidbar), der Rest wird blass. Legende auf der
+  Karte; Inspector zeigt STP-Zusammenfassung sowie VLAN- und STP-Spalten.
+  Jede VLAN-ID hat eine feste eigene Farbe (aus der ID berechnet).
+- Scanner lesen Spanning Tree (BRIDGE-MIB, RSTP-MIB `dot1dStpVersion`) und
+  VLAN-Namen (`dot1qVlanStaticName`), best effort; Migration 019. Cisco
+  PVST: nur die Standard-Instanz (VLAN 1).
 - Ruhige Animationen mit `motion` 13.4.4: Inspector, Befehlspalette, Dialoge,
   Toasts, Seitenwechsel, Dashboard-Aufbau und Mobil-Menue. Bei reduzierter
   Bewegung nur kurze Einblendungen.

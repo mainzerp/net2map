@@ -199,6 +199,16 @@ class Device(Base):
     label        = Column(String, default="")
     enabled      = Column(Boolean, default=True, nullable=False)
 
+    # Spanning tree summary (BRIDGE-MIB / RSTP-MIB default instance); NULL
+    # when the device does not report it.
+    stp_protocol  = Column(String(16), nullable=True)   # stp|rstp|mstp|unknown
+    stp_bridge_id = Column(String(32), nullable=True)   # "<prio hex4>.<mac hex12>"
+    stp_root_id   = Column(String(32), nullable=True)
+    stp_root_cost = Column(Integer, nullable=True)
+    stp_root_port = Column(String(64), nullable=True)   # port name (if_descr) toward the root
+    # VLAN id (string) -> name from dot1qVlanStaticName
+    vlan_names    = Column(JSONB, nullable=True, default=dict, server_default="{}")
+
     ports        = relationship("Port", back_populates="device", cascade="all, delete-orphan", lazy="selectin")
     rack         = relationship("Rack", back_populates="devices", lazy="joined")
     switch_class = relationship("SwitchClass", back_populates="devices", lazy="joined")
@@ -219,6 +229,10 @@ class Port(Base):
     oper_status  = Column(Integer, default=2)             # 1=up, 2=down
     vlan         = Column(Integer, default=0)
     tagged_vlans = Column(JSONB, default=list)
+    # Spanning tree (BRIDGE-MIB default instance); NULL when not reported
+    stp_state     = Column(String(16), nullable=True)   # disabled|blocking|listening|learning|forwarding|broken
+    stp_role      = Column(String(16), nullable=True)   # root|designated|blocked|disabled (derived)
+    stp_path_cost = Column(Integer, nullable=True)
 
     device = relationship("Device", back_populates="ports")
     endpoint_associations = relationship(

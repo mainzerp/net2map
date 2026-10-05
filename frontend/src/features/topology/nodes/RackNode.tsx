@@ -2,6 +2,7 @@ import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { useScanPulse } from "../zoomTier";
 import type { RackFlowNode } from "../flowTypes";
+import OverlayBadges from "./OverlayBadges";
 
 // ── RackNode ─────────────────────────────────────────────────────────────────
 // A collapsed rack box: class color strips on top, label, port counters and
@@ -11,19 +12,21 @@ import type { RackFlowNode } from "../flowTypes";
 const handleStyle: React.CSSProperties = { opacity: 0, pointerEvents: "none" };
 
 function RackNode({ data, selected }: NodeProps<RackFlowNode>) {
-  const { rack, devices, classColors, activePorts, totalPorts } = data;
+  const { rack, devices, classColors, activePorts, totalPorts, overlay } = data;
   const pulseIps = useScanPulse();
   const pulse = pulseIps.size > 0 && devices.some(d => pulseIps.has(d.ip));
 
   return (
     <div
-      className={`topo-node w-full h-full rounded-lg border bg-panel flex flex-col items-center justify-center gap-1 cursor-pointer active:cursor-grabbing relative transition-[border-color,box-shadow] duration-[120ms] motion-reduce:transition-none ${
+      className={`topo-node w-full h-full rounded-lg border bg-panel flex flex-col items-center justify-center gap-1 cursor-pointer active:cursor-grabbing relative transition-[border-color,box-shadow,opacity] duration-[120ms] motion-reduce:transition-none ${
         selected ? "border-accent ring-1 ring-accent" : "border-line-strong hover:border-accent"
       } ${pulse ? "topo-scan-ring" : ""}`}
       data-node-kind="rack"
+      data-overlay-dim={overlay && overlay.dim !== "none" ? overlay.dim : undefined}
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />
       <Handle type="source" position={Position.Right} style={handleStyle} />
+      <OverlayBadges overlay={overlay} />
       {classColors.length > 0 && (
         <span className="absolute top-1.5 left-2 right-2 flex gap-1">
           {classColors.map((c, i) => (

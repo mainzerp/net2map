@@ -31,6 +31,22 @@
   --danger-soft: #fff0f0;
   --external: #3d5a80;
   --port-highlight: #2f6690;
+  /* Map logical layers: VLAN violet and STP cobalt, kept apart from the
+     terracotta selection accent and the speed/cable palette. Both reach
+     >= 5.7:1 on surface, panel and panel-2 (so they also work as text) and
+     >= 5.7:1 on their *-soft chip backgrounds. */
+  --overlay-vlan: #6a3fc0;
+  --overlay-vlan-soft: #efeafa;
+  --overlay-stp: #1f56b8;
+  --overlay-stp-soft: #e6eefa;
+  /* Per-VLAN colors (vlanColor.ts): oklch(L C hue) with the hue from the VLAN
+     id. In sRGB gamut for every allowed hue (60..350); strokes reach >= 5.26:1
+     on surface, >= 5.73:1 on panel, >= 4.85:1 on panel-2 and >= 5.07:1 on
+     the soft chip background. */
+  --vlan-l: 0.5;
+  --vlan-c: 0.085;
+  --vlan-soft-l: 0.955;
+  --vlan-soft-c: 0.02;
 
   /* Sidebar stays ink navy in both themes */
   --sidebar: #202d39;
@@ -72,6 +88,17 @@
   --danger-soft: #3d2226;
   --external: #9aa7d6;
   --port-highlight: #7fa6c9;
+  /* >= 5.5:1 on surface/panel/panel-2, >= 5.7:1 on the soft chips */
+  --overlay-vlan: #b29cf0;
+  --overlay-vlan-soft: #2a2643;
+  --overlay-stp: #7aa7f0;
+  --overlay-stp-soft: #1c2c45;
+  /* Per-VLAN colors: >= 6.54:1 on surface, >= 5.84:1 on panel, >= 5.11:1 on
+     panel-2 and >= 5.48:1 on the soft chip background, all in sRGB gamut. */
+  --vlan-l: 0.72;
+  --vlan-c: 0.12;
+  --vlan-soft-l: 0.29;
+  --vlan-soft-c: 0.045;
 
   --sidebar: #0f161d;
   --sidebar-muted: #8d979c;
@@ -103,6 +130,10 @@
   --color-danger-soft: var(--danger-soft);
   --color-external: var(--external);
   --color-port-highlight: var(--port-highlight);
+  --color-overlay-vlan: var(--overlay-vlan);
+  --color-overlay-vlan-soft: var(--overlay-vlan-soft);
+  --color-overlay-stp: var(--overlay-stp);
+  --color-overlay-stp-soft: var(--overlay-stp-soft);
   --color-sidebar: var(--sidebar);
   --color-sidebar-muted: var(--sidebar-muted);
   --color-sidebar-hover: var(--sidebar-hover);
@@ -286,6 +317,16 @@ progress {
   stroke-dasharray: 2 10;
   stroke-opacity: 0.55;
   animation: topoFlow 2.6s linear infinite;
+}
+
+/* Logical layers (STP / VLAN): nodes outside the active layer fade but stay
+   clickable; devices without STP data fade further. VLAN count badges carry
+   topo-detail (hidden at the far tier); the STP root badge stays visible. */
+.topo-node[data-overlay-dim="faded"] {
+  opacity: 0.25;
+}
+.topo-node[data-overlay-dim="strong"] {
+  opacity: 0.15;
 }
 
 /* Brief accent ring on nodes the running scan just touched. */

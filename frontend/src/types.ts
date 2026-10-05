@@ -13,7 +13,22 @@ export interface PortInfo {
   tagged_vlans: number[];
   poe_status: string | null;
   endpoint_count: number;
+  stp_state?: StpPortState | null;
+  stp_role?: StpPortRole | null;
+  stp_path_cost?: number | null;
   [key: string]: unknown;
+}
+
+export type StpPortState = "disabled" | "blocking" | "listening" | "learning" | "forwarding" | "broken";
+export type StpPortRole = "root" | "designated" | "blocked" | "disabled";
+
+export interface DeviceStpInfo {
+  protocol: "stp" | "rstp" | "mstp" | "unknown";
+  bridge_id: string | null;
+  root_id: string | null;
+  root_cost: number | null;
+  root_port: string | null;
+  is_root: boolean;
 }
 
 export interface TopologyNode {
@@ -44,6 +59,9 @@ export interface TopologyNode {
   enabled?: boolean;
   rack_u_position?: number | null;
   u_height?: number;
+  stp?: DeviceStpInfo | null;
+  // VLAN id (as string) -> VLAN name
+  vlan_names?: Record<string, string>;
   [key: string]: unknown;
 }
 

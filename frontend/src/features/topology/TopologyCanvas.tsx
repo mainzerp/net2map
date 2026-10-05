@@ -62,6 +62,24 @@ import {
   saveFlowPreference,
 } from "./flowContext";
 import ScanOverlay from "./ScanOverlay";
+import MapLayerLegend from "./MapLayerLegend";
+import {
+  collectVlanOptions,
+  defaultVlan,
+  hasStpData,
+  stpDomainCount,
+  classifyAggregatedVlan,
+  classifyAggregatedStp,
+  nodeOverlay,
+  type MapLayer,
+} from "./overlays";
+import { vlanColor } from "./vlanColor";
+import {
+  loadLayerPreference,
+  saveLayerPreference,
+  loadLayerVlan,
+  saveLayerVlan,
+} from "./layerPreference";
 import { prefersReducedMotion, useReducedMotion } from "./motion";
 import {
   RACK_COLLAPSED_SIZE,
@@ -70,7 +88,7 @@ import {
   offsetLayout,
   isUnpositioned,
 } from "./layout";
-import type { TopoFlowNode, AggregatedFlowEdge } from "./flowTypes";
+import type { TopoFlowNode, AggregatedFlowEdge, EdgeOverlay } from "./flowTypes";
 
 const nodeTypes = { rack: RackNode, device: DeviceNode, mapBackground: BackgroundNode } as unknown as NodeTypes;
 const edgeTypes = { aggregated: AggregatedEdge } as unknown as EdgeTypes;
@@ -181,6 +199,8 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
   const focusDeviceId = useNetmapStore(s => s.focusDeviceId);
   const clearFocusDevice = useNetmapStore(s => s.clearFocusDevice);
   const [flowPref, setFlowPref] = useState<boolean | null>(loadFlowPreference);
+  const [layerPref, setLayerPref] = useState<MapLayer>(loadLayerPreference);
+  const [vlanPref, setVlanPref] = useState<number | null>(loadLayerVlan);
   const pulseSet = useMemo(() => new Set(scanPulseIps), [scanPulseIps]);
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -286,6 +306,48 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
 
   const nodesByIp = useMemo(() => new Map(nodes.map(n => [n.ip, n])), [nodes]);
 
+  // Logical layer: the stored preference falls back to Off while the data
+  // for it is missing (the preference itself is kept).
+  const stpAvailable = useMemo(() => hasStpData(nodes), [nodes]);
+  const vlanOptions = useMemo(() => collectVlanOptions(nodes), [nodes]);
+  const vlanAvailable = vlanOptions.length > 0;
+  const stpDomains = useMemo(() => stpDomainCount(nodes), [nodes]);
+  const layer: MapLayer =
+    (layerPref === "stp" && !stpAvailable) || (layerPref === "vlan" && !vlanAvailable) ? "off" : layerPref;
+  const selectedVlan =
+    vlanPref != null && vlanOptions.some(o => o.id === vlanPref) ? vlanPref : defaultVlan(vlanOptions);
+  const selectedVlanLabel = vlanOptions.find(o => o.id === selectedVlan)?.label ?? null;
+
+  // Per-edge layer encoding keyed by endpoint pair.
+  const edgeOverlays = useMemo(() => {
+    const result = new Map<string, EdgeOverlay>();
+    if (layer === "off") return result;
+    const endpointByIp = buildEndpointIndex(nodes, managedRacks, switchClasses);
+    const color = selectedVlan == null ? undefined : vlanColor(selectedVlan);
+    aggregated.forEach(l => {
+      const pairKey = [l.from, l.to].sort().join("|");
+      if (layer === "vlan") {
+        if (selectedVlan == null) return;
+        const carry = classifyAggregatedVlan(l, nodesByIp, selectedVlan);
+        result.set(pairKey, {
+          layer: "vlan",
+          emphasis: carry === "none" ? "faded" : "emphasized",
+          color,
+          untagged: carry === "untagged",
+        });
+        return;
+      }
+      const stp = classifyAggregatedStp(l, nodesByIp, endpointByIp);
+      result.set(pairKey, {
+        layer: "stp",
+        emphasis: stp.state === "root" ? "emphasized" : stp.state === "blocked" ? "blocked" : "faded",
+        blockedCount: stp.blockedCount,
+        rootEnd: stp.towardRoot == null ? null : stp.towardRoot === l.to ? "target" : stp.towardRoot === l.from ? "source" : null,
+      });
+    });
+    return result;
+  }, [layer, selectedVlan, aggregated, nodes, nodesByIp, managedRacks, switchClasses]);
+
   // Which endpoint pair contains the link selected in RackDetail.
   const activePairKey = useMemo(() => {
     if (!selectedLink) return null;
@@ -356,6 +418,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
             classColors,
             activePorts: counts.active,
             totalPorts: counts.total,
+            overlay: layer === "off" ? undefined : nodeOverlay(rack.devices, layer, selectedVlan),
           },
           style: { width: RACK_COLLAPSED_SIZE.width, height: RACK_COLLAPSED_SIZE.height, zIndex: 0 },
           selected: prevSelected.has(id),
@@ -374,6 +437,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
             device: node,
             classColor: node.class_id ? classMap[node.class_id]?.color || null : null,
             inRack: false,
+            overlay: layer === "off" ? undefined : nodeOverlay([node], layer, selectedVlan),
           },
           style: { width: DEVICE_NODE_SIZE.width, height: DEVICE_NODE_SIZE.height },
           selected: prevSelected.has(id),
@@ -404,13 +468,14 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
             width,
             active: activePairKey === pairKey,
             status,
+            overlay: edgeOverlays.get(pairKey),
           },
           selectable: false,
           deletable: false,
         };
       }),
     );
-  }, [graphModel, aggregated, activePairKey, racks, outsideNodes, classMap, rackPairColorMap, nodesByIp, mapBgUrl, mapBgOpacity, mapBgScale, mapBgColor, setFlowNodes, setEdges]);
+  }, [graphModel, aggregated, activePairKey, racks, outsideNodes, classMap, rackPairColorMap, nodesByIp, edgeOverlays, layer, selectedVlan, mapBgUrl, mapBgOpacity, mapBgScale, mapBgColor, setFlowNodes, setEdges]);
 
   // Center the viewport on a rack/outside node when its selection changes
   // (covers rack clicks, toolbar search and the highlightPortKey deep-link).
@@ -587,6 +652,15 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
     saveFlowPreference(next);
   }, [flowSetting]);
 
+  const handleLayerChange = useCallback((next: MapLayer) => {
+    setLayerPref(next);
+    saveLayerPreference(next);
+  }, []);
+  const handleVlanChange = useCallback((vlan: number) => {
+    setVlanPref(vlan);
+    saveLayerVlan(vlan);
+  }, []);
+
   const handleMoveEnd = useCallback((_e: unknown, viewport: Viewport) => {
     try {
       localStorage.setItem(VIEWPORT_STORAGE_KEY, JSON.stringify(viewport));
@@ -613,6 +687,13 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
         flowEnabled={flowSetting}
         flowDisabledReason={reducedMotion ? "Animation is off because the system requests reduced motion" : undefined}
         onToggleFlow={handleToggleFlow}
+        layer={layer}
+        onLayerChange={handleLayerChange}
+        stpDisabledReason={stpAvailable ? undefined : "No spanning tree data reported by any device"}
+        vlanDisabledReason={vlanAvailable ? undefined : "No VLAN data reported on any port"}
+        vlanOptions={vlanOptions}
+        selectedVlan={selectedVlan}
+        onVlanChange={handleVlanChange}
         stats={stats}
         updatedAt={updatedAt}
       />
@@ -621,6 +702,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
         style={{ background: mapBgColor || "var(--surface)" }}
         data-zoom-tier={tier}
         data-flow={flowActive ? "on" : "off"}
+        data-layer={layer}
       >
         <ZoomTierContext.Provider value={tier}>
         <FlowEnabledContext.Provider value={flowActive}>
@@ -679,6 +761,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
         </ScanPulseContext.Provider>
         </FlowEnabledContext.Provider>
         </ZoomTierContext.Provider>
+        <MapLayerLegend layer={layer} vlanId={selectedVlan} vlanLabel={selectedVlanLabel} stpDomains={stpDomains} />
         {scan?.active && <ScanOverlay progress={scan.progress} label={scan.label} />}
       </div>
     </div>

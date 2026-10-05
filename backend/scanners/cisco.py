@@ -34,3 +34,9 @@ class CiscoScanner(VendorScanner, vendor_id="cisco"):
 
     def fdb_strategy(self) -> str:
         return "dot1d"
+
+    def supports_stp(self) -> bool:
+        # Only the default instance is read via the plain community / context.
+        # PVST+ / Rapid-PVST+ per-VLAN instances need community@vlan (v2c) or
+        # context "vlan-<id>" (v3) and are out of scope.
+        return True

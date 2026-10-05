@@ -30,3 +30,7 @@ class OPNsenseScanner(VendorScanner, vendor_id="opnsense"):
 
     def fdb_strategy(self) -> str:
         return "dot1d"
+
+    def supports_stp(self) -> bool:
+        # Firewall: no bridge spanning tree to report.
+        return False

@@ -6,6 +6,7 @@ import { VENDOR_COLOR, speedColor } from "../../../theme/visual";
 import type { PortInfo } from "../../../types";
 import { useScanPulse, useZoomTier } from "../zoomTier";
 import type { DeviceFlowNode } from "../flowTypes";
+import OverlayBadges from "./OverlayBadges";
 
 // ── DeviceNode ───────────────────────────────────────────────────────────────
 // A single switch on the canvas: either an outside (unracked) device or a
@@ -61,7 +62,7 @@ const PortStrip = memo(function PortStrip({ ports }: { ports: PortInfo[] }) {
 });
 
 function DeviceNode({ data, selected }: NodeProps<DeviceFlowNode>) {
-  const { device, classColor } = data;
+  const { device, classColor, overlay } = data;
   const tier = useZoomTier();
   const pulse = useScanPulse().has(device.ip);
   const vendorColor = VENDOR_COLOR[device.vendor] || "var(--muted)";
@@ -73,14 +74,16 @@ function DeviceNode({ data, selected }: NodeProps<DeviceFlowNode>) {
 
   return (
     <div
-      className={`topo-node relative w-full h-full rounded-lg border bg-panel px-3 py-2 flex flex-col justify-center gap-0.5 cursor-pointer active:cursor-grabbing transition-[border-color,box-shadow] duration-[120ms] motion-reduce:transition-none ${
+      className={`topo-node relative w-full h-full rounded-lg border bg-panel px-3 py-2 flex flex-col justify-center gap-0.5 cursor-pointer active:cursor-grabbing transition-[border-color,box-shadow,opacity] duration-[120ms] motion-reduce:transition-none ${
         selected ? "border-accent ring-1 ring-accent" : "border-line-strong hover:border-accent"
       } ${pulse ? "topo-scan-ring" : ""}`}
       title={`${name} - click to open details`}
       data-node-kind="device"
+      data-overlay-dim={overlay && overlay.dim !== "none" ? overlay.dim : undefined}
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />
       <Handle type="source" position={Position.Right} style={handleStyle} />
+      <OverlayBadges overlay={overlay} />
       <span
         className="absolute left-0 top-2 bottom-2 w-1 rounded-r"
         style={{ backgroundColor: classColor || vendorColor, opacity: 0.9 }}

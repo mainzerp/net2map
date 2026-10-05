@@ -146,3 +146,31 @@
   discovery probe with an override, so it does not help agents that ignore
   discovery; it only fixes the engine ID keys are localized to.
   Context engine ID / context name stay out of scope until a device needs them.
+
+## Logical topology overlays (2026-10-06)
+
+- **STP and VLAN ship together, one map "Layer" switch.** Toolbar control with
+  `Off | STP | VLAN`; VLAN mode adds a single-VLAN picker. Matching links/devices
+  are emphasized, everything else fades. One VLAN at a time, because striping all
+  VLANs per link becomes unreadable on real trunks.
+- **STP from standard MIBs only.** BRIDGE-MIB `dot1dStp*` (bridge/root ID, root
+  cost, root port, per-port state, path cost) plus RSTP-MIB `dot1dStpVersion` for
+  the protocol. Port role is derived (`root` = root port, `blocked` = blocking or
+  discarding, `designated` = forwarding otherwise, `disabled`), because RSTP-MIB has
+  no role column. MSTP switches (Aruba CX, FS) report the CIST through BRIDGE-MIB.
+  Cisco PVST+/Rapid-PVST exposes per-VLAN instances only via community/context
+  indexing; v1 reads the default instance (VLAN 1) and records that limitation.
+  Collection is best effort: missing MIB subtrees leave the fields null and never
+  fail a scan.
+- **Data contract.** `PortOut.stp_state` (`disabled|blocking|listening|learning|
+  forwarding|broken`, null if unknown), `PortOut.stp_role` (`root|designated|
+  blocked|disabled`, null). `DeviceOut.stp` (null if no STP data) with `protocol`
+  (`stp|rstp|mstp|unknown`), `bridge_id` and `root_id` as `"<prio hex4>.<mac12>"`,
+  `root_cost`, `root_port` (port name), `is_root`. `DeviceOut.vlan_names` maps VLAN
+  id strings to names (empty object if unknown). Links stay name-matched to ports,
+  as in `graph.ts`.
+- **One stable color per VLAN id.** `vlanColor(id)` in `src/features/topology/vlanColor.ts`
+  derives an OKLCH hue from the id (step ~-23.08 deg, compressed into 60..350 deg so
+  the terracotta/danger band 350..60 stays free); lightness/chroma are theme tokens
+  (`--vlan-l/-c/-soft-l/-soft-c`) holding >= 4.85:1 on all surfaces. The golden angle
+  was rejected: it puts common ids (10/99, 1/200) almost on the same hue.

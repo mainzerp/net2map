@@ -659,6 +659,22 @@ def _record_engine_id(db: Session, cred: Credential, engine_id: str, corr: str) 
     cred.engine_id_seen_at = datetime.now(timezone.utc)
 
 
+def _apply_stp_vlan_names(device: Device, sw) -> None:
+    """Overwrite the device's STP summary and VLAN names from scan data.
+
+    Values the device no longer reports are reset to None / {} so stale
+    spanning tree data does not survive a scan.
+    """
+    stp = getattr(sw, "stp", None) or {}
+    device.stp_protocol = stp.get("protocol")
+    device.stp_bridge_id = stp.get("bridge_id")
+    device.stp_root_id = stp.get("root_id")
+    device.stp_root_cost = stp.get("root_cost")
+    device.stp_root_port = stp.get("root_port")
+    vlan_names = getattr(sw, "vlan_names", None)
+    device.vlan_names = dict(vlan_names) if isinstance(vlan_names, dict) else {}
+
+
 @_guard_scan_transactions
 def _finalize_scan_db(
     db: Session,
@@ -876,6 +892,8 @@ def _finalize_scan_db(
                 device.model     = model        or device.model
                 device.firmware  = firmware     or device.firmware
                 device.last_seen = datetime.now(timezone.utc)
+                if scan_mode != "discovery":
+                    _apply_stp_vlan_names(device, sw)
             elif ping_ok:
                 device.sys_name = device.sys_name or ip
                 device.sys_descr = device.sys_descr or "Discovered by ping (SNMP unavailable)"
@@ -913,6 +931,8 @@ def _finalize_scan_db(
                 label=cred.label if cred else "",
                 enabled=True,
             )
+            if scan_mode != "discovery":
+                _apply_stp_vlan_names(new_device, sw)
             db.add(new_device)
             db.flush()
             devices_by_ip[ip] = new_device
@@ -1022,6 +1042,9 @@ def _finalize_scan_db(
                             oper_status=iface.oper_status,
                             vlan=iface.vlan,
                             tagged_vlans=iface.tagged_vlans,
+                            stp_state=getattr(iface, "stp_state", None),
+                            stp_role=getattr(iface, "stp_role", None),
+                            stp_path_cost=getattr(iface, "stp_path_cost", None),
                         )
                         ports_with_endpoints.append((port_obj, iface, endpoint_entries))
 

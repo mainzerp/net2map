@@ -1,14 +1,17 @@
 /**
  * Canvas-level tests for the topology map phase 3: semantic zoom attribute,
  * Flow toggle persistence, scan sweep overlay and "Show on map" focus
- * handling (the focus is consumed and cleared once the node exists).
+ * handling (the focus is consumed and cleared once the node exists), plus the
+ * logical layer control (STP / VLAN), its persistence and legend.
  */
 import React from "react";
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import TopologyCanvas from "../features/topology/TopologyCanvas";
 import useNetmapStore from "../store";
 import { FLOW_STORAGE_KEY } from "../features/topology/flowContext";
+import { LAYER_STORAGE_KEY, LAYER_VLAN_STORAGE_KEY } from "../features/topology/layerPreference";
+import { vlanColor } from "../features/topology/vlanColor";
 import { stubMemoryStorage } from "./test-utils";
 import type { TopologyNode, RackInfo } from "../types";
 
@@ -203,5 +206,134 @@ describe("TopologyCanvas phase 3", () => {
     useNetmapStore.getState().setFocusDevice(12345);
     render(<TopologyCanvas {...defaultProps} nodes={nodes} managedRacks={managedRacks} />);
     await waitFor(() => expect(useNetmapStore.getState().focusDeviceId).toBeNull());
+  });
+});
+
+describe("TopologyCanvas logical layers", () => {
+  let storage: Map<string, string>;
+  beforeEach(() => {
+    storage = stubMemoryStorage();
+    useNetmapStore.setState({ focusDeviceId: null });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const stpInfo = { protocol: "rstp" as const, bridge_id: null, root_id: "8000.aa", root_cost: 0, root_port: null, is_root: false };
+  const layeredNodes = [
+    makeNode({
+      id: 7,
+      ip: "10.0.1.1",
+      sys_name: "core",
+      map_x: 200,
+      map_y: 200,
+      stp: { ...stpInfo, is_root: true },
+      vlan_names: { "20": "Clients" },
+      ports: [
+        { port_id: "1", name: "1", oper_status: 1, speed: 1000, vlan: 10, tagged_vlans: [20], poe_status: null, endpoint_count: 0, stp_role: "designated" },
+        { port_id: "2", name: "2", oper_status: 1, speed: 1000, vlan: 20, tagged_vlans: [], poe_status: null, endpoint_count: 0, stp_role: "designated" },
+      ],
+    }),
+    makeNode({
+      id: 9,
+      ip: "10.0.9.9",
+      sys_name: "access",
+      map_x: 700,
+      map_y: 200,
+      stp: { ...stpInfo, root_cost: 4, root_port: "49" },
+      ports: [
+        { port_id: "49", name: "49", oper_status: 1, speed: 1000, vlan: 10, tagged_vlans: [20], poe_status: null, endpoint_count: 0, stp_role: "root" },
+        { port_id: "50", name: "50", oper_status: 1, speed: 1000, vlan: 20, tagged_vlans: [], poe_status: null, endpoint_count: 0, stp_role: "blocked" },
+      ],
+    }),
+  ];
+  const layeredLinks = [
+    { id: 1, local_ip: "10.0.9.9", local_port: "49", remote_ip: "10.0.1.1", remote_port: "1", local_sys_name: "access", remote_sys_name: "core", speed_label: "1G" },
+    { id: 2, local_ip: "10.0.9.9", local_port: "50", remote_ip: "10.0.1.1", remote_port: "2", local_sys_name: "access", remote_sys_name: "core", speed_label: "1G" },
+  ];
+  const layerButton = (name: string) =>
+    within(screen.getByRole("group", { name: "Map layer" })).getByRole("button", { name });
+
+  it("Layer control switches layers, persists the choice and toggles the legend", async () => {
+    const { container } = render(<TopologyCanvas {...defaultProps} nodes={layeredNodes} links={layeredLinks} />);
+    const canvas = container.querySelector(".topo-canvas") as HTMLElement;
+    expect(canvas.dataset.layer).toBe("off");
+    expect(screen.queryByTestId("map-layer-legend")).toBeNull();
+
+    fireEvent.click(layerButton("STP"));
+    expect(layerButton("STP").getAttribute("aria-pressed")).toBe("true");
+    expect(storage.get(LAYER_STORAGE_KEY)).toBe("stp");
+    expect(canvas.dataset.layer).toBe("stp");
+    expect(screen.getByTestId("map-layer-legend").textContent).toContain("Spanning tree");
+    expect(screen.getByTestId("stp-root-badge")).toBeTruthy();
+    // The parallel root + blocked links render one edge with a blocked marker.
+    expect((await screen.findByTestId("stp-blocked-marker")).textContent).toContain("1 blocked");
+
+    fireEvent.click(layerButton("Off"));
+    expect(storage.get(LAYER_STORAGE_KEY)).toBe("off");
+    expect(screen.queryByTestId("map-layer-legend")).toBeNull();
+    expect(screen.queryByTestId("stp-root-badge")).toBeNull();
+  });
+
+  it("restores a stored layer and VLAN on mount", () => {
+    storage.set(LAYER_STORAGE_KEY, "vlan");
+    storage.set(LAYER_VLAN_STORAGE_KEY, "10");
+    render(<TopologyCanvas {...defaultProps} nodes={layeredNodes} links={layeredLinks} />);
+    expect(layerButton("VLAN").getAttribute("aria-pressed")).toBe("true");
+    expect((screen.getByRole("combobox", { name: "VLAN" }) as HTMLSelectElement).value).toBe("10");
+    expect(screen.getByTestId("map-layer-legend").textContent).toContain("VLAN 10");
+  });
+
+  it("VLAN picker lists all VLANs with names and persists the selection", () => {
+    render(<TopologyCanvas {...defaultProps} nodes={layeredNodes} links={layeredLinks} />);
+    expect(screen.queryByRole("combobox", { name: "VLAN" })).toBeNull();
+    fireEvent.click(layerButton("VLAN"));
+    const picker = screen.getByRole("combobox", { name: "VLAN" }) as HTMLSelectElement;
+    expect(Array.from(picker.options).map(o => o.textContent)).toEqual(["10", "20 · Clients"]);
+    // Default: most common VLAN other than 1.
+    expect(picker.value).toBe("20");
+    expect(screen.getAllByTestId("vlan-port-badge").map(b => b.textContent)).toEqual(["2", "2"]);
+    fireEvent.change(picker, { target: { value: "10" } });
+    expect(storage.get(LAYER_VLAN_STORAGE_KEY)).toBe("10");
+    expect(screen.getByTestId("map-layer-legend").textContent).toContain("VLAN 10");
+  });
+
+  it("colors edges, badges, legend and picker with the selected VLAN's own color", async () => {
+    const { container } = render(<TopologyCanvas {...defaultProps} nodes={layeredNodes} links={layeredLinks} />);
+    fireEvent.click(layerButton("VLAN"));
+    const c20 = vlanColor(20);
+    const c10 = vlanColor(10);
+    expect(c20.stroke).not.toBe(c10.stroke);
+
+    const inkStroke = async () => {
+      await waitFor(() => expect(container.querySelector('[data-overlay="emphasized"] .topo-edge-ink')).not.toBeNull());
+      return (container.querySelector('[data-overlay="emphasized"] .topo-edge-ink') as SVGPathElement).style.stroke;
+    };
+    const legendStroke = () =>
+      (screen.getByTestId("map-layer-legend").querySelector("line") as SVGLineElement).style.stroke;
+
+    expect(await inkStroke()).toBe(c20.stroke);
+    expect(legendStroke()).toBe(c20.stroke);
+    expect(screen.getAllByTestId("vlan-port-badge")[0].style.color).toBe(c20.stroke);
+    expect(screen.getByTestId("vlan-color-swatch").style.backgroundColor).toBe(c20.stroke);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "VLAN" }), { target: { value: "10" } });
+    await waitFor(async () => expect(await inkStroke()).toBe(c10.stroke));
+    expect(legendStroke()).toBe(c10.stroke);
+    expect(screen.getByTestId("vlan-color-swatch").style.backgroundColor).toBe(c10.stroke);
+  });
+
+  it("disables STP and VLAN without data and ignores a stale stored layer", () => {
+    storage.set(LAYER_STORAGE_KEY, "stp");
+    const plainNodes = [makeNode({ id: 3, ip: "10.0.3.3", sys_name: "plain" })];
+    const { container } = render(<TopologyCanvas {...defaultProps} nodes={plainNodes} />);
+    const stp = layerButton("STP");
+    expect(stp.getAttribute("aria-disabled")).toBe("true");
+    expect(stp.getAttribute("title")).toMatch(/No spanning tree data/);
+    expect(layerButton("VLAN").getAttribute("aria-disabled")).toBe("true");
+    expect((container.querySelector(".topo-canvas") as HTMLElement).dataset.layer).toBe("off");
+    expect(screen.queryByTestId("map-layer-legend")).toBeNull();
+    fireEvent.click(stp);
+    expect(layerButton("Off").getAttribute("aria-pressed")).toBe("true");
   });
 });

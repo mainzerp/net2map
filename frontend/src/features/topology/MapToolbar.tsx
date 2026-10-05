@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity } from "lucide-react";
+import { Activity, GitBranch, Layers, Tag, type LucideIcon } from "lucide-react";
 import { Button, Input } from "../../components/ui";
 import type { FilterState, RackInfo, SwitchClass, TopologyNode } from "../../types";
+import type { MapLayer, VlanOption } from "./overlays";
+import { vlanColor } from "./vlanColor";
 
 // ── MapToolbar ───────────────────────────────────────────────────────────────
-// Search, rack/class filter chips, auto-layout and zoom-reset actions, plus a
+// Search, rack/class filter chips, logical layer control (Off / STP / VLAN),
+// auto-layout and zoom-reset actions, plus a
 // live "updated Xs ago" staleness indicator. Rendered by TopologyCanvas inside
 // the ReactFlow provider so layout actions can reach the flow instance.
 
@@ -25,9 +28,24 @@ interface MapToolbarProps {
   // animation is visible (e.g. prefers-reduced-motion).
   flowDisabledReason?: string;
   onToggleFlow?: () => void;
+  // Logical layer (Off / STP / VLAN), persisted by TopologyCanvas. A set
+  // *DisabledReason disables that option and becomes its tooltip.
+  layer?: MapLayer;
+  onLayerChange?: (layer: MapLayer) => void;
+  stpDisabledReason?: string;
+  vlanDisabledReason?: string;
+  vlanOptions?: VlanOption[];
+  selectedVlan?: number | null;
+  onVlanChange?: (vlan: number) => void;
   stats: { switches: number; fast: number; gig: number };
   updatedAt: number | null;
 }
+
+const LAYER_OPTIONS: { value: MapLayer; label: string; title: string; icon: LucideIcon }[] = [
+  { value: "off", label: "Off", title: "No logical layer", icon: Layers },
+  { value: "stp", label: "STP", title: "Spanning tree: root bridge, root paths and blocked links", icon: GitBranch },
+  { value: "vlan", label: "VLAN", title: "Highlight links and devices carrying a VLAN", icon: Tag },
+];
 
 function formatAge(updatedAt: number | null, now: number): string {
   if (!updatedAt) return "never";
@@ -50,6 +68,13 @@ export default function MapToolbar({
   flowEnabled = false,
   flowDisabledReason,
   onToggleFlow,
+  layer = "off",
+  onLayerChange,
+  stpDisabledReason,
+  vlanDisabledReason,
+  vlanOptions = [],
+  selectedVlan = null,
+  onVlanChange,
   stats,
   updatedAt,
 }: MapToolbarProps) {
@@ -57,6 +82,7 @@ export default function MapToolbar({
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const searchRef = useRef<HTMLDivElement>(null);
+  const selectedVlanColor = selectedVlan != null ? vlanColor(selectedVlan) : null;
 
   // Tick once per second so the staleness indicator stays live.
   useEffect(() => {
@@ -223,6 +249,69 @@ export default function MapToolbar({
         <span className="text-[10px] text-muted tabular-nums" title="Topology data freshness">
           updated {formatAge(updatedAt, now)}
         </span>
+        {onLayerChange && (
+          <div className="flex items-center gap-1.5">
+            <div
+              role="group"
+              aria-label="Map layer"
+              className="inline-flex items-center rounded border border-line bg-panel overflow-hidden"
+            >
+              {LAYER_OPTIONS.map(opt => {
+                const reason = opt.value === "stp" ? stpDisabledReason : opt.value === "vlan" ? vlanDisabledReason : undefined;
+                const disabled = !!reason;
+                const active = layer === opt.value;
+                const Icon = opt.icon;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    aria-pressed={active}
+                    aria-disabled={disabled || undefined}
+                    title={reason ?? opt.title}
+                    onClick={() => {
+                      if (!disabled && !active) onLayerChange(opt.value);
+                    }}
+                    className={`text-[10px] px-2 py-0.5 inline-flex items-center gap-1 select-none transition-colors border-l border-line first:border-l-0 ${
+                      disabled
+                        ? "text-muted opacity-50 cursor-not-allowed"
+                        : active
+                          ? "text-accent bg-panel-2 cursor-pointer"
+                          : "text-muted hover:text-primary cursor-pointer"
+                    }`}
+                  >
+                    <Icon size={11} strokeWidth={1.75} aria-hidden="true" />
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+            {layer === "vlan" && vlanOptions.length > 0 && (
+              <span className="inline-flex items-center gap-1">
+                {selectedVlanColor && (
+                  <span
+                    aria-hidden="true"
+                    data-testid="vlan-color-swatch"
+                    className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{ backgroundColor: selectedVlanColor.stroke }}
+                  />
+                )}
+                <select
+                  aria-label="VLAN"
+                  value={selectedVlan ?? ""}
+                  onChange={e => onVlanChange?.(Number(e.target.value))}
+                  className="text-[10px] px-1.5 py-0.5 rounded border border-overlay-vlan bg-panel text-primary max-w-40 cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
+                  style={selectedVlanColor ? { borderColor: selectedVlanColor.stroke } : undefined}
+                >
+                  {vlanOptions.map(o => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </span>
+            )}
+          </div>
+        )}
         {onToggleFlow && (
           <button
             type="button"

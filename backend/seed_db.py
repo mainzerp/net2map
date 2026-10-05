@@ -21,6 +21,11 @@ Links (stored as TopologyLink / LLDP)
     • Within rack  : AP eth0   → one Aruba access port (2.5G, rotating)
     • Inter-rack   : ring A→B→C→D→E→A via FS TOR-2 100G uplink ports
 
+Spanning tree (RSTP) / VLANs
+    • fs-rack-a-tor1 is the root bridge; the 10-switch TOR ring is a loop, so
+      fs-rack-c-tor2 HundredGigE1/2 (toward fs-rack-d-tor1) is blocking
+    • Trunk ports carry tagged VLANs; every switch reports VLAN names
+
 Credentials
     • One SNMPv3 credential per FS TOR switch   (authPriv / SHA-256 / AES-128)
     • One SNMPv3 credential per Aruba CX switch (authPriv / SHA-256 / AES-256)
@@ -196,6 +201,124 @@ def make_aruba_6200_ports(device_id: int, rack_idx: int, sw_idx: int) -> list[Po
             vlan        = 1,
         ))
     return ports
+
+
+# ─── VLAN / spanning tree overlay ─────────────────────────────────────────────
+
+SWITCH_VLAN_NAMES = {
+    "1": "default", "10": "Management", "20": "Clients", "30": "VoIP",
+    "40": "Servers", "99": "Guest", "100": "Storage",
+}
+AP_VLAN_NAMES = {"1": "default", "20": "Clients", "99": "Guest"}
+
+TOR_TRUNK_VLANS    = [10, 20, 30, 40, 99, 100]
+ACCESS_TRUNK_VLANS = [10, 20, 30, 40, 99]
+AP_TRUNK_VLANS     = [20, 99]
+
+# IEEE 802.1t (RSTP) port path costs by link speed in Mbps
+STP_PATH_COST = {100_000: 200, 25_000: 800, 10_000: 2_000, 2_500: 8_000, 1_000: 20_000}
+
+STP_RING_HOP_COST = STP_PATH_COST[100_000]
+STP_UPLINK_COST   = STP_PATH_COST[10_000]
+
+
+def _bridge_id(priority: int, ri: int, slot: int) -> str:
+    """Deterministic demo bridge ID: '<prio hex4>.<locally administered MAC>'."""
+    return f"{priority:04x}.02a0c9{ri + 1:02x}{slot + 1:02x}00"
+
+
+def apply_vlan_stp_overlay(db: Session, devices_by_rack: dict) -> None:
+    """Seed VLAN names, trunk tagged VLANs and a consistent RSTP tree.
+
+    The TOR switches form a 10-node ring (tor1 -> tor2 within a rack via
+    HundredGigE1/1, tor2 -> next rack tor1 via HundredGigE1/2). fs-rack-a-tor1
+    is the root; every other TOR picks the shorter ring direction toward it.
+    The node opposite the root (ring position 5, fs-rack-c-tor2) has equal
+    cost both ways: it keeps the port toward the previous ring node as root
+    port and blocks the other one. Access switches use their uplink as root
+    port; the UniFi APs report no spanning tree.
+    """
+    ring: list[tuple[Device, int, int]] = []   # (device, rack index, slot)
+    for ri, rack in enumerate(RACKS):
+        d = devices_by_rack[rack["id"]]
+        ring.append((d["fs1"], ri, 0))
+        ring.append((d["fs2"], ri, 1))
+    ring_len = len(ring)
+    root_dev, root_ri, root_slot = ring[0]
+    root_id = _bridge_id(0x1000, root_ri, root_slot)
+
+    def ports_of(dev: Device) -> dict[str, Port]:
+        return {p.if_descr: p for p in db.query(Port).filter(Port.device_id == dev.id).all()}
+
+    def set_default_port_stp(ports: dict[str, Port]) -> None:
+        for p in ports.values():
+            p.stp_path_cost = STP_PATH_COST.get(p.speed_mbps, 20_000)
+            if p.oper_status == 1:
+                p.stp_state, p.stp_role = "forwarding", "designated"
+            else:
+                p.stp_state, p.stp_role = "disabled", "disabled"
+
+    def set_stp(dev: Device, priority: int, ri: int, slot: int,
+                root_cost: int, root_port: str | None) -> None:
+        dev.stp_protocol  = "rstp"
+        dev.stp_bridge_id = _bridge_id(priority, ri, slot)
+        dev.stp_root_id   = root_id
+        dev.stp_root_cost = root_cost
+        dev.stp_root_port = root_port
+        dev.vlan_names    = dict(SWITCH_VLAN_NAMES)
+
+    tor_cost: dict[int, int] = {}
+    for k, (dev, ri, slot) in enumerate(ring):
+        is_tor1 = slot == 0
+        prev_port = "HundredGigE1/2" if is_tor1 else "HundredGigE1/1"
+        next_port = "HundredGigE1/1" if is_tor1 else "HundredGigE1/2"
+        ports = ports_of(dev)
+        set_default_port_stp(ports)
+        for name in ("HundredGigE1/1", "HundredGigE1/2"):
+            ports[name].tagged_vlans = list(TOR_TRUNK_VLANS)
+        for name in ("Eth1/1", "Eth1/2") if is_tor1 else ("Eth1/1",):
+            ports[name].tagged_vlans = list(ACCESS_TRUNK_VLANS)
+            ports[name].oper_status = 1
+            ports[name].stp_state, ports[name].stp_role = "forwarding", "designated"
+
+        if k == 0:
+            set_stp(dev, 0x1000, ri, slot, 0, None)
+            tor_cost[dev.id] = 0
+            continue
+        hops = min(k, ring_len - k)
+        root_port = prev_port if k <= ring_len - k else next_port
+        set_stp(dev, 0x2000, ri, slot, hops * STP_RING_HOP_COST, root_port)
+        tor_cost[dev.id] = hops * STP_RING_HOP_COST
+        ports[root_port].stp_role = "root"
+        if k == ring_len - k:
+            # Equal cost both ways: the second ring port is the alternate.
+            ports[next_port].stp_state, ports[next_port].stp_role = "blocking", "blocked"
+
+    for ri, rack in enumerate(RACKS):
+        d = devices_by_rack[rack["id"]]
+        ap_uplink_sw = [d["aruba1"], d["aruba2"], d["aruba3"]][ri % 3]
+        for slot, key, uplink, tor_key in (
+            (2, "aruba1", "1/1/25", "fs1"),
+            (3, "aruba2", "1/1/25", "fs1"),
+            (4, "aruba3", "1/1/49", "fs2"),
+        ):
+            dev = d[key]
+            ports = ports_of(dev)
+            set_default_port_stp(ports)
+            for p in ports.values():
+                if p.if_alias == "uplink":
+                    p.tagged_vlans = list(ACCESS_TRUNK_VLANS)
+            ports[uplink].stp_role = "root"
+            if dev is ap_uplink_sw:
+                ports["1/1/3"].tagged_vlans = list(AP_TRUNK_VLANS)
+                ports["1/1/3"].oper_status = 1
+                ports["1/1/3"].stp_state, ports["1/1/3"].stp_role = "forwarding", "designated"
+            set_stp(dev, 0x8000, ri, slot, tor_cost[d[tor_key].id] + STP_UPLINK_COST, uplink)
+
+        ap = d["ap"]
+        ap.vlan_names = dict(AP_VLAN_NAMES)
+        for p in ports_of(ap).values():
+            p.tagged_vlans = list(AP_TRUNK_VLANS)
 
 
 # ─── Main seed routine ────────────────────────────────────────────────────────
@@ -518,6 +641,12 @@ def seed(db: Session):
 
     db.commit()
     print(f"  [OK] {links_added} link entries added")
+
+    # ── 3. VLAN names, trunk VLANs and spanning tree ─────────────────────────
+    print("Applying VLAN names, trunk VLANs and spanning tree state …")
+    apply_vlan_stp_overlay(db, devices_by_rack)
+    db.commit()
+    print("  [OK] Root bridge: " + devices_by_rack[RACKS[0]["id"]]["fs1"].sys_name)
 
     # ── Summary ──────────────────────────────────────────────────────────────
     total_dev     = db.query(Device).count()

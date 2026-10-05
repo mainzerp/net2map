@@ -44,3 +44,11 @@ class VendorScanner(ABC):
     @abstractmethod
     def fdb_strategy(self) -> str:
         """Return the FDB walk strategy: 'dot1d' or 'qbridge'."""
+
+    def supports_stp(self) -> bool:
+        """Return True if spanning tree data (BRIDGE-MIB dot1dStp) should be read.
+
+        Only the default instance is read; vendors that never run a bridge
+        spanning tree (e.g. firewalls) override this to skip the requests.
+        """
+        return True
