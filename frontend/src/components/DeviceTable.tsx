@@ -18,6 +18,7 @@ import {
   type StatusDotStatus,
 } from "./ui";
 import { formatTimestamp } from "../utils/datetime";
+import { useInspector } from "../hooks/useInspector";
 import type { DeviceTableProps, RackInfo, SwitchClass, SwitchModel, TopologyNode } from "../types";
 
 // /api/devices returns DeviceOut, which adds last_seen to the topology node shape.
@@ -60,6 +61,7 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
     queryFn: () => api.get("/api/switch-models"),
   });
   const { invalidate } = useInvalidateApi();
+  const { open: openInspector } = useInspector();
 
   const [togglingId, setTogglingId] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<string | number>>(new Set());
@@ -396,6 +398,7 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
               onSelectionChange={setSelected}
               search={search}
               searchText={searchText}
+              onRowClick={(d) => openInspector("device", d.id)}
               emptyTitle={search || statusFilter ? "No devices match your filters" : "All devices are currently ignored"}
             />
           </section>
@@ -415,6 +418,7 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
                 onSelectionChange={setSelected}
                 search={search}
                 searchText={searchText}
+              onRowClick={(d) => openInspector("device", d.id)}
                 rowClassName={() => "opacity-60"}
                 emptyTitle="No devices match your filters"
               />

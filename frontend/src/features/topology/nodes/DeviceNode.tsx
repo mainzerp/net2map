@@ -27,9 +27,10 @@ export default function DeviceNode({ data, selected }: NodeProps<DeviceFlowNode>
 
   return (
     <div
-      className={`w-full h-full rounded-lg border bg-panel px-3 py-2 flex flex-col justify-center gap-0.5 cursor-grab active:cursor-grabbing ${
-        selected ? "border-accent shadow-[0_0_14px_var(--accent)]" : "border-line-strong"
+      className={`w-full h-full rounded-lg border bg-panel px-3 py-2 flex flex-col justify-center gap-0.5 cursor-pointer active:cursor-grabbing transition-shadow duration-[120ms] motion-reduce:transition-none ${
+        selected ? "border-accent shadow-[0_0_14px_var(--accent)]" : "border-line-strong hover:ring-2 hover:ring-accent/40"
       }`}
+      title={`${name} - click to open details`}
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />
       <Handle type="source" position={Position.Right} style={handleStyle} />

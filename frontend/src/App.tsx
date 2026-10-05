@@ -9,6 +9,7 @@ import {
   Moon,
   Network,
   ScrollText,
+  Search,
   Server,
   Settings,
   Sun,
@@ -18,9 +19,12 @@ import {
 } from "lucide-react";
 import { getStoredToken, getStoredUser, logout, setApiNavigate } from "./api";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
-import useNetmapStore from "./store";
+import { useStartScan } from "./hooks/useStartScan";
 import { useToast } from "./components/ToastProvider";
 import { useTheme } from "./theme/ThemeProvider";
+import CommandPalette from "./features/command-palette/CommandPalette";
+import { paletteShortcutLabel, usePaletteStore } from "./features/command-palette/paletteStore";
+import InspectorDrawer from "./features/inspector/InspectorDrawer";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 interface NavItem {
@@ -79,6 +83,32 @@ function ThemeToggleButton({ tone = "surface", className = "" }: { tone?: Chrome
   );
 }
 
+// Opens the command palette; the kbd hint mirrors the Ctrl/Cmd+K shortcut.
+function SearchTrigger({ collapsed }: { collapsed: boolean }) {
+  const setOpen = usePaletteStore((s) => s.setOpen);
+  const shortcut = paletteShortcutLabel();
+  return (
+    <button
+      type="button"
+      onClick={() => setOpen(true)}
+      title={`Search (${shortcut})`}
+      aria-label={`Search (${shortcut})`}
+      aria-keyshortcuts="Control+K Meta+K"
+      className={`flex items-center gap-2 rounded-control text-xs transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent text-sidebar-muted hover:text-sidebar-text hover:bg-sidebar-hover ${
+        collapsed ? "justify-center w-8 h-8 mx-auto" : "w-full px-3 py-2 border border-sidebar-hover"
+      }`}
+    >
+      <Search size={ICON_SIZE} strokeWidth={ICON_STROKE} className="shrink-0" aria-hidden="true" />
+      {!collapsed && (
+        <>
+          <span className="flex-1 text-left">Search</span>
+          <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-sidebar-hover text-sidebar-muted">{shortcut}</kbd>
+        </>
+      )}
+    </button>
+  );
+}
+
 function NavItems({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
   return (
     <nav aria-label="Main navigation" className="flex flex-col gap-0.5 px-2">
@@ -113,7 +143,8 @@ const SIDEBAR_COLLAPSED_KEY = "netmap-sidebar-collapsed";
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
-  const startScan = useNetmapStore((s) => s.startScan);
+  const startScan = useStartScan();
+  const openPalette = usePaletteStore((s) => s.setOpen);
   const { addToast } = useToast();
 
   const [collapsed, setCollapsed] = useState(() => {
@@ -173,16 +204,11 @@ export default function App() {
           document.activeElement.blur();
         }
       },
-      onScan: async () => {
-        try {
-          await startScan();
-          addToast("Scan started", "info");
-        } catch {
-          addToast("Failed to start scan", "error");
-        }
+      onScan: () => {
+        void startScan();
       },
     }),
-    [startScan, addToast],
+    [startScan],
   );
 
   useKeyboardShortcuts(shortcuts);
@@ -258,6 +284,15 @@ export default function App() {
           <span className="text-primary font-semibold text-[15px] tracking-tight">NetMap</span>
         </NavLink>
         <div className="ml-auto flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => openPalette(true)}
+            aria-label="Search"
+            title="Search"
+            className={`inline-flex items-center justify-center w-8 h-8 rounded-control transition-colors cursor-pointer ${ICON_BUTTON_TONE.surface}`}
+          >
+            <Search size={ICON_SIZE} strokeWidth={ICON_STROKE} aria-hidden="true" />
+          </button>
           <ThemeToggleButton />
           {renderUserControls("surface")}
         </div>
@@ -300,6 +335,10 @@ export default function App() {
           {!collapsed && <span className="text-sidebar-text font-semibold text-[15px] tracking-tight">NetMap</span>}
         </NavLink>
 
+        <div className={`shrink-0 pb-2 ${collapsed ? "px-0" : "px-2"}`}>
+          <SearchTrigger collapsed={collapsed} />
+        </div>
+
         <div className="flex-1 overflow-y-auto py-2">
           <NavItems collapsed={collapsed} />
         </div>
@@ -329,6 +368,9 @@ export default function App() {
           <Outlet />
         </div>
       </main>
+
+      <InspectorDrawer />
+      <CommandPalette />
     </div>
   );
 }

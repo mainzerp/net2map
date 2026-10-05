@@ -5,17 +5,13 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Backlog
 
-- Cartography phase 2: Ctrl+K command palette and shared detail drawer · priority: P1 · area: frontend
-  Outcome: search devices/IP/MAC/port from anywhere; one right-side inspector
-  opened from map, tables and racks instead of page hops.
-  Verify: typecheck/tests/build; palette finds a known MAC and opens its drawer.
 - Cartography phase 3-5: map, racks, motion · priority: P2 · area: frontend
   Ink-stroke cables by speed, semantic zoom, scan sweep on the map; realistic rack
   faceplates with port LEDs; `motion` transitions honoring reduced-motion.
+  Include: "Show on map" pans/zooms to the device node (today it only selects the rack).
 - Cartography polish leftovers · priority: P3 · area: frontend
   22 ad-hoc rounded-lg panels -> rounded-card, bg-black overlays -> token scrim,
   vendor label contrast on map (<4.5:1), dark primary hover 3.95:1, ASCII vendor tags.
-
 - Persistent database fencing across Redis lease changes · priority: P2 · area: backend
   Observed lease loss, missing-client split brain and orphan finalizers are fixed
   in the security follow-up. Commit/post-flush checks do not provide an atomic
@@ -121,6 +117,8 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
   verification pending.
 
 ## Done
+
+- Cartography phase 2: Ctrl+K command palette and shared inspector drawer · priority: done · area: frontend · v2.2.0
 
 - UI redesign prototype "Cartography" (Billio palette) · priority: done · area: frontend · v2.2.0 (03426f4)
 

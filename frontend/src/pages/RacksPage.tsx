@@ -65,7 +65,14 @@ export default function RacksPage() {
           <Select
             aria-label="Select rack"
             value={activeRack?.id ?? ""}
-            onChange={(e) => setSearchParams({ rack: e.target.value })}
+            onChange={(e) =>
+              // Keep other params (e.g. the inspector drawer target) intact.
+              setSearchParams((prev) => {
+                const next = new URLSearchParams(prev);
+                next.set("rack", e.target.value);
+                return next;
+              })
+            }
           >
             {racks.map((r) => (
               <option key={r.id} value={r.id}>

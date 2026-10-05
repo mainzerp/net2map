@@ -118,4 +118,29 @@ describe("DataTable", () => {
     rerender(<DataTable columns={columns} rows={[]} rowKey={(r) => r.id} emptyTitle="Nothing here" />);
     expect(screen.getByText("Nothing here")).toBeTruthy();
   });
+
+  it("renders the trailing chevron column only when onRowClick is set", () => {
+    const { rerender } = render(<DataTable columns={columns} rows={rows} rowKey={(r) => r.id} />);
+    expect(screen.queryByTestId("row-open-header")).toBeNull();
+    expect(screen.queryAllByTestId("row-open-cell")).toHaveLength(0);
+    expect(document.querySelector("thead tr")!.children).toHaveLength(1);
+
+    const onRowClick = vi.fn();
+    rerender(<DataTable columns={columns} rows={rows} rowKey={(r) => r.id} onRowClick={onRowClick} />);
+    expect(screen.getByTestId("row-open-header")).toBeTruthy();
+    const cells = screen.getAllByTestId("row-open-cell");
+    expect(cells).toHaveLength(rows.length);
+    // Header and body stay aligned: one extra th, one extra td per row.
+    expect(document.querySelector("thead tr")!.children).toHaveLength(2);
+    expect(document.querySelector("tbody tr")!.children).toHaveLength(2);
+    // The chevron is decorative and does not change the row's text.
+    expect(cells[0].querySelector("svg")!.getAttribute("aria-hidden")).toBe("true");
+    expect(bodyRowNames()).toEqual(["gamma", "alpha", "beta"]);
+
+    // Clicking the chevron cell activates the row like any other cell.
+    fireEvent.click(cells[1]);
+    expect(onRowClick).toHaveBeenCalledWith(rows[1]);
+    // Rows stay keyboard-focusable.
+    expect(document.querySelector("tbody tr")!.getAttribute("tabindex")).toBe("0");
+  });
 });

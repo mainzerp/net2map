@@ -54,6 +54,26 @@ export function createApiMock() {
 }
 
 /**
+ * Replace the global localStorage with an in-memory Map-backed stub (the
+ * runtime's built-in storage is not usable in the test environment).
+ * Pair with `vi.unstubAllGlobals()` in afterEach.
+ */
+export function stubMemoryStorage() {
+  const values = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      values.set(key, String(value));
+    },
+    removeItem: (key: string) => {
+      values.delete(key);
+    },
+    clear: () => values.clear(),
+  });
+  return values;
+}
+
+/**
  * Helper to wait for async component updates.
  */
 export { waitFor, screen, act } from "@testing-library/react";

@@ -13,6 +13,7 @@ import {
   buildLayoutEntries,
   computeDropTarget,
   deviceUHeight,
+  isClickGesture,
   placementsFromNodes,
   rackHeightU,
   type DropTarget,
@@ -162,6 +163,7 @@ export interface RackDragState {
   source: "rack" | "tray";
   uHeight: number;
   pointer: { x: number; y: number };
+  origin: { x: number; y: number }; // pointer position at pointerdown
   target: DropTarget | null; // null while the pointer is outside the rack body
 }
 
@@ -172,11 +174,15 @@ interface UseRackDragOptions {
   bodyRef: RefObject<HTMLDivElement | null>;
   readOnly: boolean;
   onDrop: (device: TopologyNode, source: "rack" | "tray", pos: number, uHeight: number) => void;
+  // Called instead of a drop when the press moved less than the click
+  // threshold (see isClickGesture), e.g. to open the inspector.
+  onClick?: (device: TopologyNode, source: "rack" | "tray") => void;
 }
 
 // Pointer-event drag-and-drop: grab a faceplate or tray item, preview a ghost
-// snapped to the U grid (red when invalid), commit on release.
-export function useRackDrag({ rackId, heightU, nodes, bodyRef, readOnly, onDrop }: UseRackDragOptions) {
+// snapped to the U grid (red when invalid), commit on release. A release
+// within CLICK_MOVE_THRESHOLD_PX of the press point is a click, not a drop.
+export function useRackDrag({ rackId, heightU, nodes, bodyRef, readOnly, onDrop, onClick }: UseRackDragOptions) {
   const [drag, setDrag] = useState<RackDragState | null>(null);
   const dragRef = useRef<RackDragState | null>(null);
   dragRef.current = drag;
@@ -190,6 +196,7 @@ export function useRackDrag({ rackId, heightU, nodes, bodyRef, readOnly, onDrop 
         source,
         uHeight: deviceUHeight(device),
         pointer: { x: e.clientX, y: e.clientY },
+        origin: { x: e.clientX, y: e.clientY },
         target: null,
       });
     },
@@ -230,8 +237,14 @@ export function useRackDrag({ rackId, heightU, nodes, bodyRef, readOnly, onDrop 
       setDrag((d) => (d ? { ...d, pointer: { x: e.clientX, y: e.clientY }, target } : d));
     }
 
-    function onUp() {
+    function onUp(e: PointerEvent) {
       const current = dragRef.current;
+      if (current && e.type === "pointerup" && isClickGesture(current.origin, { x: e.clientX, y: e.clientY })) {
+        // Sub-threshold press: a click, never a (no-op) re-drop.
+        setDrag(null);
+        onClick?.(current.device, current.source);
+        return;
+      }
       if (current?.target?.valid) {
         onDrop(current.device, current.source, current.target.pos, current.uHeight);
       }
@@ -246,7 +259,7 @@ export function useRackDrag({ rackId, heightU, nodes, bodyRef, readOnly, onDrop 
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
     };
-  }, [drag != null, nodes, rackId, heightU, bodyRef, onDrop]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [drag != null, nodes, rackId, heightU, bodyRef, onDrop, onClick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { drag, startDrag };
 }

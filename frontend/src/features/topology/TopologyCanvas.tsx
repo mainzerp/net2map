@@ -88,6 +88,9 @@ interface TopologyCanvasProps {
   selectedOutsideId: number | null;
   onSelectRack: (rack: { id: number; label: string; location: string }) => void;
   onSelectOutside: (node: TopologyNode) => void;
+  // Called when a device node (not a rack) is clicked; opens the inspector.
+  // React Flow suppresses node clicks after a drag (nodeClickDistance = 0).
+  onOpenDevice?: (deviceId: number) => void;
   onSearchSelect: (device: TopologyNode) => void;
   onRackPositionChange: (rackId: number, pos: { x: number; y: number }, devicePositions: DevicePositionPatch[]) => void;
   onDevicePositionChange: (deviceId: number, pos: { x: number; y: number }) => void;
@@ -135,7 +138,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
   const {
     nodes, links, managedRacks, switchClasses, filters, onFilterChange,
     selectedRackId, selectedOutsideId,
-    onSelectRack, onSelectOutside, onSearchSelect,
+    onSelectRack, onSelectOutside, onOpenDevice, onSearchSelect,
     onRackPositionChange, onDevicePositionChange, onAutoLayout,
     selectedLink, rackPairColorMap,
     mapBgUrl, mapBgOpacity, mapBgScale, mapBgColor,
@@ -429,10 +432,15 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
       if (node.type === "device") {
         const deviceId = Number(node.id.slice("device:".length));
         const device = nodes.find(n => n.id === deviceId);
-        if (device) onSelectOutside(device);
+        // The inspector drawer and the inline side panel share the right edge,
+        // so a device click opens only one of them.
+        if (device) {
+          if (onOpenDevice) onOpenDevice(device.id);
+          else onSelectOutside(device);
+        }
       }
     },
-    [racks, nodes, onSelectRack, onSelectOutside],
+    [racks, nodes, onSelectRack, onSelectOutside, onOpenDevice],
   );
 
   const handleAutoLayout = useCallback(() => {

@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, CircleCheck, CircleX, EyeOff, TriangleAlert, type LucideIcon } from "lucide-react";
+import { ArrowRight, ChevronRight, CircleCheck, CircleX, EyeOff, TriangleAlert, type LucideIcon } from "lucide-react";
 import { formatTimestamp } from "../../utils/datetime";
+import { useInspector } from "../../hooks/useInspector";
 import type { ScanRun, TopologyNode } from "../../types";
 
 // Primary dashboard block: everything that needs a human look, as rows with an
@@ -33,6 +34,8 @@ function IssueRow({
   detail,
   meta,
   onClick,
+  opensInspector = false,
+  ariaLabel,
 }: {
   tone: IssueTone;
   icon: LucideIcon;
@@ -41,13 +44,20 @@ function IssueRow({
   detail?: React.ReactNode;
   meta?: React.ReactNode;
   onClick: () => void;
+  // Device rows open the inspector drawer: always-visible chevron and the
+  // same accent hover tint as clickable table rows.
+  opensInspector?: boolean;
+  ariaLabel?: string;
 }) {
   return (
     <li>
       <button
         type="button"
         onClick={onClick}
-        className="group w-full flex items-center gap-3 text-left px-5 py-3 hover:bg-panel-2/60 cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+        aria-label={ariaLabel}
+        className={`group w-full flex items-center gap-3 text-left px-5 py-3 cursor-pointer transition-colors duration-[120ms] motion-reduce:transition-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent ${
+          opensInspector ? "hover:bg-accent-soft/60 focus-visible:bg-accent-soft/60" : "hover:bg-panel-2/60"
+        }`}
       >
         <StatusChip tone={tone} icon={icon} label={chip} />
         <span className="flex-1 min-w-0 flex items-baseline gap-2">
@@ -55,11 +65,20 @@ function IssueRow({
           {detail != null && <span className="text-[11px] text-muted font-mono truncate">{detail}</span>}
         </span>
         {meta != null && <span className="hidden sm:inline text-[11px] text-muted whitespace-nowrap tabular-nums">{meta}</span>}
-        <ArrowRight
-          size={14}
-          aria-hidden="true"
-          className="shrink-0 text-muted opacity-0 group-hover:opacity-100 transition-opacity"
-        />
+        {opensInspector ? (
+          <ChevronRight
+            size={14}
+            aria-hidden="true"
+            data-testid="attention-open-chevron"
+            className="shrink-0 text-muted transition-colors duration-[120ms] motion-reduce:transition-none group-hover:text-accent group-focus-visible:text-accent"
+          />
+        ) : (
+          <ArrowRight
+            size={14}
+            aria-hidden="true"
+            className="shrink-0 text-muted opacity-0 group-hover:opacity-100 transition-opacity"
+          />
+        )}
       </button>
     </li>
   );
@@ -73,6 +92,7 @@ export interface AttentionCardProps {
 
 export function AttentionCard({ nodes, lastRun = null, className = "" }: AttentionCardProps) {
   const navigate = useNavigate();
+  const { open: openInspector } = useInspector();
   const offline = nodes.filter((n) => !n.ignored && n.ping_status === "offline");
   const ignoredCount = nodes.filter((n) => n.ignored).length;
   const unassignedCount = nodes.filter((n) => !n.ignored && !n.rack_id).length;
@@ -126,7 +146,9 @@ export function AttentionCard({ nodes, lastRun = null, className = "" }: Attenti
               title={d.sys_name || d.hostname || d.ip}
               detail={d.ip}
               meta={`last seen ${formatTimestamp(d.last_seen as string | null)}`}
-              onClick={() => navigate("/network?status=down")}
+              opensInspector
+              ariaLabel={`Open details for ${d.sys_name || d.hostname || d.ip} (offline)`}
+              onClick={() => openInspector("device", d.id)}
             />
           ))}
           {unassignedCount > 0 && (

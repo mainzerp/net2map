@@ -16,6 +16,7 @@ import {
   usedUnits,
 } from "./rackLayout";
 import { useRackDrag, useRackLayout } from "./useRackLayout";
+import { useInspector } from "../../hooks/useInspector";
 
 interface RackElevationProps {
   rack: RackInfo;
@@ -101,6 +102,7 @@ function Faceplate({
   heightU,
   onPointerDown,
   onUHeight,
+  onOpen,
 }: {
   device: TopologyNode;
   readOnly: boolean;
@@ -108,16 +110,33 @@ function Faceplate({
   heightU: number;
   onPointerDown: (e: React.PointerEvent) => void;
   onUHeight: (uHeight: number) => void;
+  onOpen: () => void;
 }) {
   const ping = device.ping_status || "unknown";
   const status = ping === "online" ? "up" : ping === "offline" ? "down" : "unknown";
   const vendor = VENDOR_ICON[device.vendor] ?? VENDOR_ICON.generic;
+  const name = device.sys_name || device.hostname || device.ip;
   return (
     <div
       data-testid={`faceplate-${device.id}`}
+      role="button"
+      tabIndex={0}
+      aria-label={`${name} - open details`}
+      title={readOnly ? "Click to open details" : "Click to open details, drag to move"}
       onPointerDown={onPointerDown}
-      className={`flex items-center gap-2 px-2 h-full w-full rounded border bg-panel-2 overflow-hidden select-none ${
-        readOnly ? "border-line" : "border-line-strong cursor-grab active:cursor-grabbing hover:border-accent"
+      // Read-only racks have no drag gesture, so a plain click opens details.
+      // Editable racks open via the click-vs-drag threshold in useRackDrag.
+      onClick={readOnly ? onOpen : undefined}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && e.target === e.currentTarget) {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+      className={`flex items-center gap-2 px-2 h-full w-full rounded border bg-panel-2 overflow-hidden select-none transition-colors duration-[120ms] motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent ${
+        readOnly
+          ? "border-line cursor-pointer hover:border-accent"
+          : "border-line-strong cursor-grab active:cursor-grabbing hover:border-accent"
       } ${dragging ? "opacity-40" : ""}`}
       style={{ touchAction: "none" }}
     >
@@ -126,7 +145,7 @@ function Faceplate({
         {vendor}
       </span>
       <span className="text-primary text-[11px] font-semibold truncate shrink-0 max-w-[160px]">
-        {device.sys_name || device.hostname || device.ip}
+        {name}
       </span>
       {ping === "online" && device.ping_rtt_ms != null && (
         <span className="text-[10px] text-muted shrink-0">{device.ping_rtt_ms}ms</span>
@@ -173,6 +192,9 @@ export default function RackElevation({ rack, nodes, readOnly = false }: RackEle
     [assignDevice, moveDevice, rack.id],
   );
 
+  const { open: openInspector } = useInspector();
+  const openDevice = useCallback((device: TopologyNode) => openInspector("device", device.id), [openInspector]);
+
   const { drag, startDrag } = useRackDrag({
     rackId: rack.id,
     heightU,
@@ -180,6 +202,7 @@ export default function RackElevation({ rack, nodes, readOnly = false }: RackEle
     bodyRef,
     readOnly,
     onDrop,
+    onClick: openDevice,
   });
 
   const scaleRows = Array.from({ length: heightU }, (_, i) => heightU - i); // top row shows heightU
@@ -257,6 +280,7 @@ export default function RackElevation({ rack, nodes, readOnly = false }: RackEle
                     heightU={heightU}
                     onPointerDown={(e) => startDrag(e, device, "rack")}
                     onUHeight={(h) => setUHeight(device, h)}
+                    onOpen={() => openDevice(device)}
                   />
                 </div>
               );

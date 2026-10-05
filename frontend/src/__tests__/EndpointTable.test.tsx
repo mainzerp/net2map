@@ -3,7 +3,8 @@
  */
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { useLocation } from "react-router-dom";
 import { renderWithRouter } from "./test-utils";
 
 // Mock the store
@@ -27,6 +28,11 @@ vi.mock("../api", () => ({
 }));
 
 import EndpointTable from "../components/EndpointTable";
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location">{decodeURIComponent(location.search)}</div>;
+}
 
 describe("EndpointTable", () => {
   beforeEach(() => {
@@ -141,5 +147,40 @@ describe("EndpointTable", () => {
       expect(screen.getByText(/boom/)).toBeTruthy();
     });
     expect(screen.getByText("Retry")).toBeTruthy();
+  });
+
+  it("opens the endpoint inspector on row click or Enter, but not from row actions", async () => {
+    const endpoints = [
+      { id: 5, mac: "aa:bb:cc:dd:ee:05", ip: "10.0.0.105", hostname: "nas-1", ignored: false, first_seen: null, last_seen: null, notes: null, found_on: [] },
+      { id: 6, mac: "aa:bb:cc:dd:ee:06", ip: "10.0.0.106", hostname: "nas-2", ignored: false, first_seen: null, last_seen: null, notes: null, found_on: [] },
+    ];
+    mockApiGet.mockImplementation((path: string) => {
+      if (path === "/api/endpoints") return Promise.resolve(endpoints);
+      return Promise.resolve([]);
+    });
+
+    renderWithRouter(
+      <>
+        <EndpointTable />
+        <LocationProbe />
+      </>,
+      { route: "/devices?q=nas" },
+    );
+
+    const first = await screen.findByText("nas-1");
+    const firstRow = first.closest("tr")!;
+    const location = () => screen.getByTestId("location").textContent;
+
+    // Per-row action buttons keep their own behavior.
+    fireEvent.click(screen.getAllByRole("button", { name: "Ignore" })[0]);
+    expect(location()).toBe("?q=nas");
+
+    // Keyboard: rows are focusable and Enter opens the inspector.
+    expect(firstRow.getAttribute("tabindex")).toBe("0");
+    fireEvent.keyDown(firstRow, { key: "Enter" });
+    await waitFor(() => expect(location()).toBe("?q=nas&inspect=endpoint:5"));
+
+    fireEvent.click(screen.getByText("nas-2"));
+    await waitFor(() => expect(location()).toBe("?q=nas&inspect=endpoint:6"));
   });
 });

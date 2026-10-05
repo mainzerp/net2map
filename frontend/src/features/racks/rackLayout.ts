@@ -107,3 +107,16 @@ export function placementsFromNodes(nodes: TopologyNode[], rackId: number, heigh
 export function usedUnits(placements: Placement[]): number {
   return placements.reduce((sum, p) => sum + p.uHeight, 0);
 }
+
+// Click-vs-drag threshold for faceplates and tray items: a press whose pointer
+// travelled less than this distance (in CSS pixels) between pointerdown and
+// pointerup counts as a click (opens the inspector), not as a drag.
+export const CLICK_MOVE_THRESHOLD_PX = 4;
+
+export function isClickGesture(
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  threshold: number = CLICK_MOVE_THRESHOLD_PX,
+): boolean {
+  return Math.hypot(end.x - start.x, end.y - start.y) < threshold;
+}

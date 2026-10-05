@@ -118,3 +118,9 @@
   color, layout and the map, not a display face; also drops the Google Fonts dependency.
 - **Prototype first.** A /styleguide page and the redesigned dashboard are reviewed
   before the shell, map, racks and motion are rebuilt.
+- **One inspector drawer, addressed by URL.** `?inspect=device:<id>|endpoint:<id>|rack:<id>`
+  on any route opens a shared right-side drawer rendered by the shell: deep-linkable,
+  closes with Back, and replaces page-local detail state (MapPage `detailSwitchId`).
+- **Command palette without a new dependency.** Ctrl/Cmd+K searches the already cached
+  `useTopology` + `useEndpoints` data with hand-rolled fuzzy scoring; there is no backend
+  search endpoint and the lists are small enough for client-side matching.

@@ -265,7 +265,9 @@ Rules of thumb:
 - `frontend/` — React 18 + Vite + TypeScript SPA served by nginx; entry
   `index.html` → `src/main.tsx` (lazy-loaded pages); owning doc: `docs/README.md`.
   Feature modules in `src/features/`: `dashboard/` (ScanHero, AttentionCard,
-  DistributionCards, RackOverview), `topology/` (React Flow map: TopologyCanvas, graph/layout,
+  DistributionCards, RackOverview), `inspector/` (shared right-side drawer,
+  `?inspect=device:|endpoint:|rack:<id>` via `src/hooks/useInspector.ts`),
+  `command-palette/` (Ctrl/Cmd+K and `/`, pure scoring in `search.ts`), `topology/` (React Flow map: TopologyCanvas, graph/layout,
   nodes/, edges/, MapToolbar), `racks/` (rack elevation view at route `/racks`:
   RackElevation, useRackLayout, rackLayout).
   Styling: Tailwind v4 (`@tailwindcss/vite`) with theme tokens in `src/index.css`

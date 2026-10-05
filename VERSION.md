@@ -16,11 +16,19 @@ Arbeitsstand, noch nicht veroeffentlicht; Prototyp fuer das UI-Redesign.
 - Dashboard neu aufgebaut: Statussatz als Ueberschrift, kompakte Scan-Leiste
   mit Abbrechen, Aufmerksamkeitsliste als Hauptbereich, kompakte Verteilungen.
 - Neue Seite `/styleguide` zur Pruefung aller Farben und UI-Bausteine.
+- Befehlspalette mit Strg/Cmd+K oder `/`: sucht Switches, Endpunkte (auch MAC
+  ohne Trennzeichen), Racks und Ports, springt zu Seiten, startet Scans und
+  wechselt das Theme. Zuletzt geoeffnete Ziele erscheinen bei leerer Suche.
+- Gemeinsames Detail-Panel (Inspector) rechts fuer Switches, Endpunkte und
+  Racks, per URL verlinkbar (`?inspect=device:<id>`), schliesst mit Zurueck oder
+  Escape. Zeilen in den Geraete- und Endpunkt-Tabellen oeffnen es per Klick/Enter.
 
 ### Aenderungen
 
 - Toasts, Fehleransicht und Einstellungen verwenden Theme-Farben statt fester
   Hex-Werte. Der Standard-Kartenhintergrund folgt dem Theme ("Follow theme").
+- Die Switch-Detailansicht der Karte (SwitchDetailSlideIn) wurde durch den
+  Inspector ersetzt.
 
 ## v2.1.2 -- Sitzungs-Sicherheit, Scan-Stabilitaet und UI-Polish
 

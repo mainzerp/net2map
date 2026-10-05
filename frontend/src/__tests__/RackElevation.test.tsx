@@ -2,8 +2,9 @@
  * Tests for the rack elevation view: U scale rendering, placed-device row
  * positions, the unassigned tray, and the pure layout-payload functions.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from "vitest";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { useLocation } from "react-router-dom";
 import { renderWithRouter } from "./test-utils";
 
 const mockApiGet = vi.fn();
@@ -28,8 +29,10 @@ vi.mock("../api", () => ({
 // Must import after mocks are set up
 import RacksPage from "../pages/RacksPage";
 import {
+  CLICK_MOVE_THRESHOLD_PX,
   U_PX,
   buildLayoutEntries,
+  isClickGesture,
   computeDropTarget,
   placementsFromNodes,
   rowFromTop,
@@ -132,6 +135,104 @@ describe("RacksPage / RackElevation", () => {
     expect(screen.getByText("No rack assigned (1)")).toBeTruthy();
     expect(screen.queryByTestId("faceplate-3")).toBeNull();
     expect(screen.queryByTestId("faceplate-4")).toBeNull();
+  });
+});
+
+describe("RackElevation faceplate click vs drag", () => {
+  function LocationProbe() {
+    const location = useLocation();
+    return <div data-testid="location">{decodeURIComponent(location.search)}</div>;
+  }
+
+  function renderRacks() {
+    return renderWithRouter(
+      <>
+        <RacksPage />
+        <LocationProbe />
+      </>,
+      { route: "/racks?rack=1" },
+    );
+  }
+
+  // jsdom has no PointerEvent; without it fireEvent.pointer* builds a plain
+  // Event that drops button/clientX/clientY. A MouseEvent subclass is enough.
+  beforeAll(() => {
+    if (typeof window.PointerEvent === "undefined") {
+      class PointerEventPolyfill extends MouseEvent {
+        constructor(type: string, init?: PointerEventInit) {
+          super(type, init);
+        }
+      }
+      vi.stubGlobal("PointerEvent", PointerEventPolyfill);
+    }
+  });
+
+  afterAll(() => {
+    vi.unstubAllGlobals();
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockApiGet.mockImplementation((path: string) => {
+      if (path === "/api/topology") return Promise.resolve(structuredClone(TOPOLOGY));
+      return Promise.resolve([]);
+    });
+    mockApiPatch.mockResolvedValue({});
+  });
+
+  it("opens the inspector when the pointer is released without moving", async () => {
+    renderRacks();
+    const fp = await screen.findByTestId("faceplate-2");
+
+    fireEvent.pointerDown(fp, { button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerUp(window, { button: 0, clientX: 102, clientY: 101 });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("location").textContent).toBe("?rack=1&inspect=device:2"),
+    );
+    expect(mockApiPatch).not.toHaveBeenCalled();
+  });
+
+  it("does not open the inspector when the pointer moved past the threshold", async () => {
+    renderRacks();
+    const fp = await screen.findByTestId("faceplate-2");
+
+    fireEvent.pointerDown(fp, { button: 0, clientX: 100, clientY: 100 });
+    // The drag started: the source faceplate is dimmed.
+    expect(fp.className).toContain("opacity-40");
+    fireEvent.pointerMove(window, { clientX: 100, clientY: 140 });
+    fireEvent.pointerUp(window, { button: 0, clientX: 100, clientY: 140 });
+
+    expect(screen.getByTestId("location").textContent).toBe("?rack=1");
+    // The drag ended: the faceplate is no longer dimmed.
+    expect(fp.className).not.toContain("opacity-40");
+  });
+
+  it("opens the inspector with Enter on a focused faceplate", async () => {
+    renderRacks();
+    const fp = await screen.findByTestId("faceplate-1");
+    expect(fp.getAttribute("tabindex")).toBe("0");
+
+    fireEvent.keyDown(fp, { key: "Enter" });
+    await waitFor(() =>
+      expect(screen.getByTestId("location").textContent).toBe("?rack=1&inspect=device:1"),
+    );
+  });
+});
+
+describe("isClickGesture", () => {
+  it("treats movement below the threshold as a click", () => {
+    expect(CLICK_MOVE_THRESHOLD_PX).toBe(4);
+    expect(isClickGesture({ x: 0, y: 0 }, { x: 0, y: 0 })).toBe(true);
+    expect(isClickGesture({ x: 10, y: 10 }, { x: 12, y: 12 })).toBe(true); // ~2.8px
+    expect(isClickGesture({ x: 0, y: 0 }, { x: 3.9, y: 0 })).toBe(true);
+  });
+
+  it("treats movement at or above the threshold as a drag", () => {
+    expect(isClickGesture({ x: 0, y: 0 }, { x: 4, y: 0 })).toBe(false);
+    expect(isClickGesture({ x: 0, y: 0 }, { x: 3, y: 3 })).toBe(false); // ~4.2px
+    expect(isClickGesture({ x: 0, y: 0 }, { x: 0, y: 40 })).toBe(false);
+    expect(isClickGesture({ x: 0, y: 0 }, { x: 5, y: 0 }, 10)).toBe(true);
   });
 });
 

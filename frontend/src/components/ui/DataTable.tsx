@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { ChevronRight } from "lucide-react";
 import { Button } from "./Button";
 import { EmptyState } from "./EmptyState";
 import { Input } from "./Input";
@@ -50,7 +51,14 @@ export interface DataTableProps<T> {
   emptyTitle?: ReactNode;
   emptyHint?: ReactNode;
   rowClassName?: (row: T) => string;
+
+  // Row activation (e.g. open the inspector). Rows become focusable and open
+  // on click or Enter; clicks on interactive cell content (buttons, links,
+  // inputs) keep their own behavior and do not activate the row.
+  onRowClick?: (row: T) => void;
 }
+
+const INTERACTIVE_SELECTOR = 'button, a[href], input, select, textarea, label, [role="button"]';
 
 const ALIGN_CLASS: Record<DataTableAlign, string> = {
   left: "text-left",
@@ -79,6 +87,7 @@ export function DataTable<T>({
   emptyTitle = "No rows",
   emptyHint,
   rowClassName,
+  onRowClick,
 }: DataTableProps<T>) {
   const [internalSearch, setInternalSearch] = useState("");
   const searchValue = search ?? internalSearch;
@@ -214,6 +223,7 @@ export function DataTable<T>({
                   )}
                 </th>
               ))}
+              {onRowClick && <th aria-hidden="true" data-testid="row-open-header" className="w-8 px-2 py-2" />}
             </tr>
           </thead>
           <tbody>
@@ -230,6 +240,7 @@ export function DataTable<T>({
                         <div className="h-3.5 rounded bg-panel-2 animate-pulse" />
                       </td>
                     ))}
+                    {onRowClick && <td className="w-8 px-2 py-2.5" />}
                   </tr>
                 ))
               : visible.map((row) => {
@@ -237,10 +248,35 @@ export function DataTable<T>({
                   return (
                     <tr
                       key={key}
-                      className={`border-b border-line last:border-0 hover:bg-panel-2/50 ${rowClassName?.(row) ?? ""}`}
+                      tabIndex={onRowClick ? 0 : undefined}
+                      onClick={
+                        onRowClick
+                          ? (e) => {
+                              const target = e.target as HTMLElement;
+                              const interactive = target.closest(INTERACTIVE_SELECTOR);
+                              if (interactive && e.currentTarget.contains(interactive)) return;
+                              onRowClick(row);
+                            }
+                          : undefined
+                      }
+                      onKeyDown={
+                        onRowClick
+                          ? (e) => {
+                              if (e.key === "Enter" && e.target === e.currentTarget) {
+                                e.preventDefault();
+                                onRowClick(row);
+                              }
+                            }
+                          : undefined
+                      }
+                      className={`border-b border-line last:border-0 ${
+                        onRowClick
+                          ? "group cursor-pointer transition-colors duration-[120ms] motion-reduce:transition-none hover:bg-accent-soft/60 focus-visible:bg-accent-soft/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+                          : "hover:bg-panel-2/50"
+                      } ${rowClassName?.(row) ?? ""}`}
                     >
                       {selectable && (
-                        <td className="px-3 py-2">
+                        <td className="px-3 py-2" onClick={onRowClick ? (e) => e.stopPropagation() : undefined}>
                           <input
                             type="checkbox"
                             aria-label={`Select row ${String(key)}`}
@@ -258,6 +294,15 @@ export function DataTable<T>({
                           {col.render(row)}
                         </td>
                       ))}
+                      {onRowClick && (
+                        <td className="w-8 px-2 py-2 text-right" data-testid="row-open-cell">
+                          <ChevronRight
+                            size={14}
+                            aria-hidden="true"
+                            className="inline-block text-muted transition-colors duration-[120ms] motion-reduce:transition-none group-hover:text-accent group-focus-visible:text-accent"
+                          />
+                        </td>
+                      )}
                     </tr>
                   );
                 })}

@@ -12,8 +12,8 @@ export default function RackNode({ data, selected }: NodeProps<RackFlowNode>) {
 
   return (
     <div
-      className={`w-full h-full rounded-lg border bg-panel flex flex-col items-center justify-center gap-1 cursor-grab active:cursor-grabbing relative ${
-        selected ? "border-accent shadow-[0_0_14px_var(--accent)]" : "border-line-strong"
+      className={`w-full h-full rounded-lg border bg-panel flex flex-col items-center justify-center gap-1 cursor-pointer active:cursor-grabbing relative transition-shadow duration-[120ms] motion-reduce:transition-none ${
+        selected ? "border-accent shadow-[0_0_14px_var(--accent)]" : "border-line-strong hover:ring-2 hover:ring-accent/40"
       }`}
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />

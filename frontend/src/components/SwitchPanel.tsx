@@ -44,7 +44,16 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
               {uBadge && (
                 <span className="text-[10px] px-1.5 py-px rounded border border-line-strong text-muted bg-panel-2 font-semibold shrink-0">{uBadge}</span>
               )}
-              <span className="text-primary font-semibold text-sm">{switchModel ? switchModel.name : (device.model || device.sys_name)}</span>
+              {onShowDetail ? (
+                <button
+                  type="button"
+                  title="Open switch details"
+                  onClick={e => { e.stopPropagation(); onShowDetail(device.id); }}
+                  className="text-primary font-semibold text-sm text-left bg-transparent border-0 p-0 cursor-pointer hover:text-accent hover:underline underline-offset-2 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent rounded-sm"
+                >{switchModel ? switchModel.name : (device.model || device.sys_name)}</button>
+              ) : (
+                <span className="text-primary font-semibold text-sm">{switchModel ? switchModel.name : (device.model || device.sys_name)}</span>
+              )}
               {switchClass && (
                 <span
                   className="text-[10px] px-1.5 py-px rounded border"

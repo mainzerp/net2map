@@ -7,6 +7,7 @@ import { useEndpoints, useInvalidateApi } from "../hooks/api";
 import { queryKeys } from "../hooks/api";
 import { Button, Card, DataTable, Input, type DataTableColumn } from "./ui";
 import { formatTimestamp } from "../utils/datetime";
+import { useInspector } from "../hooks/useInspector";
 import type { Endpoint } from "../types";
 
 export default function EndpointTable() {
@@ -14,6 +15,7 @@ export default function EndpointTable() {
   const setHighlightPortKey = useNetmapStore((s) => s.setHighlightPortKey);
   const endpointsQuery = useEndpoints();
   const { invalidate } = useInvalidateApi();
+  const { open: openInspector } = useInspector();
 
   const [togglingId, setTogglingId] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<string | number>>(new Set());
@@ -241,6 +243,7 @@ export default function EndpointTable() {
               onSelectionChange={setSelected}
               search={search}
               searchText={searchText}
+              onRowClick={(e) => openInspector("endpoint", e.id)}
               emptyTitle={search ? "No endpoints match your search" : "All endpoints are currently ignored"}
             />
           </section>
@@ -260,6 +263,7 @@ export default function EndpointTable() {
                 onSelectionChange={setSelected}
                 search={search}
                 searchText={searchText}
+              onRowClick={(e) => openInspector("endpoint", e.id)}
                 rowClassName={() => "opacity-60"}
                 emptyTitle="No endpoints match your search"
               />

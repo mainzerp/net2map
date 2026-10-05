@@ -12,7 +12,7 @@ import TopologyCanvas, {
 } from "../features/topology/TopologyCanvas";
 import { buildRackPairColorMap } from "../features/topology/graph";
 import RackDetail from "../components/map/RackDetail";
-import SwitchDetailSlideIn from "../components/SwitchDetailSlideIn";
+import { useInspector } from "../hooks/useInspector";
 import { useMapBackground } from "../hooks/useMapBackground";
 import { useRackOrders } from "../hooks/useRackOrders";
 import type { TopologyNode, TopologyLink, SelectedRack, FilterState, TopologyData } from "../types";
@@ -43,7 +43,8 @@ export default function MapPage() {
   const [filters, setFilters] = useState<FilterState>({ racks: null, classes: null });
   const [selectedLink, setSelectedLink] = useState<TopologyLink | null>(null);
   const [selectedOutsideNode, setSelectedOutsideNode] = useState<TopologyNode | null>(null);
-  const [detailSwitchId, setDetailSwitchId] = useState<number | null>(null);
+  // Switch details open in the shared inspector drawer (app shell).
+  const { open: openInspector } = useInspector();
 
   // When the active scan job finishes, refresh the topology immediately.
   const scanProgress = useScanProgress(activeScanJobId);
@@ -247,6 +248,7 @@ export default function MapPage() {
               selectedOutsideId={selectedOutsideNode?.id ?? null}
               onSelectRack={handleSelectRack}
               onSelectOutside={handleSelectOutside}
+              onOpenDevice={(deviceId: number) => openInspector("device", deviceId)}
               onSearchSelect={handleSearchSelect}
               onRackPositionChange={saveRackPosition}
               onDevicePositionChange={saveDevicePosition}
@@ -283,7 +285,7 @@ export default function MapPage() {
               rackPairColorMap={rackPairColorMap}
               selectedLink={selectedLink}
               onLinkSelect={setSelectedLink}
-              onShowDetail={setDetailSwitchId}
+              onShowDetail={(deviceId: number) => openInspector("device", deviceId)}
               highlightPortKey={highlightPortKey}
               deviceOrder={selectedRackOrders}
               onReorder={(deviceId: number, dir: "up" | "down", groupKey: string) =>
@@ -303,16 +305,6 @@ export default function MapPage() {
           </div>
         )}
       </div>
-      {detailSwitchId != null && (
-        <SwitchDetailSlideIn
-          deviceId={detailSwitchId}
-          nodes={topology.nodes}
-          topologyLinks={topology.links}
-          rackPairColorMap={rackPairColorMap}
-          allRacks={allRacks}
-          onClose={() => setDetailSwitchId(null)}
-        />
-      )}
     </div>
   );
 }
