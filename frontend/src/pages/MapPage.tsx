@@ -24,7 +24,7 @@ export default function MapPage() {
   // Live topology: 30s polling; the ETag in api.get keeps 304 responses cheap.
   const topologyQuery = useQuery<TopologyData>({
     queryKey: queryKeys.topology,
-    queryFn: () => api.get("/api/topology"),
+    queryFn: () => api.get<TopologyData>("/api/topology"),
     refetchInterval: 30_000,
   });
   const topology = topologyQuery.data ?? EMPTY_TOPOLOGY;

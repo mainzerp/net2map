@@ -6,6 +6,6 @@ import { queryKeys } from "./keys";
 export function useEndpoints() {
   return useQuery<Endpoint[]>({
     queryKey: queryKeys.endpoints,
-    queryFn: () => api.get("/api/endpoints"),
+    queryFn: () => api.get<Endpoint[]>("/api/endpoints"),
   });
 }

@@ -67,7 +67,7 @@ function RacksTabContent({ newEntryTrigger }: RacksTabContentProps) {
       if (values.id) {
         await api.put(`/api/racks/${values.id}`, payload);
       } else {
-        const r = await api.post("/api/racks", payload);
+        const r = await api.post<{ detail?: unknown }>("/api/racks", payload);
         if (r.detail) throw new Error(typeof r.detail === "string" ? r.detail : JSON.stringify(r.detail));
       }
     },

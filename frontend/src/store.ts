@@ -71,7 +71,7 @@ const useNetmapStore = create<NetmapStoreState>((set, get) => ({
   },
 
   loadMapSettings: () => {
-    api.get("/api/map-settings").then((s: Record<string, unknown>) => {
+    api.get<Record<string, unknown>>("/api/map-settings").then((s) => {
       const patch: Partial<NetmapState> = {};
       if (s.opacity != null) patch.bgOpacity = s.opacity as number;
       if (s.scale != null) patch.bgScale = s.scale as number;
@@ -86,7 +86,7 @@ const useNetmapStore = create<NetmapStoreState>((set, get) => ({
 
   startScan: async (): Promise<{ job_id: string; status: string }> => {
     try {
-      const res = await api.post("/api/scan/jobs");
+      const res = await api.post<{ job_id: string; status: string }>("/api/scan/jobs");
       set({ activeScanJobId: res.job_id, scanStatus: res.status });
       return res;
     } catch (e) {

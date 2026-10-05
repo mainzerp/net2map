@@ -68,7 +68,7 @@ function DryRunPanel() {
           return;
         }
         try {
-          const st = await api.get(`/api/scan/jobs/${job.job_id}`);
+          const st = await api.get<{ status?: string; result?: Partial<DryRunResult> } | null>(`/api/scan/jobs/${job.job_id}`);
           consecutiveErrors = 0;
           if (st?.result) {
             const preview: DryRunPreviewItem[] = st.result?.preview ?? [];

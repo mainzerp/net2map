@@ -72,7 +72,7 @@ function ModelsTabContent({ newEntryTrigger }: ModelsTabContentProps) {
       if (values.id) {
         await api.put(`/api/switch-models/${values.id}`, payload);
       } else {
-        const r = await api.post("/api/switch-models", payload);
+        const r = await api.post<{ detail?: unknown }>("/api/switch-models", payload);
         if (r.detail) throw new Error(typeof r.detail === "string" ? r.detail : JSON.stringify(r.detail));
       }
     },

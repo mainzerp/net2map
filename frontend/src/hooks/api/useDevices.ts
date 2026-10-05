@@ -6,6 +6,6 @@ import { queryKeys } from "./keys";
 export function useDevices() {
   return useQuery<TopologyNode[]>({
     queryKey: queryKeys.devices,
-    queryFn: () => api.get("/api/devices"),
+    queryFn: () => api.get<TopologyNode[]>("/api/devices"),
   });
 }

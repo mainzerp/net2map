@@ -31,8 +31,45 @@ interface ETagCacheEntry {
   data: unknown;
 }
 
-// ETag cache for GET requests that support conditional fetching
-const _etagCache: Record<string, ETagCacheEntry> = {};
+// ETag cache for GET requests that support conditional fetching. A Map keeps
+// insertion order, which doubles as LRU order: hits are re-inserted at the end
+// and the first (least recently used) entry is evicted once the bound is hit.
+const ETAG_CACHE_MAX_ENTRIES = 200;
+const _etagCache = new Map<string, ETagCacheEntry>();
+
+/**
+ * Normalize a logical request path into an ETag cache key: the versioned path
+ * plus query parameters sorted by name, so "/api/x?b=2&a=1" and
+ * "/api/v1/x?a=1&b=2" share one entry.
+ */
+export function etagCacheKey(path: string): string {
+  const full = versionedPath(path).split("#")[0];
+  const q = full.indexOf("?");
+  if (q < 0) return full;
+  const params = new URLSearchParams(full.slice(q + 1));
+  params.sort();
+  const query = params.toString();
+  return query ? `${full.slice(0, q)}?${query}` : full.slice(0, q);
+}
+
+function _etagCacheGet(key: string): ETagCacheEntry | undefined {
+  const entry = _etagCache.get(key);
+  if (entry) {
+    _etagCache.delete(key);
+    _etagCache.set(key, entry);
+  }
+  return entry;
+}
+
+function _etagCacheSet(key: string, entry: ETagCacheEntry): void {
+  _etagCache.delete(key);
+  _etagCache.set(key, entry);
+  while (_etagCache.size > ETAG_CACHE_MAX_ENTRIES) {
+    const oldest = _etagCache.keys().next().value;
+    if (oldest === undefined) break;
+    _etagCache.delete(oldest);
+  }
+}
 let _sessionVersion = 0;
 export const SESSION_CHANGED_EVENT = "netmap-session-changed";
 
@@ -53,22 +90,25 @@ function checkSession(version: number): void {
 }
 
 function _clearEtagCache(): void {
-  Object.keys(_etagCache).forEach(k => { delete _etagCache[k]; });
+  _etagCache.clear();
 }
 
 // Drop cache entries affected by a mutation: the exact path, any cached
-// parent collection of it, and any cached child paths below it.
+// parent collection of it, and any cached child paths below it. Query strings
+// are ignored for the comparison, so filtered list views are dropped as well.
 function _invalidateRelated(path: string): void {
-  Object.keys(_etagCache).forEach(key => {
-    if (key === path || path.startsWith(key + "/") || key.startsWith(path + "/")) {
-      delete _etagCache[key];
+  const base = etagCacheKey(path).split("?")[0];
+  for (const key of [..._etagCache.keys()]) {
+    const keyBase = key.split("?")[0];
+    if (keyBase === base || base.startsWith(keyBase + "/") || keyBase.startsWith(base + "/")) {
+      _etagCache.delete(key);
     }
-  });
+  }
 }
 
-// Auth token from localStorage (JWT or legacy token)
+// Auth token from localStorage (login JWT or legacy SECRET_TOKEN)
 export function _getAuthHeader(): Record<string, string> {
-  const token = localStorage.getItem("auth_token") || import.meta.env.VITE_API_TOKEN || "";
+  const token = localStorage.getItem("auth_token") || "";
   return token ? { Authorization: "Bearer " + token } : {};
 }
 
@@ -76,6 +116,20 @@ export function login(token: string, user: { username: string; role: string }): 
   localStorage.setItem("auth_token", token);
   localStorage.setItem("auth_user", JSON.stringify(user));
   resetSessionCaches();
+}
+
+/**
+ * Validate a static access token (legacy single SECRET_TOKEN mode, or a pasted
+ * JWT) against GET /api/auth/me without storing it. Resolves to the user the
+ * backend associates with the token; rejects with an "HTTP <status>: ..." error.
+ */
+export async function verifyAccessToken(token: string): Promise<{ username: string; role: string }> {
+  const r = await fetch(apiUrl("/api/auth/me"), { headers: { Authorization: "Bearer " + token } });
+  if (!r.ok) {
+    throw new Error(`HTTP ${r.status}: ${r.status === 401 ? "Invalid access token" : r.statusText}`);
+  }
+  const data: { username?: string; role?: string } = await r.json();
+  return { username: data.username || "token", role: data.role || "viewer" };
 }
 
 export async function logout(): Promise<boolean> {
@@ -197,50 +251,43 @@ async function _checkOk(r: Response): Promise<Response> {
 }
 
 export const api = {
-  get: async (path: string): Promise<any> => {
+  get: async <T = unknown>(path: string): Promise<T> => {
     const version = _sessionVersion;
     await refreshTokenIfNeeded();
     checkSession(version);
+    const key = etagCacheKey(path);
     const headers: Record<string, string> = { ..._getAuthHeader() };
-    if (_etagCache[path]) headers["If-None-Match"] = _etagCache[path].etag;
+    const cachedEntry = _etagCache.get(key);
+    if (cachedEntry) headers["If-None-Match"] = cachedEntry.etag;
     const r = await fetch(apiUrl(path), { headers });
     checkSession(version);
     if (r.status === 304) {
-      if (_etagCache[path]) return structuredClone(_etagCache[path].data);
+      const hit = _etagCacheGet(key);
+      if (hit) return structuredClone(hit.data) as T;
       // Cache miss despite 304 - re-fetch without ETag
       const r2 = await fetch(apiUrl(path), { headers: { ..._getAuthHeader() } });
       checkSession(version);
       await _checkOk(r2);
       const data2 = await r2.json();
       checkSession(version);
-      return data2;
+      return data2 as T;
     }
     await _checkOk(r);
     const etag = r.headers.get("ETag");
     const data = await r.json();
     checkSession(version);
-    if (etag) {
-      _etagCache[path] = { etag, data: structuredClone(data) };
-      const keys = Object.keys(_etagCache);
-      if (keys.length > 200) {
-        // Evict oldest 20% to avoid thrashing
-        const evictCount = Math.ceil(keys.length * 0.2);
-        for (let i = 0; i < evictCount; i++) {
-          delete _etagCache[keys[i]];
-        }
-      }
-    }
-    return data;
+    if (etag) _etagCacheSet(key, { etag, data: structuredClone(data) });
+    return data as T;
   },
-  post: (path: string, body?: unknown): Promise<any> => mutate("POST", path, body),
-  put: (path: string, body?: unknown): Promise<any> => mutate("PUT", path, body),
-  patch: (path: string, body?: unknown): Promise<any> => mutate("PATCH", path, body),
-  del: (path: string): Promise<void> => mutate("DELETE", path),
+  post: <T = unknown>(path: string, body?: unknown): Promise<T> => mutate<T>("POST", path, body),
+  put: <T = unknown>(path: string, body?: unknown): Promise<T> => mutate<T>("PUT", path, body),
+  patch: <T = unknown>(path: string, body?: unknown): Promise<T> => mutate<T>("PATCH", path, body),
+  del: (path: string): Promise<void> => mutate<void>("DELETE", path),
   /** Invalidate one or more ETag cache entries so the next GET fetches fresh data. */
-  invalidate: (...paths: string[]): void => { paths.forEach(p => { delete _etagCache[p]; }); },
+  invalidate: (...paths: string[]): void => { paths.forEach(p => { _etagCache.delete(etagCacheKey(p)); }); },
 };
 
-async function mutate(method: string, path: string, body?: unknown): Promise<any> {
+async function mutate<T>(method: string, path: string, body?: unknown): Promise<T> {
   const version = _sessionVersion;
   if (path !== "/api/auth/login") await refreshTokenIfNeeded();
   checkSession(version);
@@ -254,7 +301,7 @@ async function mutate(method: string, path: string, body?: unknown): Promise<any
   const data = method === "DELETE" || response.status === 204 ? undefined : await response.json();
   checkSession(version);
   _invalidateRelated(path);
-  return data;
+  return data as T;
 }
 
 // ── SNMP protocol constants ──────────────────────────────────────────────────
@@ -267,7 +314,7 @@ export const SEC_LEVELS: string[]     = ["noAuthNoPriv","authNoPriv","authPriv"]
 // ── Cable-link helpers ───────────────────────────────────────────────────────
 // Normalise a port identifier so LLDP port IDs and SNMP ifDescr values
 // can be compared case-insensitively after trimming whitespace.
-export function normPort(s: string): string {
+export function normPort(s: string | null | undefined): string {
   return (s || "").trim().toLowerCase();
 }
 

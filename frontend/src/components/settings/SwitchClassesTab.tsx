@@ -58,7 +58,7 @@ function ClassesTabContent({ newEntryTrigger }: ClassesTabContentProps) {
       if (values.id) {
         await api.put(`/api/switch-classes/${values.id}`, values.form);
       } else {
-        const r = await api.post("/api/switch-classes", values.form);
+        const r = await api.post<{ detail?: unknown }>("/api/switch-classes", values.form);
         if (r.detail) throw new Error(typeof r.detail === "string" ? r.detail : JSON.stringify(r.detail));
       }
     },

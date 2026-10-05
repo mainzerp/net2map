@@ -13,6 +13,6 @@ export interface Stats {
 export function useStats() {
   return useQuery<Stats>({
     queryKey: queryKeys.stats,
-    queryFn: () => api.get("/api/stats"),
+    queryFn: () => api.get<Stats>("/api/stats"),
   });
 }

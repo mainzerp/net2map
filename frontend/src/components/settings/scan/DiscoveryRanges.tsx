@@ -30,7 +30,7 @@ function DiscoveryRanges() {
         .split(/[\n,;]+/)
         .map((s) => s.trim())
         .filter(Boolean);
-      const resp = await api.put("/api/discovery-ranges", { ranges: lines });
+      const resp = await api.put<{ ranges?: unknown } | null>("/api/discovery-ranges", { ranges: lines });
       return Array.isArray(resp?.ranges) ? (resp.ranges as string[]) : lines;
     },
     onSuccess: (saved) => {

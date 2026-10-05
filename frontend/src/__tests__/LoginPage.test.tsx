@@ -17,9 +17,11 @@ vi.mock("react-router-dom", async () => {
 
 // Mock the api module
 const mockApiPost = vi.fn();
+const mockVerifyAccessToken = vi.fn();
 vi.mock("../api", () => ({
   API: "",
   login: vi.fn(),
+  verifyAccessToken: (...args: unknown[]) => mockVerifyAccessToken(...args),
   extractErrorMessage: (ex: unknown) => (ex instanceof Error ? ex.message : String(ex)),
   api: { post: (...args: unknown[]) => mockApiPost(...args) },
 }));
@@ -79,5 +81,25 @@ describe("LoginPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Invalid credentials")).toBeTruthy();
     });
+  });
+
+  it("signs in with an access token in single-token mode", async () => {
+    const user = userEvent.setup();
+    const { login } = await import("../api");
+
+    mockVerifyAccessToken.mockResolvedValueOnce({ username: "legacy", role: "admin" });
+
+    renderWithRouter(<LoginPage />);
+
+    await user.click(screen.getByRole("button", { name: /access token instead/i }));
+    await user.type(screen.getByLabelText(/access token/i), "  static-secret  ");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => {
+      expect(mockVerifyAccessToken).toHaveBeenCalledWith("static-secret");
+      expect(login).toHaveBeenCalledWith("static-secret", { username: "legacy", role: "admin" });
+      expect(mockNavigate).toHaveBeenCalledWith("/", { replace: true });
+    });
+    expect(mockApiPost).not.toHaveBeenCalled();
   });
 });

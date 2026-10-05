@@ -11,6 +11,8 @@ function levelTone(level: string | undefined): BadgeTone {
 }
 
 const LIMIT_OPTIONS = [100, 300, 500, 1000, 2000];
+// Rows rendered per page; up to 2000 entries can be fetched at once.
+const PAGE_SIZE = 100;
 
 export default function LogsPage() {
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -19,6 +21,7 @@ export default function LogsPage() {
   const [textFilter, setTextFilter] = useState("");
   const [debouncedText, setDebouncedText] = useState("");
   const [limit, setLimit] = useState(300);
+  const [page, setPage] = useState(1);
   const { addToast } = useToast();
   const lastToastedErrorRef = useRef<string | null>(null);
 
@@ -54,6 +57,17 @@ export default function LogsPage() {
   }, [logsQuery.error, addToast]);
 
   const rows = useMemo(() => [...(logsQuery.data ?? [])].reverse(), [logsQuery.data]);
+
+  // Filters change the result set, so jump back to the first page. Auto
+  // refresh keeps the current page; it is clamped below if the set shrinks.
+  useEffect(() => {
+    setPage(1);
+  }, [levelFilter, eventFilter, debouncedText, limit]);
+
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const visibleRows = rows.slice(start, start + PAGE_SIZE);
 
   return (
     <div className="h-full flex flex-col gap-3">
@@ -136,11 +150,11 @@ export default function LogsPage() {
           ) : rows.length === 0 ? (
             <EmptyState title="No log entries" />
           ) : (
-            rows.map((entry: LogEntry, idx: number) => {
+            visibleRows.map((entry: LogEntry, idx: number) => {
               const { ts, level, event, ...payload } = entry || {};
               return (
                 <div
-                  key={`${entry.ts || ""}-${idx}`}
+                  key={`${entry.ts || ""}-${start + idx}`}
                   className="grid grid-cols-[170px_90px_180px_1fr] gap-2 px-3 py-2 border-b border-line last:border-0 text-[10px] items-start"
                 >
                   <span className="text-muted whitespace-nowrap">{ts || "-"}</span>
@@ -154,6 +168,35 @@ export default function LogsPage() {
             })
           )}
         </div>
+
+        {!logsQuery.isLoading && !logsQuery.isError && rows.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-t border-line text-[11px] text-muted">
+            <span>
+              Showing {start + 1}-{Math.min(start + PAGE_SIZE, rows.length)} of {rows.length}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={currentPage <= 1}
+                onClick={() => setPage(currentPage - 1)}
+              >
+                Prev
+              </Button>
+              <span>
+                Page {currentPage} / {pageCount}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={currentPage >= pageCount}
+                onClick={() => setPage(currentPage + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

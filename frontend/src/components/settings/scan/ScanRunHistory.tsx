@@ -54,7 +54,7 @@ function ScanRunHistory() {
     stopPolling();
     pollRef.current = setInterval(async () => {
       try {
-        const st = await api.get(`/api/scan/jobs/${jobId}`);
+        const st = await api.get<{ status?: string; result?: ScanResult } | null>(`/api/scan/jobs/${jobId}`);
         if (st?.result) {
           setScanResult(st.result);
         }

@@ -50,7 +50,7 @@ export function useScanProgress(jobId: string | null): ScanProgress | null {
 
       let ticket = "";
       try {
-        const resp = await api.post("/api/auth/ws-ticket", {});
+        const resp = await api.post<{ ticket?: string }>("/api/auth/ws-ticket", {});
         ticket = resp.ticket || "";
       } catch (ex) {
         // No silent token fallback: a raw JWT in the URL would end up in proxy logs.

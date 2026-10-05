@@ -54,11 +54,11 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
   const racksQuery = useRacks();
   const classesQuery = useQuery<SwitchClass[]>({
     queryKey: ["switch-classes"],
-    queryFn: () => api.get("/api/switch-classes"),
+    queryFn: () => api.get<SwitchClass[]>("/api/switch-classes"),
   });
   const modelsQuery = useQuery<SwitchModel[]>({
     queryKey: ["switch-models"],
-    queryFn: () => api.get("/api/switch-models"),
+    queryFn: () => api.get<SwitchModel[]>("/api/switch-models"),
   });
   const { invalidate } = useInvalidateApi();
   const { open: openInspector } = useInspector();

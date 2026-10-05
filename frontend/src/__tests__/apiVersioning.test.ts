@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, apiUrl, API_VERSION_PREFIX, login, setApiNavigate, versionedPath } from "../api";
+import { api, apiUrl, API_VERSION_PREFIX, etagCacheKey, login, setApiNavigate, versionedPath } from "../api";
 
 function response(data: unknown, status = 200, headers?: Record<string, string>) {
   return new Response(JSON.stringify(data), { status, headers });
@@ -47,6 +47,52 @@ describe("API version mapping", () => {
     const cached = await api.get("/api/devices");
     expect(fetchMock.mock.calls[1][1].headers["If-None-Match"]).toBe("e1");
     expect(cached).toEqual([{ id: 1 }]);
+  });
+
+  it("normalizes ETag cache keys (versioned path, sorted query params)", async () => {
+    expect(etagCacheKey("/api/logs?q=x&limit=10")).toBe("/api/v1/logs?limit=10&q=x");
+    expect(etagCacheKey("/api/v1/logs?limit=10&q=x")).toBe("/api/v1/logs?limit=10&q=x");
+    expect(etagCacheKey("/api/devices?")).toBe("/api/v1/devices");
+
+    const fetchMock = vi.fn().mockResolvedValue(response([{ id: 7 }], 200, { ETag: "q1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await api.get("/api/logs?q=x&limit=10");
+    fetchMock.mockResolvedValue(new Response(null, { status: 304 }));
+    const cached = await api.get("/api/v1/logs?limit=10&q=x");
+    expect(fetchMock.mock.calls[1][1].headers["If-None-Match"]).toBe("q1");
+    expect(cached).toEqual([{ id: 7 }]);
+  });
+
+  it("evicts the least recently used ETag entry once the cache is full", async () => {
+    const fetchMock = vi.fn((url: string) => {
+      const n = String(url).split("/").pop();
+      return Promise.resolve(response({ n }, 200, { ETag: `e${n}` }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    for (let i = 0; i < 200; i++) await api.get(`/api/items/${i}`);
+    // Touch entry 0 via a 304 hit so entry 1 becomes the least recently used.
+    fetchMock.mockImplementationOnce(() => Promise.resolve(new Response(null, { status: 304 })));
+    expect(await api.get("/api/items/0")).toEqual({ n: "0" });
+    await api.get("/api/items/200");
+
+    const headersFor = async (path: string) => {
+      fetchMock.mockClear();
+      await api.get(path);
+      return (fetchMock.mock.calls[0] as unknown[])[1] as { headers: Record<string, string> };
+    };
+    expect((await headersFor("/api/items/0")).headers["If-None-Match"]).toBe("e0");
+    expect((await headersFor("/api/items/1")).headers["If-None-Match"]).toBeUndefined();
+  });
+
+  it("mutations drop related cached GETs including filtered list views", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response([{ id: 1 }], 200, { ETag: "r1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await api.get("/api/racks?room=a");
+    fetchMock.mockResolvedValue(response({ id: 2 }));
+    await api.post("/api/racks", { name: "r" });
+    fetchMock.mockResolvedValue(response([{ id: 1 }], 200, { ETag: "r2" }));
+    await api.get("/api/racks?room=a");
+    expect(fetchMock.mock.calls[2][1].headers["If-None-Match"]).toBeUndefined();
   });
 
   it("mutations go to the versioned URL", async () => {
