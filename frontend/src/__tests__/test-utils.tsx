@@ -7,6 +7,7 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { vi } from "vitest";
 import { ToastProvider } from "../components/ToastProvider";
+import { MotionProvider } from "../theme/MotionProvider";
 
 /**
  * Fresh React Query client per render: no retries, no cache reuse across tests.
@@ -20,8 +21,8 @@ export function createTestQueryClient() {
 }
 
 /**
- * Render a component wrapped in QueryClientProvider, MemoryRouter and
- * ToastProvider for tests.
+ * Render a component wrapped in QueryClientProvider, MemoryRouter,
+ * MotionProvider and ToastProvider for tests (same order as main.tsx).
  */
 export function renderWithRouter(
   ui: ReactElement,
@@ -31,7 +32,9 @@ export function renderWithRouter(
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[route]}>
-        <ToastProvider>{ui}</ToastProvider>
+        <MotionProvider>
+          <ToastProvider>{ui}</ToastProvider>
+        </MotionProvider>
       </MemoryRouter>
     </QueryClientProvider>,
     options,

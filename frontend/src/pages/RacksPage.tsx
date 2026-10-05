@@ -4,14 +4,17 @@
 
 import { useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { Activity } from "lucide-react";
 import { getStoredUser } from "../api";
 import { useTopology } from "../hooks/api";
 import { EmptyState, Select, Spinner } from "../components/ui";
 import RackElevation from "../features/racks/RackElevation";
 import { rackHeightU } from "../features/racks/rackLayout";
+import { useRackActivity } from "../features/racks/useRackActivity";
 
 export default function RacksPage() {
   const { data, isLoading, isError, error } = useTopology();
+  const activityPref = useRackActivity();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const racks = useMemo(() => data?.racks ?? [], [data]);
@@ -82,12 +85,33 @@ export default function RacksPage() {
             ))}
           </Select>
         </div>
-        <Link to="/settings/racks" className="text-accent text-[11px] hover:underline ml-auto">
-          Manage racks
-        </Link>
+        <div className="flex items-center gap-3 ml-auto">
+          {activityPref.available && (
+            <button
+              type="button"
+              data-testid="rack-activity-toggle"
+              aria-pressed={activityPref.enabled}
+              title="Subtle blink on port LEDs that are up"
+              onClick={() => activityPref.setEnabled(!activityPref.enabled)}
+              className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-control border text-[11px] cursor-pointer transition-colors duration-[120ms] motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
+                activityPref.enabled
+                  ? "border-accent text-accent bg-accent-soft"
+                  : "border-line-strong text-muted bg-panel hover:text-primary"
+              }`}
+            >
+              <Activity size={12} aria-hidden="true" />
+              Activity
+            </button>
+          )}
+          <Link to="/settings/racks" className="text-accent text-[11px] hover:underline">
+            Manage racks
+          </Link>
+        </div>
       </div>
 
-      {activeRack && <RackElevation rack={activeRack} nodes={nodes} readOnly={readOnly} />}
+      {activeRack && (
+        <RackElevation rack={activeRack} nodes={nodes} readOnly={readOnly} activity={activityPref.active} />
+      )}
     </div>
   );
 }

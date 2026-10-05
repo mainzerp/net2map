@@ -181,18 +181,6 @@ progress {
   background: var(--line-strong);
 }
 
-/* -- Port highlight pulse (deep-link from Endpoints page) ---------------------- */
-
-@keyframes portPulse {
-  0%,
-  100% {
-    box-shadow: 0 0 4px var(--port-highlight), 0 0 8px var(--port-highlight);
-  }
-  50% {
-    box-shadow: 0 0 12px var(--port-highlight), 0 0 24px var(--port-highlight);
-  }
-}
-
 /* -- React Flow (@xyflow/react) theme overrides ---------------------------------
    The library ships its own defaults; remap its panels/controls onto the theme
    tokens so the canvas matches both themes. */
@@ -398,5 +386,244 @@ progress {
     width: 100%;
     opacity: 0.6;
     animation: none;
+  }
+}
+
+/* --- Rack faceplates (phase 4) --- */
+/* Rack elevation drawn as a technical illustration of a 19" rack: square-hole
+   rails, blanking plates, device faceplates with ears, status LED and
+   stylized port tiles. Colors come only from theme tokens; shading is limited to 1px inset
+   highlights. Motion (LED activity, deep-link port ring) is CSS-only and off
+   under prefers-reduced-motion. Owned by src/features/racks/RackElevation.tsx
+   and src/components/Port.tsx. */
+
+.rack-cap {
+  height: 8px;
+  background-color: var(--panel-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+}
+
+.rack-interior {
+  background-color: color-mix(in srgb, var(--primary) 5%, var(--surface));
+}
+
+.rack-rail {
+  background-color: var(--panel-2);
+  border-left: 1px solid var(--line-strong);
+  border-right: 1px solid var(--line-strong);
+}
+
+.rack-rail-unit {
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.rack-rail-holes {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-evenly;
+  width: 9px;
+  flex-shrink: 0;
+}
+
+/* Square mounting hole: 3 per U like real square-hole rails */
+.rack-rail-hole {
+  width: 4px;
+  height: 4px;
+  border-radius: 1px;
+  background-color: color-mix(in srgb, var(--primary) 5%, var(--surface));
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+/* Empty slot: faint blanking plate with a centre hairline */
+.rack-blank {
+  background-color: color-mix(in srgb, var(--panel-2) 35%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+.rack-blank::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 50%;
+  height: 1px;
+  background-color: color-mix(in srgb, var(--line) 45%, transparent);
+}
+
+/* Device faceplate: panel material with a 1px top highlight and darker
+   bottom edge */
+.rack-plate {
+  background-color: color-mix(in srgb, var(--panel) 60%, var(--panel-2));
+  box-shadow:
+    inset 0 1px 0 var(--panel),
+    inset 0 -1px 0 color-mix(in srgb, var(--line-strong) 80%, transparent),
+    var(--shadow-card);
+}
+[data-theme="dark"] .rack-plate {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--line-strong) 80%, transparent),
+    inset 0 -1px 0 var(--surface),
+    var(--shadow-card);
+}
+
+.rack-ear {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  width: 10px;
+  flex-shrink: 0;
+  padding: 3px 0;
+  background-color: var(--panel-2);
+}
+.rack-ear-left {
+  border-right: 1px solid var(--line);
+}
+.rack-ear-right {
+  border-left: 1px solid var(--line);
+}
+.rack-screw {
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background-color: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+/* Power / ping LED: soft halo only when online, never a glow */
+.rack-status-led {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background-color: var(--muted);
+}
+.rack-status-led-up {
+  background-color: var(--success);
+  box-shadow: 0 0 0 2px var(--success-soft);
+}
+.rack-status-led-down {
+  background-color: var(--danger);
+}
+.rack-status-led-unknown {
+  opacity: 0.6;
+}
+
+/* Stylized port tile: one solid square per port instead of a realistic
+   RJ45/SFP socket. Up = filled with the speed color (set inline as
+   --tile-color by RackElevation via theme/visual.ts speedColor) with a
+   slightly darker ink-mixed border; down = hollow tile with a line-strong
+   border. Endpoint presence = centered dot (panel color on up tiles, muted on
+   down tiles). 9x9px tiles fit 48 access + 4 uplink ports in two rows of a
+   1U plate inside the 480px rack interior. */
+.rack-tile {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background-color: transparent;
+}
+.rack-tile-up {
+  background-color: var(--tile-color);
+  /* --sidebar is the ink navy in both themes, so the edge always darkens. */
+  border-color: color-mix(in srgb, var(--tile-color) 70%, var(--sidebar));
+}
+.rack-tile-down {
+  background-color: var(--panel);
+}
+/* Uplink / SFP tile: same style, wider */
+.rack-tile-uplink {
+  width: 13px;
+}
+/* Compact mode (> 96 ports): small solid tiles, no endpoint marker */
+.rack-tile-compact {
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+}
+.rack-tile:hover {
+  outline: 1px solid var(--accent);
+  outline-offset: 0;
+}
+/* Endpoint presence marker: 3px centered dot */
+.rack-tile-endpoint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 3px;
+  border-radius: 9999px;
+  transform: translate(-50%, -50%);
+  background-color: var(--muted);
+}
+.rack-tile-up .rack-tile-endpoint {
+  background-color: var(--panel);
+}
+/* Uplink group: small gap plus a 1px divider line */
+.rack-uplink-group {
+  padding-left: 3px;
+  border-left: 1px solid var(--line-strong);
+}
+
+/* Optional activity: subtle opacity breathing on up tiles, timing set inline */
+.rack-tile-blink {
+  animation: rackTileBlink 4s ease-in-out infinite;
+}
+@keyframes rackTileBlink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Port legend under the rack */
+.rack-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: 10px;
+  line-height: 12px;
+  color: var(--muted);
+}
+.rack-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Calm deep-link ring for map side-panel ports (deep-link from Endpoints page) */
+.port-ring-pulse {
+  animation: portRingPulse 1.8s ease-in-out infinite;
+}
+@keyframes portRingPulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1.5px var(--port-highlight),
+      0 0 0 1.5px transparent;
+  }
+  50% {
+    box-shadow:
+      0 0 0 1.5px var(--port-highlight),
+      0 0 0 4px color-mix(in srgb, var(--port-highlight) 28%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rack-tile-blink {
+    animation: none;
+  }
+  .port-ring-pulse {
+    animation: none;
+    box-shadow: 0 0 0 1.5px var(--port-highlight);
   }
 }

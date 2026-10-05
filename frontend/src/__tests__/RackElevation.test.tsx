@@ -136,6 +136,133 @@ describe("RacksPage / RackElevation", () => {
     expect(screen.queryByTestId("faceplate-3")).toBeNull();
     expect(screen.queryByTestId("faceplate-4")).toBeNull();
   });
+
+  it("draws rails with three mounting holes per U and blanking plates", async () => {
+    renderWithRouter(<RacksPage />, { route: "/racks?rack=1" });
+    const body = await screen.findByTestId("rack-body");
+    for (const side of ["left", "right"]) {
+      const rail = screen.getByTestId(`rack-rail-${side}`);
+      expect(rail.querySelectorAll(".rack-rail-hole")).toHaveLength(12 * 3);
+    }
+    expect(body.querySelectorAll(".rack-blank")).toHaveLength(12);
+  });
+
+  it("renders stylized port tiles with status attributes for up and down ports", async () => {
+    const ports = [
+      ...Array.from({ length: 24 }, (_, i) => ({
+        id: i + 1,
+        port_id: String(i + 1),
+        name: String(i + 1),
+        if_index: i + 1,
+        // Odd ports up at 1G, even ports down; port 3 has endpoints.
+        oper_status: i % 2 === 0 ? 1 : 2,
+        speed: 0,
+        speed_mbps: i % 2 === 0 ? 1000 : 0,
+        vlan: 10,
+        tagged_vlans: [],
+        poe_status: null,
+        endpoint_count: i === 2 ? 2 : 0,
+      })),
+      {
+        id: 25, port_id: "25", name: "sfp1", if_index: 25, oper_status: 1, speed: 0,
+        speed_mbps: 10000, vlan: null, tagged_vlans: [], poe_status: null, endpoint_count: 0,
+      },
+      {
+        id: 26, port_id: "26", name: "sfp2", if_index: 26, oper_status: 2, speed: 0,
+        speed_mbps: 0, vlan: null, tagged_vlans: [], poe_status: null, endpoint_count: 0,
+      },
+    ];
+    const topo = structuredClone(TOPOLOGY);
+    topo.nodes[1] = { ...topo.nodes[1], ports, ping_status: "online" };
+    mockApiGet.mockImplementation((path: string) => {
+      if (path === "/api/topology") return Promise.resolve(structuredClone(topo));
+      return Promise.resolve([]);
+    });
+
+    renderWithRouter(<RacksPage />, { route: "/racks?rack=1" });
+    const fp = await screen.findByTestId("faceplate-2");
+
+    const block = within(fp).getByTestId("port-block");
+    expect(block.getAttribute("data-mode")).toBe("two-row");
+
+    // One tile per port: no separate socket well or inner LED element.
+    const tiles = within(fp).getAllByTestId("port-tile");
+    expect(tiles).toHaveLength(26);
+    const up = tiles.filter((t) => t.getAttribute("data-status") === "up");
+    const down = tiles.filter((t) => t.getAttribute("data-status") === "down");
+    expect(up).toHaveLength(13);
+    expect(down).toHaveLength(13);
+    for (const tile of up) {
+      // Filled in the speed color.
+      expect(tile.className).toContain("rack-tile-up");
+      expect(tile.style.backgroundColor).not.toBe("");
+      expect(tile.style.getPropertyValue("--tile-color")).not.toBe("");
+    }
+    for (const tile of down) {
+      // Hollow tile: no inline fill color.
+      expect(tile.className).toContain("rack-tile-down");
+      expect(tile.style.backgroundColor).toBe("");
+    }
+
+    // Endpoint presence marker only on port 3 (top row, second tile).
+    const markers = within(fp).getAllByTestId("port-endpoint-marker");
+    expect(markers).toHaveLength(1);
+    expect(markers[0].parentElement).toBe(tiles[1]);
+    expect(tiles[1].getAttribute("title")).toBe("3 - up - 1G - VLAN 10 - 2 endpoints");
+
+    // SFP ports are grouped at the right end with wider tiles.
+    const uplinks = within(fp).getByTestId("uplink-group");
+    const uplinkTiles = within(uplinks).getAllByTestId("port-tile");
+    expect(uplinkTiles).toHaveLength(2);
+    for (const t of uplinkTiles) {
+      expect(t.getAttribute("data-uplink")).toBe("1");
+      expect(t.className).toContain("rack-tile-uplink");
+    }
+    const access = within(fp).getByTestId("access-group");
+    for (const t of within(access).getAllByTestId("port-tile")) {
+      expect(t.getAttribute("data-uplink")).toBe("0");
+      expect(t.className).not.toContain("rack-tile-uplink");
+    }
+
+    // Online status LED.
+    expect(within(fp).getByTestId("device-status-led").getAttribute("data-status")).toBe("up");
+  });
+
+  it("renders a port legend under the rack using the same tile style", async () => {
+    renderWithRouter(<RacksPage />, { route: "/racks?rack=1" });
+    await screen.findByTestId("rack-body");
+    const legend = screen.getByTestId("rack-port-legend");
+    for (const label of ["<1G", "1G", "10G", "25G+", "down", "endpoints", "uplink"]) {
+      expect(within(legend).getByText(label)).toBeTruthy();
+    }
+    expect(legend.querySelectorAll(".rack-tile-up")).toHaveLength(6);
+    expect(legend.querySelectorAll(".rack-tile-down")).toHaveLength(1);
+    expect(legend.querySelectorAll(".rack-tile-uplink")).toHaveLength(1);
+    expect(within(legend).getAllByTestId("port-endpoint-marker")).toHaveLength(1);
+  });
+
+  it("renders compact tiles for devices with more than 96 ports", async () => {
+    const ports = Array.from({ length: 100 }, (_, i) => ({
+      id: i + 1, port_id: String(i + 1), name: String(i + 1), if_index: i + 1,
+      oper_status: 1, speed: 0, speed_mbps: 1000, vlan: null, tagged_vlans: [],
+      poe_status: null, endpoint_count: 0,
+    }));
+    const topo = structuredClone(TOPOLOGY);
+    topo.nodes[1] = { ...topo.nodes[1], ports };
+    mockApiGet.mockImplementation((path: string) => {
+      if (path === "/api/topology") return Promise.resolve(structuredClone(topo));
+      return Promise.resolve([]);
+    });
+
+    renderWithRouter(<RacksPage />, { route: "/racks?rack=1" });
+    const fp = await screen.findByTestId("faceplate-2");
+    expect(within(fp).getByTestId("port-block").getAttribute("data-mode")).toBe("compact");
+    const tiles = within(fp).getAllByTestId("port-tile");
+    expect(tiles).toHaveLength(100);
+    for (const t of tiles) expect(t.className).toContain("rack-tile-compact");
+    expect(within(fp).queryByTestId("uplink-group")).toBeNull();
+    expect(within(fp).queryByTestId("access-group")).toBeNull();
+  });
 });
 
 describe("RackElevation faceplate click vs drag", () => {

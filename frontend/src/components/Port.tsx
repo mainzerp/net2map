@@ -27,7 +27,7 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
   const [showModal, setShowModal] = useState(false);
 
   // Scroll into view when highlighted (deep-link from the Endpoints page).
-  // The pulse keyframes live in index.css (portPulse, --port-highlight).
+  // The ring pulse lives in index.css (.port-ring-pulse, --port-highlight).
   useEffect(() => {
     if (highlighted && ref.current) {
       ref.current.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
@@ -52,14 +52,19 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
     else if (isLinked) hl = "dim";
   }
 
-  const bg     = hl==="from"||hl==="to" ? tint(cc, 16) : hl==="dim" ? "var(--surface)" : isLinked && !hl ? tint(cc, 7) : active ? base : "var(--panel)";
-  const border = hl==="from"||hl==="to" ? cc : isLinked ? cc : base;
-  const shadow = hl==="from"||hl==="to"
-    ? `0 0 12px ${cc}, 0 0 4px ${cc}`
-    : isLinked && !hl ? `0 0 6px ${cc}` : hov && (hasDev || isLinked) ? `0 0 7px ${base}` : active ? `0 0 2px ${tint(base, 33)}` : "none";
+  // Cartographic styling: selected link endpoints get a 1.5px solid ring in
+  // the cable color over a tinted fill; linked ports a cable-color border and
+  // a light tint; hover a 1px ring. No blurred glows.
+  const isSelected = hl==="from"||hl==="to";
+  const bg     = isSelected ? tint(cc, 16) : hl==="dim" ? "var(--surface)" : isLinked && !hl ? tint(cc, 7) : active ? base : "var(--panel)";
+  const border = isSelected ? cc : isLinked ? cc : base;
+  const shadow = isSelected
+    ? `0 0 0 1.5px ${cc}`
+    : hov && (hasDev || isLinked) ? `0 0 0 1px ${isLinked ? cc : base}` : "none";
 
+  // Deep-link highlight: calm ring pulse (.port-ring-pulse in index.css,
+  // static ring under prefers-reduced-motion).
   const highlightStyle: React.CSSProperties = highlighted ? {
-    animation: "portPulse 1s ease-in-out infinite",
     border: "2px solid var(--port-highlight)",
     zIndex: 10,
   } : {};
@@ -98,7 +103,7 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
         onMouseLeave={() => setHov(false)}
         style={{ flexShrink:0, opacity: hl==="dim" ? 0.22 : 1, transition:"opacity 0.18s", cursor: isLinked ? "pointer" : "default" }}
       >
-        <div title={port.if_descr} style={{
+        <div title={port.if_descr} className={highlighted ? "port-ring-pulse" : undefined} style={{
           width:34, height: interRack ? 22 : 20, borderRadius:2,
           backgroundColor: bg,
           border:`1px solid ${border}`,
@@ -113,14 +118,13 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
               position:"absolute", top: interRack ? -5 : -3, right: interRack ? -5 : -3,
               width: interRack ? 9 : 6, height: interRack ? 9 : 6, borderRadius:"50%",
               backgroundColor: cc, border:"1px solid var(--surface)",
-              boxShadow: interRack ? `0 0 10px ${cc}, 0 0 4px ${cc}` : `0 0 5px ${cc}`,
             }}/>
           )}
           <span style={{
             fontSize:12, fontWeight:700,
             color: hl ? "var(--primary)"
                  : (isLinked && !hl) ? "var(--primary)"
-                 : active ? "rgba(0,0,0,0.75)"
+                 : active ? "color-mix(in srgb, var(--sidebar) 85%, transparent)"
                  : "var(--muted)",
             fontFamily:"var(--font-mono)", lineHeight:1, userSelect:"none",
           }}>{port.if_index}</span>
@@ -131,11 +135,11 @@ export default function Port({ port, portKey, portLinkMap, selectedLink, onPortC
         <div style={{
           position:"fixed", top:pos.top, left:pos.left,
           transform: pos.flipY ? "translate(-50%, -100%)" : "translateX(-50%)", zIndex:9999,
-          backgroundColor:"var(--panel)", border:`1px solid ${isLinked ? cc+"55" : "var(--line-strong)"}`,
+          backgroundColor:"var(--panel)", border:`1px solid ${isLinked ? tint(cc, 33) : "var(--line-strong)"}`,
           borderRadius:8, padding:"10px 14px", minWidth:240,
           pointerEvents:"none",
           fontSize:12, color:"var(--muted)",
-          boxShadow:`var(--shadow-raised), 0 0 12px ${tint(cc, 9)}`,
+          boxShadow:"var(--shadow-raised)",
         }}>
           {isLinked && (
             <div style={{marginBottom: hasDev ? 10 : 0, padding:"5px 8px",

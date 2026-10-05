@@ -3,13 +3,15 @@
 // block the page: no backdrop on desktop, a scrim only below the md
 // breakpoint where the drawer covers the full width.
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, type RefObject } from "react";
 import { X } from "lucide-react";
+import { AnimatePresence, m, useIsPresent } from "motion/react";
 import { useInspector, type InspectorKind, type InspectorTarget } from "../../hooks/useInspector";
 import { pushRecent } from "../command-palette/recent";
 import DeviceInspector from "./DeviceInspector";
 import EndpointInspector from "./EndpointInspector";
 import RackInspector from "./RackInspector";
+import { DURATION, fadePreset, slidePreset, useReducedMotion } from "../../theme/motion";
 
 const KIND_LABELS: Record<InspectorKind, string> = {
   device: "Switch",
@@ -17,28 +19,16 @@ const KIND_LABELS: Record<InspectorKind, string> = {
   rack: "Rack",
 };
 
-// Matches the slide duration below; content stays rendered while sliding out.
-const EXIT_DELAY_MS = 180;
-
 // A modal dialog (or the command palette) owns Escape while it is open.
 const MODAL_SELECTOR = '[data-modal], [role="dialog"][aria-modal="true"]';
 
 export default function InspectorDrawer() {
   const { target, raw, close } = useInspector();
-  const [shown, setShown] = useState<InspectorTarget | null>(target);
+  const reduced = useReducedMotion();
   const panelRef = useRef<HTMLElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
   const isOpen = target !== null;
-
-  useEffect(() => {
-    if (target) {
-      setShown(target);
-      return;
-    }
-    const timer = setTimeout(() => setShown(null), EXIT_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [target]);
 
   // Remember opened targets for the palette's "Recent" group.
   useEffect(() => {
@@ -72,46 +62,90 @@ export default function InspectorDrawer() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [isOpen, close]);
 
-  const display = target ?? shown;
-
   return (
     <>
-      {isOpen && <div className="md:hidden fixed inset-0 z-40 bg-scrim" onClick={close} aria-hidden="true" />}
-      <aside
-        ref={panelRef}
-        role="dialog"
-        aria-modal="false"
-        aria-labelledby={titleId}
-        aria-hidden={!isOpen}
-        data-inspector
-        data-inspect-target={raw ?? undefined}
-        tabIndex={-1}
-        className={`fixed inset-y-0 right-0 z-40 w-full md:w-[420px] bg-panel border-l border-line shadow-raised flex flex-col outline-none transition-[transform,visibility] duration-[180ms] ease-out motion-reduce:transition-none ${
-          isOpen ? "translate-x-0 visible" : "translate-x-full invisible"
-        }`}
-      >
-        {display && (
-          <>
-            <div className="shrink-0 flex items-center gap-2 h-12 px-5 border-b border-line">
-              <span className="eyebrow">{KIND_LABELS[display.kind]}</span>
-              <button
-                type="button"
-                onClick={close}
-                aria-label="Close inspector"
-                title="Close (Esc)"
-                className="ml-auto inline-flex items-center justify-center w-8 h-8 rounded-control text-muted hover:text-primary hover:bg-panel-2 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-              >
-                <X size={16} strokeWidth={1.75} aria-hidden="true" />
-              </button>
-            </div>
-            <div className="flex-1 min-h-0 overflow-y-auto">
-              {display.kind === "device" && <DeviceInspector key={display.id} id={display.id} titleId={titleId} />}
-              {display.kind === "endpoint" && <EndpointInspector key={display.id} id={display.id} titleId={titleId} />}
-              {display.kind === "rack" && <RackInspector key={display.id} id={display.id} titleId={titleId} />}
-            </div>
-          </>
+      <AnimatePresence>
+        {isOpen && (
+          <m.div
+            key="inspector-scrim"
+            {...fadePreset(reduced)}
+            className="md:hidden fixed inset-0 z-40 bg-scrim"
+            onClick={close}
+            aria-hidden="true"
+          />
         )}
-      </aside>
+      </AnimatePresence>
+      <AnimatePresence>
+        {target && (
+          <DrawerPanel
+            key="inspector"
+            target={target}
+            raw={raw}
+            panelRef={panelRef}
+            titleId={titleId}
+            reduced={reduced}
+            onClose={close}
+          />
+        )}
+      </AnimatePresence>
     </>
+  );
+}
+
+interface DrawerPanelProps {
+  target: InspectorTarget;
+  raw: string | null;
+  panelRef: RefObject<HTMLElement | null>;
+  titleId: string;
+  reduced: boolean;
+  onClose: () => void;
+}
+
+// The sliding panel. While it slides out it keeps its last target (the
+// exiting element is frozen by AnimatePresence) but already counts as closed:
+// hidden from assistive tech and pointer input.
+function DrawerPanel({ target, raw, panelRef, titleId, reduced, onClose }: DrawerPanelProps) {
+  const isPresent = useIsPresent();
+  const contentKey = raw ?? `${target.kind}:${target.id}`;
+  return (
+    <m.aside
+      {...slidePreset(reduced, "right")}
+      ref={panelRef}
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby={titleId}
+      aria-hidden={isPresent ? undefined : true}
+      data-inspector
+      data-inspect-target={raw ?? undefined}
+      tabIndex={-1}
+      className={`fixed inset-y-0 right-0 z-40 w-full md:w-[420px] bg-panel border-l border-line shadow-raised flex flex-col outline-none ${
+        isPresent ? "" : "pointer-events-none"
+      }`}
+    >
+      <div className="shrink-0 flex items-center gap-2 h-12 px-5 border-b border-line">
+        <span className="eyebrow">{KIND_LABELS[target.kind]}</span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close inspector"
+          title="Close (Esc)"
+          className="ml-auto inline-flex items-center justify-center w-8 h-8 rounded-control text-muted hover:text-primary hover:bg-panel-2 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        >
+          <X size={16} strokeWidth={1.75} aria-hidden="true" />
+        </button>
+      </div>
+      {/* Fade the body out and the next target in when switching targets
+          (sequential, so the title id is never duplicated). The first open is
+          covered by the panel slide, so no extra fade there. */}
+      <div className="flex-1 min-h-0 flex flex-col">
+        <AnimatePresence initial={false} mode="wait">
+          <m.div key={contentKey} {...fadePreset(reduced, DURATION.fast)} className="flex-1 min-h-0 overflow-y-auto">
+            {target.kind === "device" && <DeviceInspector id={target.id} titleId={titleId} />}
+            {target.kind === "endpoint" && <EndpointInspector id={target.id} titleId={titleId} />}
+            {target.kind === "rack" && <RackInspector id={target.id} titleId={titleId} />}
+          </m.div>
+        </AnimatePresence>
+      </div>
+    </m.aside>
   );
 }

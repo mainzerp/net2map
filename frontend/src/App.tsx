@@ -25,7 +25,9 @@ import { useTheme } from "./theme/ThemeProvider";
 import CommandPalette from "./features/command-palette/CommandPalette";
 import { paletteShortcutLabel, usePaletteStore } from "./features/command-palette/paletteStore";
 import InspectorDrawer from "./features/inspector/InspectorDrawer";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AnimatePresence, m } from "motion/react";
+import { DURATION, EASE_OUT, fadePreset, pagePreset, slidePreset, useReducedMotion } from "./theme/motion";
 
 interface NavItem {
   to: string;
@@ -83,8 +85,23 @@ function ThemeToggleButton({ tone = "surface", className = "" }: { tone?: Chrome
   );
 }
 
+// Sidebar label that fades in when the sidebar expands. `animate` is false
+// until the user toggles the sidebar, so labels do not fade on page load.
+function SidebarLabel({ animate, className, children }: { animate: boolean; className?: string; children: ReactNode }) {
+  return (
+    <m.span
+      className={className}
+      initial={animate ? { opacity: 0 } : false}
+      animate={{ opacity: 1 }}
+      transition={{ duration: DURATION.base, ease: EASE_OUT, delay: DURATION.fast / 2 }}
+    >
+      {children}
+    </m.span>
+  );
+}
+
 // Opens the command palette; the kbd hint mirrors the Ctrl/Cmd+K shortcut.
-function SearchTrigger({ collapsed }: { collapsed: boolean }) {
+function SearchTrigger({ collapsed, animateLabels }: { collapsed: boolean; animateLabels: boolean }) {
   const setOpen = usePaletteStore((s) => s.setOpen);
   const shortcut = paletteShortcutLabel();
   return (
@@ -100,16 +117,24 @@ function SearchTrigger({ collapsed }: { collapsed: boolean }) {
     >
       <Search size={ICON_SIZE} strokeWidth={ICON_STROKE} className="shrink-0" aria-hidden="true" />
       {!collapsed && (
-        <>
+        <SidebarLabel animate={animateLabels} className="flex-1 min-w-0 flex items-center gap-2">
           <span className="flex-1 text-left">Search</span>
           <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-sidebar-hover text-sidebar-muted">{shortcut}</kbd>
-        </>
+        </SidebarLabel>
       )}
     </button>
   );
 }
 
-function NavItems({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
+function NavItems({
+  collapsed,
+  animateLabels = false,
+  onNavigate,
+}: {
+  collapsed: boolean;
+  animateLabels?: boolean;
+  onNavigate?: () => void;
+}) {
   return (
     <nav aria-label="Main navigation" className="flex flex-col gap-0.5 px-2">
       {NAV.map(({ to, label, icon: Icon }) => (
@@ -131,7 +156,11 @@ function NavItems({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: 
           }
         >
           <Icon size={ICON_SIZE} strokeWidth={ICON_STROKE} className="shrink-0" aria-hidden="true" />
-          {!collapsed && <span className="truncate">{label}</span>}
+          {!collapsed && (
+            <SidebarLabel animate={animateLabels} className="truncate">
+              {label}
+            </SidebarLabel>
+          )}
         </NavLink>
       ))}
     </nav>
@@ -139,6 +168,11 @@ function NavItems({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: 
 }
 
 const SIDEBAR_COLLAPSED_KEY = "netmap-sidebar-collapsed";
+
+/** Page transition key: "/settings/credentials" and "/settings/snmp" share "settings". */
+function pageKey(pathname: string): string {
+  return pathname.split("/")[1] ?? "";
+}
 
 export default function App() {
   const location = useLocation();
@@ -155,6 +189,9 @@ export default function App() {
     }
   });
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // Labels only fade after an explicit collapse toggle, never on first paint.
+  const [animateLabels, setAnimateLabels] = useState(false);
+  const reduced = useReducedMotion();
   const drawerRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -228,6 +265,7 @@ export default function App() {
   }
 
   function toggleCollapsed() {
+    setAnimateLabels(true);
     setCollapsed((c) => {
       try {
         localStorage.setItem(SIDEBAR_COLLAPSED_KEY, c ? "0" : "1");
@@ -299,10 +337,11 @@ export default function App() {
       </div>
 
       {/* Mobile drawer */}
-      {drawerOpen && (
-        <div className="md:hidden fixed inset-0 z-40">
-          <div className="absolute inset-0 bg-scrim" onClick={() => setDrawerOpen(false)} />
-          <aside ref={drawerRef} id="mobile-navigation" role="dialog" aria-modal="true" aria-label="Navigation" className="absolute left-0 top-0 bottom-0 w-56 bg-sidebar text-sidebar-text flex flex-col py-3 overflow-y-auto shadow-raised">
+      <AnimatePresence>
+        {drawerOpen && (
+        <div key="mobile-navigation" className="md:hidden fixed inset-0 z-40">
+          <m.div {...fadePreset(reduced)} className="absolute inset-0 bg-scrim" onClick={() => setDrawerOpen(false)} />
+          <m.aside {...slidePreset(reduced, "left")} ref={drawerRef} id="mobile-navigation" role="dialog" aria-modal="true" aria-label="Navigation" className="absolute left-0 top-0 bottom-0 w-56 bg-sidebar text-sidebar-text flex flex-col py-3 overflow-y-auto shadow-raised">
             <div className="flex items-center gap-2 px-4 pb-3">
               <BrandMark className="text-sidebar-text" />
               <span className="text-sidebar-text font-semibold text-[15px] tracking-tight">NetMap</span>
@@ -316,13 +355,14 @@ export default function App() {
               </button>
             </div>
             <NavItems collapsed={false} onNavigate={() => setDrawerOpen(false)} />
-          </aside>
+          </m.aside>
         </div>
-      )}
+        )}
+      </AnimatePresence>
 
       {/* Desktop sidebar: ink navy in both themes */}
       <aside
-        className={`hidden md:flex flex-col shrink-0 bg-sidebar text-sidebar-text transition-[width] duration-150 ${
+        className={`hidden md:flex flex-col shrink-0 overflow-hidden bg-sidebar text-sidebar-text transition-[width] duration-180 ease-out motion-reduce:transition-none ${
           collapsed ? "w-14" : "w-52"
         }`}
       >
@@ -332,15 +372,19 @@ export default function App() {
           className={`flex items-center gap-2 no-underline h-14 shrink-0 ${collapsed ? "justify-center" : "px-4"}`}
         >
           <BrandMark className="text-sidebar-text" />
-          {!collapsed && <span className="text-sidebar-text font-semibold text-[15px] tracking-tight">NetMap</span>}
+          {!collapsed && (
+            <SidebarLabel animate={animateLabels} className="text-sidebar-text font-semibold text-[15px] tracking-tight whitespace-nowrap">
+              NetMap
+            </SidebarLabel>
+          )}
         </NavLink>
 
         <div className={`shrink-0 pb-2 ${collapsed ? "px-0" : "px-2"}`}>
-          <SearchTrigger collapsed={collapsed} />
+          <SearchTrigger collapsed={collapsed} animateLabels={animateLabels} />
         </div>
 
         <div className="flex-1 overflow-y-auto py-2">
-          <NavItems collapsed={collapsed} />
+          <NavItems collapsed={collapsed} animateLabels={animateLabels} />
         </div>
 
         <div className={`shrink-0 border-t border-sidebar-hover p-2 flex ${collapsed ? "flex-col items-center gap-1" : "items-center gap-1"}`}>
@@ -364,9 +408,13 @@ export default function App() {
 
       {/* Page content */}
       <main className="flex-1 min-w-0 min-h-0 overflow-y-auto pt-12 md:pt-0">
-        <div className="h-full p-4">
+        {/* Quiet fade on route change. Keyed by the first path segment, so
+            search-param changes (opening the inspector) and settings tab
+            switches do not re-animate or remount the page. No exit animation,
+            to avoid layout jumps between pages. */}
+        <m.div key={pageKey(location.pathname)} {...pagePreset()} className="h-full p-4">
           <Outlet />
-        </div>
+        </m.div>
       </main>
 
       <InspectorDrawer />

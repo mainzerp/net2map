@@ -1,5 +1,7 @@
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import { AnimatePresence, m, useIsPresent } from "motion/react";
+import { dialogPreset, fadePreset, useReducedMotion } from "../../theme/motion";
 
 export interface ModalProps {
   open: boolean;
@@ -74,20 +76,48 @@ export function Modal({ open, onClose, title, children, width = 480 }: ModalProp
     };
   }, [open]);
 
-  if (!open) return null;
-
   return createPortal(
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim"
+    <AnimatePresence>
+      {open && (
+        <ModalLayer key="modal" panelRef={panelRef} titleId={titleId} title={title} width={width} onClose={onClose}>
+          {children}
+        </ModalLayer>
+      )}
+    </AnimatePresence>,
+    document.body,
+  );
+}
+
+interface ModalLayerProps {
+  panelRef: RefObject<HTMLDivElement | null>;
+  titleId: string;
+  title?: ReactNode;
+  width: number;
+  onClose: () => void;
+  children: ReactNode;
+}
+
+// Scrim plus panel. While the exit animation runs the layer is already
+// closed: it drops `data-modal` and `aria-modal` (so global shortcuts are no longer blocked),
+// leaves the accessibility tree and ignores pointer input.
+function ModalLayer({ panelRef, titleId, title, width, onClose, children }: ModalLayerProps) {
+  const isPresent = useIsPresent();
+  const reduced = useReducedMotion();
+  return (
+    <m.div
+      {...fadePreset(reduced)}
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-scrim ${isPresent ? "" : "pointer-events-none"}`}
+      aria-hidden={isPresent ? undefined : true}
       onClick={onClose}
     >
-      <div
+      <m.div
+        {...dialogPreset(reduced)}
         ref={panelRef}
         role="dialog"
-        aria-modal="true"
+        aria-modal={isPresent ? "true" : undefined}
         aria-labelledby={title != null ? titleId : undefined}
         aria-label={title == null ? "Dialog" : undefined}
-        data-modal
+        data-modal={isPresent ? "" : undefined}
         tabIndex={-1}
         style={{ width, maxWidth: "calc(100vw - 32px)" }}
         className="bg-panel border border-line rounded-card shadow-raised outline-none max-h-[calc(100dvh-32px)] flex flex-col"
@@ -110,8 +140,7 @@ export function Modal({ open, onClose, title, children, width = 480 }: ModalProp
           </div>
         )}
         <div className="min-h-0 p-4 overflow-auto">{children}</div>
-      </div>
-    </div>,
-    document.body,
+      </m.div>
+    </m.div>
   );
 }

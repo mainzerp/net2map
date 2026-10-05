@@ -5,9 +5,6 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Backlog
 
-- Cartography phase 4-5: racks and motion · priority: P2 · area: frontend
-  Realistic rack faceplates with port LEDs; `motion` transitions honoring
-  reduced-motion.
 
 - Persistent database fencing across Redis lease changes · priority: P2 · area: backend
   Observed lease loss, missing-client split brain and orphan finalizers are fixed
@@ -49,6 +46,7 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Done
 
+- Cartography phase 4-5: racks (stylized port tiles) and motion · priority: done · area: frontend · v2.2.0
 - Hide Auto-Layout when a floor-plan background is set · priority: done · area: frontend · v2.2.0
 - Cartography phase 3: topology map · priority: done · area: frontend · v2.2.0
 - Cartography polish leftovers · priority: done · area: frontend · v2.2.0

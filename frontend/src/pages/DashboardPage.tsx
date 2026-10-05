@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { m } from "motion/react";
 import { ArrowRight, RefreshCw, Server, Settings, Waypoints, type LucideIcon } from "lucide-react";
 import { useTopology, useStats, useEndpoints, useInvalidateApi } from "../hooks/api";
 import { useScanProgress } from "../hooks/useScanProgress";
@@ -14,6 +15,7 @@ import { useLastScanRun } from "../features/dashboard/useLastScanRun";
 import { api, extractErrorMessage } from "../api";
 import { formatTimestamp } from "../utils/datetime";
 import type { ScanProgress } from "../types";
+import { revealContainerVariants, revealItemVariants, useReducedMotion } from "../theme/motion";
 
 function DashboardSkeleton() {
   return (
@@ -150,6 +152,8 @@ export default function DashboardPage() {
   const clearScanJob = useNetmapStore((s) => s.clearScanJob);
   const progress: ScanProgress | null = useScanProgress(activeScanJobId);
   const { addToast } = useToast();
+  const reduced = useReducedMotion();
+  const revealItem = revealItemVariants(reduced);
 
   // Handle scan completion via WebSocket: refresh all dashboard data.
   useEffect(() => {
@@ -281,10 +285,18 @@ export default function DashboardPage() {
   ];
 
   return (
-    <div className="max-w-6xl mx-auto flex flex-col gap-8 pt-6 pb-12 px-1 md:px-4">
+    // Staged reveal (header, scan bar, attention, side panels, racks) runs
+    // once when the loaded dashboard mounts; refetches only re-render the
+    // already visible sections, so they never replay it.
+    <m.div
+      variants={revealContainerVariants(reduced)}
+      initial="hidden"
+      animate="show"
+      className="max-w-6xl mx-auto flex flex-col gap-8 pt-6 pb-12 px-1 md:px-4"
+    >
       {/* Calm header: eyebrow, status sentence, key facts, compact scan bar */}
       <header className="flex flex-col gap-5">
-        <div className="flex items-start justify-between gap-4">
+        <m.div variants={revealItem} className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="eyebrow">Dashboard</div>
             <StatusHeadline monitored={stats.monitoredCount} offline={stats.downCount} />
@@ -309,22 +321,26 @@ export default function DashboardPage() {
             <RefreshCw size={13} aria-hidden="true" />
             Refresh
           </Button>
-        </div>
+        </m.div>
 
-        <ScanHero
-          scanning={scanning || !!activeScanJobId}
-          progress={progress}
-          scanError={scanError}
-          lastRun={lastRun}
-          onStartScan={handleStartScan}
-          onCancelScan={activeScanJobId ? handleCancelScan : undefined}
-          cancelling={cancelling}
-        />
+        <m.div variants={revealItem}>
+          <ScanHero
+            scanning={scanning || !!activeScanJobId}
+            progress={progress}
+            scanError={scanError}
+            lastRun={lastRun}
+            onStartScan={handleStartScan}
+            onCancelScan={activeScanJobId ? handleCancelScan : undefined}
+            cancelling={cancelling}
+          />
+        </m.div>
       </header>
 
       <div className="grid gap-6 lg:grid-cols-3 items-start">
-        <AttentionCard nodes={topology.nodes} lastRun={lastRun} className="lg:col-span-2" />
-        <div className="flex flex-col gap-6">
+        <m.div variants={revealItem} className="lg:col-span-2 min-w-0">
+          <AttentionCard nodes={topology.nodes} lastRun={lastRun} />
+        </m.div>
+        <m.div variants={revealItem} className="flex flex-col gap-6">
           <DistributionPanel
             vendors={stats.vendors}
             switchTotal={stats.switchCount}
@@ -332,10 +348,12 @@ export default function DashboardPage() {
             linkTotal={stats.linkCount}
           />
           <QuickNav />
-        </div>
+        </m.div>
       </div>
 
-      <RackOverview racks={stats.rackStats} />
-    </div>
+      <m.div variants={revealItem}>
+        <RackOverview racks={stats.rackStats} />
+      </m.div>
+    </m.div>
   );
 }

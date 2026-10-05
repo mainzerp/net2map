@@ -7,6 +7,7 @@ import { SESSION_CHANGED_EVENT } from "./api";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ToastProvider } from "./components/ToastProvider";
 import { ThemeProvider } from "./theme/ThemeProvider";
+import { MotionProvider } from "./theme/MotionProvider";
 import { Spinner } from "./components/ui";
 import "./index.css";
 
@@ -53,22 +54,24 @@ createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <ThemeProvider>
-          <ToastProvider>
-            <Routes>
-              <Route path="login" element={<Suspense fallback={<LoadingSpinner />}><LoginPage /></Suspense>} />
-              <Route element={<App />}>
-                <Route index element={lazyPage(<DashboardPage />)} />
-                <Route path="map" element={lazyPage(<MapPage />)} />
-                <Route path="devices" element={lazyPage(<DevicesPage />)} />
-                <Route path="racks" element={lazyPage(<RacksPage />)} />
-                <Route path="network" element={lazyPage(<NetworkPage />)} />
-                <Route path="logs" element={lazyPage(<LogsPage />)} />
-                <Route path="settings" element={<Navigate to="/settings/credentials" replace />} />
-                <Route path="settings/:tab" element={lazyPage(<SettingsPage />)} />
-                <Route path="styleguide" element={lazyPage(<StyleguidePage />)} />
-              </Route>
-            </Routes>
-          </ToastProvider>
+          <MotionProvider>
+            <ToastProvider>
+              <Routes>
+                <Route path="login" element={<Suspense fallback={<LoadingSpinner />}><LoginPage /></Suspense>} />
+                <Route element={<App />}>
+                  <Route index element={lazyPage(<DashboardPage />)} />
+                  <Route path="map" element={lazyPage(<MapPage />)} />
+                  <Route path="devices" element={lazyPage(<DevicesPage />)} />
+                  <Route path="racks" element={lazyPage(<RacksPage />)} />
+                  <Route path="network" element={lazyPage(<NetworkPage />)} />
+                  <Route path="logs" element={lazyPage(<LogsPage />)} />
+                  <Route path="settings" element={<Navigate to="/settings/credentials" replace />} />
+                  <Route path="settings/:tab" element={lazyPage(<SettingsPage />)} />
+                  <Route path="styleguide" element={lazyPage(<StyleguidePage />)} />
+                </Route>
+              </Routes>
+            </ToastProvider>
+          </MotionProvider>
         </ThemeProvider>
       </BrowserRouter>
     </QueryClientProvider>

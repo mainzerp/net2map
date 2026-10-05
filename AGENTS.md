@@ -275,7 +275,8 @@ Rules of thumb:
   ink night; semantic utilities like `bg-surface`, `text-primary`, `border-line`,
   `*-soft`, `sidebar-*`; system font stack, no web fonts); theme state in
   `src/theme/ThemeProvider.tsx` (`useTheme`), visual constants in
-  `src/theme/visual.ts`; icons via `lucide-react`; UI primitives in
+  `src/theme/visual.ts`, motion tokens in `src/theme/motion.ts` (`motion/react`
+  via LazyMotion `m` components, reduced-motion aware); icons via `lucide-react`; UI primitives in
   `src/components/ui/`, reviewed on the unlinked `/styleguide` page; React Query data hooks in `src/hooks/api/`.
 - `docs/` — doc map `docs/README.md` plus `docs/SubAgent/` (AI-agent ANALYSIS/PLAN
   working notes; not maintained user docs).

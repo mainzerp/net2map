@@ -30,6 +30,14 @@ Arbeitsstand, noch nicht veroeffentlicht; Prototyp fuer das UI-Redesign.
 - Scan-Anzeige auf der Karte (Fortschrittslinie, dezente Ringe, kurz markierte
   Geraete). "Show on map" und die Kartensuche zoomen jetzt zum Geraet.
 - Hersteller-Abzeichen statt ASCII-Kuerzeln ([AX], [FS], [UF]).
+- Rack-Ansicht als technische Zeichnung: Schienen mit Lochraster und
+  U-Nummern, Blindplatten, Geraetefronten mit Rack-Ohren und Status-LED.
+  Ports als stilisierte Kacheln: gefuellt in Geschwindigkeitsfarbe wenn aktiv,
+  hohl wenn inaktiv, Punkt fuer angeschlossene Endgeraete, Uplinks rechts
+  abgesetzt; Legende unter dem Rack. Optionaler "Activity"-Schalter.
+- Ruhige Animationen mit `motion` 13.4.4: Inspector, Befehlspalette, Dialoge,
+  Toasts, Seitenwechsel, Dashboard-Aufbau und Mobil-Menue. Bei reduzierter
+  Bewegung nur kurze Einblendungen.
 - "Auto-Layout" erscheint nur noch, wenn kein Hintergrundbild (Grundriss) fuer
   die Karte hinterlegt ist, damit die manuelle Anordnung nicht verloren geht.
 
@@ -42,6 +50,8 @@ Arbeitsstand, noch nicht veroeffentlicht; Prototyp fuer das UI-Redesign.
 - Einheitliche Rundungen und Overlay-Abdunklung; im dunklen Theme ist der
   Hover-Zustand des Hauptbuttons heller und kontrastreicher. Links werden nicht
   mehr nach Kabelanzahl dicker (Anzahl steht im Label); 10M-Links sind bernsteinfarben.
+- Port-Hervorhebungen im Rack-Panel der Karte nutzen Ringe statt Leuchteffekte.
+- Neue Abhaengigkeit `motion` (ca. +31 kB gzip beim Start).
 
 ## v2.1.2 -- Sitzungs-Sicherheit, Scan-Stabilitaet und UI-Polish
 

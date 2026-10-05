@@ -405,26 +405,25 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
       <div
         key={i}
         onClick={() => toggleLink(l)}
-        style={{
-          borderLeft: isSel ? `3px solid ${accentColor}` : "3px solid transparent",
-          backgroundColor: isSel ? `${accentColor}14` : "transparent",
-        }}
-        className="grid grid-cols-[1fr_64px_1fr] items-center px-3 py-1.5 border-b border-line cursor-pointer text-[10px] relative transition-colors"
+        // Cartographic link row: selected rows get an accent-soft fill and a
+        // 2px accent bar on the left; the cable itself is a flat ink line in
+        // its cable color (no gradient, no glow).
+        className={`grid grid-cols-[1fr_64px_1fr] items-center px-3 py-1.5 border-b border-line border-l-2 cursor-pointer text-[10px] relative transition-colors ${
+          isSel ? "border-l-accent bg-accent-soft" : "border-l-transparent hover:bg-panel-2"
+        }`}
       >
         <div className="min-w-0 pr-1.5">
           <div
-            style={isSel ? { color: accentColor } : undefined}
-            className={`font-semibold flex items-center gap-1 min-w-0 ${isSel ? "" : "text-primary"}`}
+            className="font-semibold flex items-center gap-1 min-w-0 text-primary"
           ><VendorBadge vendor={a?.vendor} /><span className="truncate">{a?.sys_name || l.local_ip}</span></div>
           <div className="text-muted text-[10px] mt-px">{l.local_port}</div>
         </div>
         <div className="flex flex-col items-center gap-0.5">
           <div
-            className="w-full rounded-sm"
+            className="w-full rounded-full"
             style={{
-              height: isSel ? 5 : 4,
-              background: `linear-gradient(90deg, ${accentColor}cc, ${accentColor})`,
-              boxShadow: isSel ? `0 0 10px ${accentColor}` : `0 0 6px ${accentColor}88`,
+              height: isSel ? 3 : 2,
+              backgroundColor: accentColor,
             }}
           />
           <span
@@ -434,8 +433,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
         </div>
         <div className="min-w-0 pl-1.5 text-right">
           <div
-            style={isSel ? { color: accentColor } : undefined}
-            className={`font-semibold flex items-center justify-end gap-1 min-w-0 ${isSel ? "" : "text-primary"}`}
+            className="font-semibold flex items-center justify-end gap-1 min-w-0 text-primary"
           ><span className="truncate">{b?.sys_name || l.remote_ip}</span><VendorBadge vendor={b?.vendor} /></div>
           <div className="text-muted text-[10px] mt-px">{l.remote_port}</div>
         </div>

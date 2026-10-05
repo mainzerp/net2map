@@ -32,7 +32,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     <button
       ref={ref}
       type={type}
-      className={`inline-flex items-center justify-center gap-1.5 font-semibold transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
+      // CSS-only motion: 120ms ease-out color transitions and a 1px press;
+      // reduced motion keeps the color change but drops the press offset.
+      className={`inline-flex items-center justify-center gap-1.5 font-semibold transition-[color,background-color,border-color,translate] duration-120 ease-out enabled:active:translate-y-px motion-reduce:transition-colors motion-reduce:enabled:active:translate-y-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
       {...props}
     />
   );

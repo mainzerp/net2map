@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { normPort } from "../api";
 import type { TopologyNode, TopologyLink, SwitchClass, SwitchModel, PortLinkEntry } from "../types";
 import Port from "./Port";
+import { speedColor } from "../theme/visual";
 
 interface SwitchPanelProps {
   device: TopologyNode;
@@ -36,7 +37,8 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
             title={pingStatus === "online"
               ? `ping online${device.ping_rtt_ms ? ` (${device.ping_rtt_ms} ms)` : ""}`
               : pingStatus === "offline" ? "ping offline" : "ping unknown"}
-            style={{ backgroundColor: statusColor, boxShadow: `0 0 6px ${statusColor}` }}
+            // Soft halo only when online; no blurred glow.
+            style={{ backgroundColor: statusColor, boxShadow: pingStatus === "online" ? "0 0 0 2px var(--success-soft)" : "none" }}
             className="w-2 h-2 rounded-full shrink-0"
           />
           <div>
@@ -161,10 +163,12 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
             return rows;
           })()}
           <div className="flex gap-3.5 mt-2.5 text-[10px] text-muted flex-wrap">
-            <span><span className="text-success">|</span> 1G</span>
-            <span><span className="text-accent">|</span> 10G+</span>
-            <span><span className="text-warning">|</span> &lt;1G</span>
-            <span><span className="text-panel-2">|</span> inactive</span>
+            {/* Swatches use speedColor so the legend matches the port fills. */}
+            <span><span style={{ color: speedColor(1000) }}>|</span> 1G</span>
+            <span><span style={{ color: speedColor(10000) }}>|</span> 10G</span>
+            <span><span style={{ color: speedColor(25000) }}>|</span> 25G+</span>
+            <span><span style={{ color: speedColor(100) }}>|</span> &lt;1G</span>
+            <span><span className="text-line-strong">|</span> inactive</span>
           </div>
         </div>
       )}

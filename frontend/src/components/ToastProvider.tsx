@@ -9,6 +9,8 @@ import {
   type ReactNode,
 } from "react";
 import { CircleCheck, CircleX, Info, TriangleAlert, type LucideIcon } from "lucide-react";
+import { AnimatePresence, m } from "motion/react";
+import { toastPreset, useReducedMotion } from "../theme/motion";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -66,17 +68,11 @@ const AUTO_DISMISS_MS = 5000;
 // ── Single toast element ─────────────────────────────────────────────────────
 
 function ToastItem({ toast, onRemove }: { toast: Toast; onRemove: (id: string) => void }) {
-  const [visible, setVisible] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
-    // slide-in after mount
-    const frame = requestAnimationFrame(() => setVisible(true));
     timerRef.current = setTimeout(() => onRemove(toast.id), AUTO_DISMISS_MS);
-    return () => {
-      cancelAnimationFrame(frame);
-      clearTimeout(timerRef.current);
-    };
+    return () => clearTimeout(timerRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -85,11 +81,7 @@ function ToastItem({ toast, onRemove }: { toast: Toast; onRemove: (id: string) =
   return (
     <div
       role="alert"
-      className={`flex items-center gap-2 px-3.5 py-2.5 rounded-control border text-xs font-medium shadow-raised cursor-pointer max-w-[340px] break-words transition-[transform,opacity] duration-300 ease-out ${TOAST_CLASSES[toast.type]}`}
-      style={{
-        transform: visible ? "translateX(0)" : "translateX(120%)",
-        opacity: visible ? 1 : 0,
-      }}
+      className={`flex items-center gap-2 px-3.5 py-2.5 rounded-control border text-xs font-medium shadow-raised cursor-pointer max-w-[340px] break-words ${TOAST_CLASSES[toast.type]}`}
       onClick={() => onRemove(toast.id)}
     >
       <Icon
@@ -109,6 +101,7 @@ let idCounter = 0;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const reduced = useReducedMotion();
 
   const addToast = useCallback((message: string, type: ToastType = "info") => {
     const id = `toast-${++idCounter}-${Date.now()}`;
@@ -130,16 +123,23 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           right: 20,
           display: "flex",
           flexDirection: "column-reverse",
-          gap: 8,
+          alignItems: "flex-end",
           zIndex: 9999,
           pointerEvents: "none",
         }}
       >
-        {toasts.map(t => (
-          <div key={t.id} style={{ pointerEvents: "auto" }}>
-            <ToastItem toast={t} onRemove={removeToast} />
-          </div>
-        ))}
+        {/* Each row animates its own height (spacing lives inside the row as
+            top padding), so entering and leaving toasts push the stack
+            smoothly without layout projection (not in domAnimation). */}
+        <AnimatePresence initial={false}>
+          {toasts.map(t => (
+            <m.div key={t.id} {...toastPreset(reduced)} style={{ pointerEvents: "auto" }}>
+              <div className="pt-2">
+                <ToastItem toast={t} onRemove={removeToast} />
+              </div>
+            </m.div>
+          ))}
+        </AnimatePresence>
       </div>
     </ToastContext.Provider>
   );

@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
+import { AnimatePresence, m, useIsPresent } from "motion/react";
 import {
   Cable,
   Container,
@@ -32,6 +33,7 @@ import { buildPaletteIndex, iconFor, resolveRecent, type PaletteIcon, type Palet
 import { buildPaletteResults, type MatchRange } from "./search";
 import { readRecent } from "./recent";
 import { usePaletteStore } from "./paletteStore";
+import { dialogPreset, fadePreset, useReducedMotion } from "../../theme/motion";
 
 const ICONS: Record<PaletteIcon, LucideIcon> = {
   dashboard: LayoutDashboard,
@@ -90,6 +92,9 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listId = useId();
+  // False while the exit animation runs: the dialog is closed from then on.
+  const isPresent = useIsPresent();
+  const reduced = useReducedMotion();
 
   const index = useMemo(
     () => buildPaletteIndex(topologyQuery.data, endpointsQuery.data),
@@ -103,14 +108,18 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
     setActive(0);
   }, [query]);
 
-  // Focus the input on open and restore the previous focus on close.
+  // Focus the input on open and restore the previous focus on close. The
+  // restore runs as the cleanup when the exit animation starts (isPresent
+  // turns false), i.e. before effects of the same commit such as the
+  // inspector focusing itself, so it never steals focus from them.
   useEffect(() => {
+    if (!isPresent) return;
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     inputRef.current?.focus();
     return () => {
       if (previouslyFocused?.isConnected) previouslyFocused.focus();
     };
-  }, []);
+  }, [isPresent]);
 
   const activeIndex = flat.length === 0 ? -1 : Math.min(active, flat.length - 1);
   const optionId = (i: number) => `${listId}-option-${i}`;
@@ -157,12 +166,18 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
   let rowIndex = -1;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-scrim px-4 pt-[12vh]" onClick={onClose}>
-      <div
+    <m.div
+      {...fadePreset(reduced)}
+      className={`fixed inset-0 z-50 flex items-start justify-center bg-scrim px-4 pt-[12vh] ${isPresent ? "" : "pointer-events-none"}`}
+      aria-hidden={isPresent ? undefined : true}
+      onClick={onClose}
+    >
+      <m.div
+        {...dialogPreset(reduced)}
         role="dialog"
-        aria-modal="true"
+        aria-modal={isPresent ? "true" : undefined}
         aria-label="Command palette"
-        data-modal
+        data-modal={isPresent ? "" : undefined}
         data-command-palette
         className="w-[640px] max-w-full bg-panel border border-line rounded-card shadow-raised flex flex-col max-h-[70vh] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
@@ -221,14 +236,14 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
                     }}
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => run(hit.item)}
-                    className={`mx-2 flex items-center gap-3 px-3 py-2 rounded-control cursor-pointer ${
+                    className={`mx-2 flex items-center gap-3 px-3 py-2 rounded-control cursor-pointer transition-colors duration-120 ease-out motion-reduce:transition-none ${
                       isActive ? "bg-accent-soft" : ""
                     }`}
                   >
                     <Icon
                       size={16}
                       strokeWidth={1.75}
-                      className={`shrink-0 ${isActive ? "text-accent" : "text-muted"}`}
+                      className={`shrink-0 transition-colors duration-120 ease-out motion-reduce:transition-none ${isActive ? "text-accent" : "text-muted"}`}
                       aria-hidden="true"
                     />
                     <div className="flex-1 min-w-0 flex items-baseline gap-2">
@@ -252,8 +267,8 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
           <span>Enter to open</span>
           <span>Esc to close</span>
         </div>
-      </div>
-    </div>,
+      </m.div>
+    </m.div>,
     document.body,
   );
 }
@@ -289,5 +304,5 @@ export default function CommandPalette() {
 
   const close = useCallback(() => setOpen(false), [setOpen]);
 
-  return open ? <PaletteDialog onClose={close} /> : null;
+  return <AnimatePresence>{open && <PaletteDialog key="palette" onClose={close} />}</AnimatePresence>;
 }

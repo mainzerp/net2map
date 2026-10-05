@@ -1,13 +1,17 @@
 // ── RackElevation ────────────────────────────────────────────────────────────
-// True rack-elevation view: vertical frame with U scale (U1 at the bottom),
-// device faceplates spanning the interior, pointer-based drag-and-drop
-// placement and an unassigned-devices tray.
+// True rack-elevation view drawn as a technical illustration of a 19" rack:
+// square-hole side rails with U numbers (U1 at the bottom), blanking plates in
+// empty slots, device faceplates with rack ears, a status LED and stylized port
+// tiles (filled = up in the speed color, hollow = down, dot = endpoints), a
+// port legend, pointer-based drag-and-drop placement and an unassigned tray.
+// Faceplate styling lives in the "Rack faceplates (phase 4)" block of
+// index.css; all colors come from theme tokens or theme/visual.ts.
 
-import { useCallback, useMemo, useRef } from "react";
+import { memo, useCallback, useMemo, useRef } from "react";
 import { speedColor } from "../../theme/visual";
 import { Badge, StatusDot } from "../../components/ui";
 import VendorBadge from "../../components/map/VendorBadge";
-import type { RackInfo, TopologyNode } from "../../types";
+import type { PortInfo, RackInfo, TopologyNode } from "../../types";
 import {
   U_PX,
   deviceUHeight,
@@ -16,6 +20,14 @@ import {
   rowFromTop,
   usedUnits,
 } from "./rackLayout";
+import {
+  activityTiming,
+  layoutPortSockets,
+  portSpeedMbps,
+  portStatus,
+  portTitle,
+  type SocketGroup,
+} from "./portSockets";
 import { useRackDrag, useRackLayout } from "./useRackLayout";
 import { useInspector } from "../../hooks/useInspector";
 
@@ -23,33 +35,257 @@ interface RackElevationProps {
   rack: RackInfo;
   nodes: TopologyNode[];
   readOnly?: boolean;
+  // Subtle LED blink on up ports (user toggle, off under reduced motion).
+  activity?: boolean;
 }
 
-// ── Compact port strip (scaled-down variant of the SwitchPanel port grid) ───
-function PortStrip({ device }: { device: TopologyNode }) {
-  const ports = useMemo(
-    () =>
-      [...device.ports]
-        .sort((a, b) => (a.if_index || 0) - (b.if_index || 0))
-        .slice(0, device.total_ports || device.ports.length),
-    [device.ports, device.total_ports],
-  );
-  if (ports.length === 0) return null;
+function portKeyOf(p: PortInfo, i: number): string {
+  return String(p.id ?? p.if_index ?? p.port_id ?? i);
+}
+
+// Inline blink timing for an up tile; undefined when activity is off.
+function blinkStyle(activity: boolean, seed: number, index: number): React.CSSProperties | undefined {
+  if (!activity) return undefined;
+  const { delay, duration } = activityTiming(seed, index);
+  return { animationDelay: `-${delay}s`, animationDuration: `${duration}s` };
+}
+
+// ── Port tile (stylized port) ───────────────────────────────────────────────
+// One solid tile per port: filled with the speed color when up, hollow when
+// down, a centered dot when endpoints are present, wider for uplinks. Shared
+// by the faceplate port block and the legend so both always look identical.
+type TileProps = {
+  // Speed color for an up tile; null draws the hollow "down" tile.
+  color: string | null;
+  endpoints?: boolean;
+  uplink?: boolean;
+  compact?: boolean;
+  blink?: boolean;
+  style?: React.CSSProperties;
+} & Omit<React.HTMLAttributes<HTMLSpanElement>, "color" | "style">;
+
+function PortTile({ color, endpoints = false, uplink = false, compact = false, blink = false, style, ...rest }: TileProps) {
+  const up = color != null;
+  const cls = [
+    "rack-tile",
+    up ? "rack-tile-up" : "rack-tile-down",
+    uplink ? "rack-tile-uplink" : "",
+    compact ? "rack-tile-compact" : "",
+    blink ? "rack-tile-blink" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const colorStyle = up
+    ? ({ backgroundColor: color, "--tile-color": color } as React.CSSProperties)
+    : undefined;
   return (
-    <div className="flex flex-wrap gap-px items-center overflow-hidden max-h-full flex-1 min-w-0">
-      {ports.map((p) => {
-        const active = p.oper_status === 1;
-        return (
+    <span {...rest} className={cls} style={{ ...colorStyle, ...style }}>
+      {endpoints && !compact && <span data-testid="port-endpoint-marker" className="rack-tile-endpoint" />}
+    </span>
+  );
+}
+
+function Socket({
+  port,
+  index,
+  uplink,
+  activity,
+  seed,
+}: {
+  port: PortInfo;
+  index: number;
+  uplink: boolean;
+  activity: boolean;
+  seed: number;
+}) {
+  const status = portStatus(port);
+  const up = status === "up";
+  const endpoints = Number(port.endpoint_count || 0);
+  const blink = up && activity;
+  return (
+    <PortTile
+      data-testid="port-tile"
+      data-status={status}
+      data-uplink={uplink ? "1" : "0"}
+      data-endpoints={endpoints}
+      title={portTitle(port)}
+      color={up ? speedColor(portSpeedMbps(port)) : null}
+      endpoints={endpoints > 0}
+      uplink={uplink}
+      blink={blink}
+      style={blinkStyle(blink, seed, index)}
+    />
+  );
+}
+
+// ── Port legend under the rack ──────────────────────────────────────────────
+const LEGEND_SPEEDS: { label: string; mbps: number }[] = [
+  { label: "<1G", mbps: 100 },
+  { label: "1G", mbps: 1000 },
+  { label: "10G", mbps: 10000 },
+  { label: "25G+", mbps: 25000 },
+];
+
+function PortLegend() {
+  return (
+    <div data-testid="rack-port-legend" className="rack-legend" aria-label="Port legend">
+      {LEGEND_SPEEDS.map((s) => (
+        <span key={s.label} className="rack-legend-item">
+          <PortTile color={speedColor(s.mbps)} aria-hidden="true" />
+          {s.label}
+        </span>
+      ))}
+      <span className="rack-legend-item">
+        <PortTile color={null} aria-hidden="true" />
+        down
+      </span>
+      <span className="rack-legend-item">
+        <PortTile color={speedColor(1000)} endpoints aria-hidden="true" />
+        endpoints
+      </span>
+      <span className="rack-legend-item">
+        <PortTile color={speedColor(10000)} uplink aria-hidden="true" />
+        uplink
+      </span>
+    </div>
+  );
+}
+
+function SocketRows({
+  group,
+  uplink,
+  activity,
+  seed,
+  offset,
+}: {
+  group: SocketGroup;
+  uplink: boolean;
+  activity: boolean;
+  seed: number;
+  offset: number;
+}) {
+  if (group.top.length === 0 && group.bottom.length === 0) return null;
+  const row = (ports: PortInfo[], base: number) => (
+    <div className="flex gap-px">
+      {ports.map((p, i) => (
+        <Socket
+          key={portKeyOf(p, base + i)}
+          port={p}
+          index={base + i}
+          uplink={uplink}
+          activity={activity}
+          seed={seed}
+        />
+      ))}
+    </div>
+  );
+  return (
+    <div
+      className={`flex flex-col gap-px shrink-0 ${uplink ? "rack-uplink-group" : ""}`}
+      data-testid={uplink ? "uplink-group" : "access-group"}
+    >
+      {row(group.top, offset)}
+      {group.bottom.length > 0 && row(group.bottom, offset + group.top.length)}
+    </div>
+  );
+}
+
+// ── Port block (memoized per device) ────────────────────────────────────────
+// Re-renders only when the device's port list, total_ports or the activity
+// flag change, not on every drag pointermove of the parent elevation.
+const PortBlock = memo(function PortBlock({
+  deviceId,
+  ports,
+  totalPorts,
+  activity,
+}: {
+  deviceId: number;
+  ports: PortInfo[];
+  totalPorts: number;
+  activity: boolean;
+}) {
+  const layout = useMemo(() => layoutPortSockets(ports, totalPorts), [ports, totalPorts]);
+  if (layout.ports.length === 0) return <div className="flex-1 min-w-0" />;
+
+  if (layout.compact) {
+    // Compact mode for very large devices: small 6px solid tiles, no uplink
+    // grouping and no endpoint marker.
+    return (
+      <div
+        data-testid="port-block"
+        data-mode="compact"
+        className="flex flex-wrap content-center gap-px p-px overflow-hidden max-h-full flex-1 min-w-0"
+      >
+        {layout.ports.map((p, i) => {
+          const status = portStatus(p);
+          const up = status === "up";
+          const blink = up && activity;
+          return (
+            <PortTile
+              key={portKeyOf(p, i)}
+              data-testid="port-tile"
+              data-status={status}
+              data-uplink="0"
+              data-endpoints={Number(p.endpoint_count || 0)}
+              title={portTitle(p)}
+              color={up ? speedColor(portSpeedMbps(p)) : null}
+              compact
+              blink={blink}
+              style={blinkStyle(blink, deviceId, i)}
+            />
+          );
+        })}
+      </div>
+    );
+  }
+
+  const accessCount = layout.access.top.length + layout.access.bottom.length;
+  return (
+    <div
+      data-testid="port-block"
+      data-mode={layout.twoRow ? "two-row" : "one-row"}
+      className="flex items-center gap-1 p-px overflow-hidden max-h-full flex-1 min-w-0 justify-end"
+    >
+      <SocketRows group={layout.access} uplink={false} activity={activity} seed={deviceId} offset={0} />
+      <SocketRows group={layout.uplinks} uplink activity={activity} seed={deviceId} offset={accessCount} />
+    </div>
+  );
+});
+
+// ── Rack ear with two screws ────────────────────────────────────────────────
+function RackEar({ side }: { side: "left" | "right" }) {
+  return (
+    <span className={`rack-ear rack-ear-${side}`} aria-hidden="true">
+      <span className="rack-screw" />
+      <span className="rack-screw" />
+    </span>
+  );
+}
+
+// ── Side rail with square mounting holes and U numbers ──────────────────────
+function RackRail({ side, rows }: { side: "left" | "right"; rows: number[] }) {
+  const holes = (
+    <span className="rack-rail-holes" aria-hidden="true">
+      <span className="rack-rail-hole" />
+      <span className="rack-rail-hole" />
+      <span className="rack-rail-hole" />
+    </span>
+  );
+  return (
+    <div className={`rack-rail rack-rail-${side} flex flex-col w-7 shrink-0`} data-testid={`rack-rail-${side}`}>
+      {rows.map((u) => (
+        <div key={u} className="rack-rail-unit flex items-stretch" style={{ height: U_PX }}>
+          {side === "right" && holes}
           <span
-            key={p.id ?? p.if_index ?? p.port_id}
-            title={`${p.if_descr ?? p.name} - ${active ? "up" : "down"}${
-              p.endpoint_count ? ` - ${p.endpoint_count} endpoint(s)` : ""
+            className={`flex-1 flex items-center font-mono tabular-nums text-[9px] text-muted ${
+              side === "left" ? "justify-end pr-0.5" : "justify-start pl-0.5"
             }`}
-            className="inline-block w-[5px] h-[5px] rounded-[1px] shrink-0"
-            style={{ backgroundColor: active ? speedColor(p.speed_mbps ?? p.speed ?? 0) : "var(--line-strong)" }}
-          />
-        );
-      })}
+          >
+            {u}
+          </span>
+          {side === "left" && holes}
+        </div>
+      ))}
     </div>
   );
 }
@@ -69,9 +305,9 @@ function UHeightControl({
   const uHeight = deviceUHeight(device);
   const max = Math.min(4, heightU);
   const btn =
-    "w-4 h-4 inline-flex items-center justify-center rounded border border-line-strong text-muted hover:text-primary hover:border-accent disabled:opacity-30 disabled:hover:text-muted disabled:hover:border-line-strong cursor-pointer disabled:cursor-default text-[10px] leading-none";
+    "w-3.5 h-3.5 inline-flex items-center justify-center rounded-[3px] border border-line-strong bg-panel text-muted hover:text-primary hover:border-accent disabled:opacity-30 disabled:hover:text-muted disabled:hover:border-line-strong cursor-pointer disabled:cursor-default text-[10px] leading-none";
   return (
-    <div className="flex items-center gap-1 shrink-0" onPointerDown={(e) => e.stopPropagation()}>
+    <div className="flex items-center gap-0.5 shrink-0" onPointerDown={(e) => e.stopPropagation()}>
       <button
         type="button"
         aria-label={`Decrease U height of ${device.sys_name}`}
@@ -81,7 +317,7 @@ function UHeightControl({
       >
         -
       </button>
-      <span className="text-[10px] text-muted w-6 text-center">{uHeight}U</span>
+      <span className="text-[9px] font-mono tabular-nums text-muted w-5 text-center">{uHeight}U</span>
       <button
         type="button"
         aria-label={`Increase U height of ${device.sys_name}`}
@@ -104,6 +340,7 @@ function Faceplate({
   onPointerDown,
   onUHeight,
   onOpen,
+  activity,
 }: {
   device: TopologyNode;
   readOnly: boolean;
@@ -112,10 +349,15 @@ function Faceplate({
   onPointerDown: (e: React.PointerEvent) => void;
   onUHeight: (uHeight: number) => void;
   onOpen: () => void;
+  activity: boolean;
 }) {
   const ping = device.ping_status || "unknown";
   const status = ping === "online" ? "up" : ping === "offline" ? "down" : "unknown";
   const name = device.sys_name || device.hostname || device.ip;
+  const rtt = ping === "online" && device.ping_rtt_ms != null ? `${device.ping_rtt_ms}ms` : "";
+  const subline = [device.model, rtt].filter(Boolean).join(" - ");
+  const ledTitle =
+    status === "up" ? `ping online${rtt ? ` (${rtt})` : ""}` : status === "down" ? "ping offline" : "ping unknown";
   return (
     <div
       data-testid={`faceplate-${device.id}`}
@@ -133,29 +375,47 @@ function Faceplate({
           onOpen();
         }
       }}
-      className={`flex items-center gap-2 px-2 h-full w-full rounded border bg-panel-2 overflow-hidden select-none transition-colors duration-[120ms] motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent ${
+      className={`rack-plate flex items-stretch h-full w-full rounded-[2px] border overflow-hidden select-none transition-colors duration-[120ms] motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent ${
         readOnly
           ? "border-line cursor-pointer hover:border-accent"
           : "border-line-strong cursor-grab active:cursor-grabbing hover:border-accent"
       } ${dragging ? "opacity-40" : ""}`}
       style={{ touchAction: "none" }}
     >
-      <StatusDot status={status} className="shrink-0" />
-      <VendorBadge vendor={device.vendor} />
-      <span className="text-primary text-[11px] font-semibold truncate shrink-0 max-w-[160px]">
-        {name}
-      </span>
-      {ping === "online" && device.ping_rtt_ms != null && (
-        <span className="text-[10px] text-muted shrink-0">{device.ping_rtt_ms}ms</span>
-      )}
-      <PortStrip device={device} />
-      <UHeightControl device={device} heightU={heightU} readOnly={readOnly} onChange={onUHeight} />
+      <RackEar side="left" />
+      <div className="flex items-center gap-1.5 px-1.5 flex-1 min-w-0">
+        <span
+          data-testid="device-status-led"
+          data-status={status}
+          title={ledTitle}
+          className={`rack-status-led rack-status-led-${status}`}
+        />
+        {/* Name/model area kept at 88px so 48 + 4 uplink tiles fit in the
+            480px interior next to the ears, status LED and U stepper. */}
+        <div className="flex flex-col justify-center min-w-0 w-[88px] shrink-0 leading-none gap-[2px]">
+          <div className="flex items-center gap-1 min-w-0">
+            <VendorBadge vendor={device.vendor} />
+            <span className="text-primary text-[11px] font-semibold truncate leading-[13px]">{name}</span>
+          </div>
+          {subline && (
+            <span className="text-muted text-[8px] font-mono tabular-nums truncate leading-[9px]">{subline}</span>
+          )}
+        </div>
+        <PortBlock
+          deviceId={device.id}
+          ports={device.ports}
+          totalPorts={device.total_ports}
+          activity={activity}
+        />
+        <UHeightControl device={device} heightU={heightU} readOnly={readOnly} onChange={onUHeight} />
+      </div>
+      <RackEar side="right" />
     </div>
   );
 }
 
 // ── RackElevation ────────────────────────────────────────────────────────────
-export default function RackElevation({ rack, nodes, readOnly = false }: RackElevationProps) {
+export default function RackElevation({ rack, nodes, readOnly = false, activity = false }: RackElevationProps) {
   const heightU = rackHeightU(rack);
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -224,34 +484,27 @@ export default function RackElevation({ rack, nodes, readOnly = false }: RackEle
       </div>
 
       <div className="flex gap-4 items-start flex-wrap">
-        {/* Rack frame */}
-        <div className="flex shrink-0">
-          {/* Left U scale */}
-          <div className="flex flex-col w-7 shrink-0">
-            {scaleRows.map((u) => (
-              <div
-                key={u}
-                className="flex items-center justify-end pr-1 text-[9px] text-muted border-b border-line"
-                style={{ height: U_PX }}
-              >
-                {u}
-              </div>
-            ))}
-          </div>
+        {/* Rack frame: top cap, rails + interior, bottom cap */}
+        <div className="rack-frame flex flex-col shrink-0">
+          <div className="rack-cap" aria-hidden="true" />
+          <div className="flex">
+          {/* Left rail with U scale */}
+          <RackRail side="left" rows={scaleRows} />
 
           {/* Rack interior */}
           <div
             ref={bodyRef}
             data-testid="rack-body"
-            className="relative w-[480px] max-w-full border-x-2 border-line-strong bg-panel rounded-sm"
+            className="rack-interior relative w-[480px] max-w-full"
             style={{ height: heightU * U_PX }}
           >
-            {/* Empty slot lines */}
+            {/* Blanking plates for every slot (devices render on top) */}
             {Array.from({ length: heightU }, (_, i) => (
               <div
                 key={i}
-                className="absolute inset-x-0 border-b border-line/60"
+                className="rack-blank absolute inset-x-0"
                 style={{ top: i * U_PX, height: U_PX }}
+                aria-hidden="true"
               />
             ))}
 
@@ -263,7 +516,7 @@ export default function RackElevation({ rack, nodes, readOnly = false }: RackEle
               return (
                 <div
                   key={device.id}
-                  className="absolute px-1"
+                  className="absolute"
                   style={{
                     top: rowFromTop(heightU, pos, uHeight) * U_PX + 1,
                     height: uHeight * U_PX - 2,
@@ -279,6 +532,7 @@ export default function RackElevation({ rack, nodes, readOnly = false }: RackEle
                     onPointerDown={(e) => startDrag(e, device, "rack")}
                     onUHeight={(h) => setUHeight(device, h)}
                     onOpen={() => openDevice(device)}
+                    activity={activity}
                   />
                 </div>
               );
@@ -306,17 +560,12 @@ export default function RackElevation({ rack, nodes, readOnly = false }: RackEle
             )}
           </div>
 
-          {/* Right U scale */}
-          <div className="flex flex-col w-7 shrink-0">
-            {scaleRows.map((u) => (
-              <div
-                key={u}
-                className="flex items-center justify-start pl-1 text-[9px] text-muted border-b border-line"
-                style={{ height: U_PX }}
-              >
-                {u}
-              </div>
-            ))}
+          {/* Right rail with U scale */}
+          <RackRail side="right" rows={scaleRows} />
+          </div>
+          <div className="rack-cap" aria-hidden="true" />
+          <div className="pt-2">
+            <PortLegend />
           </div>
         </div>
 
