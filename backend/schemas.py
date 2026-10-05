@@ -268,6 +268,40 @@ class SnmpProfileOut(SnmpProfileBase):
 
 # ─── Credential ───────────────────────────────────────────────────────────────
 
+# RFC 3411 SnmpEngineID: OCTET STRING (SIZE(5..32)).
+ENGINE_ID_MIN_OCTETS = 5
+ENGINE_ID_MAX_OCTETS = 32
+_ENGINE_ID_SEPARATORS = re.compile(r"[\s:]")
+_HEX_RE = re.compile(r"^[0-9a-f]*$")
+
+
+def normalize_engine_id(value: Optional[str]) -> Optional[str]:
+    """Normalize a user-supplied SNMP engine ID to lowercase hex.
+
+    Accepts an optional "0x" prefix and ":" or whitespace separators.
+    Empty input yields None (= automatic discovery). Raises ValueError for
+    non-hex input, odd length or a size outside 5-32 octets.
+    """
+    if value is None:
+        return None
+    v = _ENGINE_ID_SEPARATORS.sub("", str(value)).lower()
+    if v.startswith("0x"):
+        v = v[2:]
+    if not v:
+        return None
+    if not _HEX_RE.match(v):
+        raise ValueError("Engine ID must contain only hex characters (0-9, a-f)")
+    if len(v) % 2:
+        raise ValueError("Engine ID must have an even number of hex characters")
+    octets = len(v) // 2
+    if octets < ENGINE_ID_MIN_OCTETS or octets > ENGINE_ID_MAX_OCTETS:
+        raise ValueError(
+            f"Engine ID must be {ENGINE_ID_MIN_OCTETS}-{ENGINE_ID_MAX_OCTETS} octets "
+            f"({ENGINE_ID_MIN_OCTETS * 2}-{ENGINE_ID_MAX_OCTETS * 2} hex characters)"
+        )
+    return v
+
+
 class CredentialBase(BaseModel):
     label:        str
     ip:           str
@@ -284,12 +318,19 @@ class CredentialBase(BaseModel):
     v3_auth_password:  str           = ""
     v3_priv_protocol:  PrivProtocol  = "AES-128"
     v3_priv_password:  str           = ""
+    # Optional manual override of the authoritative SNMPv3 engine ID (hex)
+    v3_engine_id:      Optional[str] = None
     # Optional assignments
     profile_id:   Optional[int] = None
     device_id:    Optional[int] = None
 
 
 class CredentialCreate(CredentialBase):
+
+    @field_validator("v3_engine_id", mode="before")
+    @classmethod
+    def validate_engine_id(cls, v):
+        return normalize_engine_id(v)
 
     @field_validator("ip")
     @classmethod
@@ -316,14 +357,24 @@ class CredentialUpdate(BaseModel):
     v3_auth_password:  Optional[str]           = None
     v3_priv_protocol:  Optional[PrivProtocol]  = None
     v3_priv_password:  Optional[str]           = None
+    v3_engine_id:      Optional[str]           = None
     profile_id:        Optional[int]           = None
     device_id:         Optional[int]           = None
+
+    @field_validator("v3_engine_id", mode="before")
+    @classmethod
+    def validate_engine_id(cls, v):
+        # Empty string / None clears the override (back to discovery).
+        return normalize_engine_id(v)
 
 
 class CredentialOut(CredentialBase):
     id:         int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # Read-only: last engine ID observed during a successful scan
+    discovered_engine_id: Optional[str]      = None
+    engine_id_seen_at:    Optional[datetime] = None
 
     @field_serializer("v3_auth_password", "v3_priv_password")
     def _mask_password(self, v: str) -> str:

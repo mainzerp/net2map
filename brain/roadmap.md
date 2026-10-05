@@ -17,12 +17,6 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
   September fixes and the October review are done (v2.1.1/v2.1.2); do not repeat
   already-fixed auth/heartbeat/frontend work. Revalidate historical residuals
   before promoting new changes; verify each against current code and regression tests.
-- API versioning strategy · priority: P1 · area: backend
-  Outcome: versioned API surface that can evolve backward-compatibly.
-  Verify: tests for versioned routes + VERSION.md entry.
-- SNMPv3 engine ID auto-discovery · priority: P1 · area: backend
-  For enterprise switches requiring an explicit engine ID.
-  Verify: scanner test with a v3 profile; VERSION.md entry.
 - API reference doc · priority: P2 · area: docs
   18 routers currently have no reference documentation.
 - Ops/deployment guide · priority: P2 · area: docs
@@ -42,7 +36,22 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
-(none)
+- API versioning (/api/v1 + deprecated /api alias) · priority: P1 · area: backend
+  Done: decorators without /api, routers mounted under /api/v1 (OpenAPI) and /api
+  (hidden, Deprecation + Link headers), version-aware auth exemptions, metrics
+  labels normalized, frontend via apiUrl()/versionedPath() in src/api.ts; README
+  section. Passed: ruff, backend tests (25 new), frontend tests/build.
+  Review: UI works on :3000; `curl -i localhost:3000/api/devices` shows Deprecation.
+- SNMPv3 engine ID discovery and override · priority: P1 · area: backend
+  Done: migration 018 (credential v3_engine_id, discovered_engine_id,
+  engine_id_seen_at), snmpEngineID.0 read after each scan, change -> WARNING +
+  AuditLog engine_id_changed, override as securityEngineId, CredentialsTab UI.
+  Passed: ruff, all 507 backend tests in a clean container of the built image
+  (Py3.12, CI env), frontend 159 tests; migration 018 applied on the local
+  PostgreSQL stack. Verified against a
+  loopback PySNMP v3 agent, not a real switch.
+  Review: run a real scan, check Settings > Credentials shows the engine ID.
+  Not covered: bulk/config import-export of v3_engine_id.
 
 ## Done
 

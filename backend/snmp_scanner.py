@@ -34,6 +34,7 @@ from pysnmp.hlapi.v3arch.asyncio import (
     bulk_cmd,
     get_cmd,
 )
+from pysnmp.proto.rfc1902 import OctetString
 from pysnmp.proto.rfc1905 import EndOfMibView, NoSuchInstance, NoSuchObject
 
 # Vendor detection and pure parsing helpers live in pysnmp-free modules so
@@ -91,6 +92,27 @@ OID_SYS_NAME      = "1.3.6.1.2.1.1.5.0"
 OID_SYS_DESCR     = "1.3.6.1.2.1.1.1.0"
 OID_SYS_LOCATION  = "1.3.6.1.2.1.1.6.0"
 OID_SYS_OBJECT_ID = "1.3.6.1.2.1.1.2.0"
+
+# SNMP-FRAMEWORK-MIB::snmpEngineID.0 -- the agent's authoritative engine ID.
+OID_SNMP_ENGINE_ID = "1.3.6.1.6.3.10.2.1.1.0"
+
+# Substrings of PySNMP error indications that point at a wrong / stale
+# authoritative engine ID (unknownEngineID, notInTimeWindow, wrongDigest).
+# With an override set, PySNMP 7 still discovers the agent's real engine ID
+# and then fails locally with unknownSecurityName when no USM user is bound
+# to that ID (verified against a loopback PySNMP 7.1.30 agent), so that
+# indication counts as an engine ID mismatch too. Only evaluated when an
+# override is configured.
+_ENGINE_ID_ERROR_MARKERS = (
+    "unknown snmp engine id",
+    "not in windows of trust",
+    "wrong snmp pdu digest",
+    "unknown snmp security name",
+    "unknownengineid",
+    "notintimewindow",
+    "wrongdigest",
+    "unknownsecurityname",
+)
 
 # ENTITY-MIB for the main chassis entry (index 1). Most switches report the
 # running OS image in entPhysicalSoftwareRev (.10); entPhysicalFirmwareRev (.9)
@@ -172,6 +194,7 @@ class SwitchData:
     lldp_neighbors: List[LldpNeighbor] = field(default_factory=list)
     arp_table:      Dict[str, str]     = field(default_factory=dict)  # mac -> ip
     mac_ifindex:    Dict[str, int]     = field(default_factory=dict)  # mac -> ifIndex
+    engine_id:      str = ""   # snmpEngineID.0 as lowercase hex ("" if unavailable)
 
 
 # --- Credentials builder ------------------------------------------------------
@@ -185,13 +208,25 @@ def build_auth(
     v3_auth_password: str = "",
     v3_priv_protocol: str = "AES-128",
     v3_priv_password: str = "",
+    v3_engine_id: str = "",
 ):
-    """Return a pysnmp auth object (CommunityData or UsmUserData)."""
+    """Return a pysnmp auth object (CommunityData or UsmUserData).
+
+    ``v3_engine_id`` is an optional manual override of the authoritative
+    engine ID (hex string, no 0x prefix). When set for SNMPv3 it is passed to
+    UsmUserData as ``securityEngineId`` so the USM user (and its localized
+    keys) is bound to that engine ID instead of the discovered one. Ignored
+    for SNMPv2c.
+    """
     if snmp_version in (SnmpVersion.V2C, "v2c"):
         # SNMPv2c remains available for devices configured with community credentials.
         return CommunityData(community, mpModel=1)  # nosec B508
 
     # SNMPv3
+    extra = {}
+    if v3_engine_id:
+        extra["securityEngineId"] = OctetString(hexValue=v3_engine_id)
+
     sl = v3_security_level
     if sl in (SecurityLevel.NO_AUTH_NO_PRIV, "noAuthNoPriv"):
         # Explicit user-selected noAuthNoPriv device compatibility.
@@ -199,6 +234,7 @@ def build_auth(
             v3_username,
             authProtocol=USM_AUTH_NONE,
             privProtocol=USM_PRIV_NONE,
+            **extra,
         )
     if sl in (SecurityLevel.AUTH_NO_PRIV, "authNoPriv"):
         # Explicit user-selected authNoPriv device compatibility.
@@ -207,6 +243,7 @@ def build_auth(
             authKey=v3_auth_password,
             authProtocol=AUTH_PROTOCOLS.get(v3_auth_protocol, USM_AUTH_HMAC96_SHA),
             privProtocol=USM_PRIV_NONE,
+            **extra,
         )
     # authPriv (default)
     # authPriv defaults to SHA-256 and AES-128; maps preserve explicit user selection.
@@ -216,7 +253,33 @@ def build_auth(
         privKey=v3_priv_password,
         authProtocol=AUTH_PROTOCOLS.get(v3_auth_protocol, USM_AUTH_HMAC192_SHA256),
         privProtocol=PRIV_PROTOCOLS.get(v3_priv_protocol, USM_PRIV_CFB128_AES),
+        **extra,
     )
+
+
+def is_engine_id_error(error_indication) -> bool:
+    """True if a PySNMP error indication points at a wrong engine ID / time window / digest."""
+    if not error_indication:
+        return False
+    text = f"{type(error_indication).__name__} {error_indication}".lower()
+    return any(marker in text for marker in _ENGINE_ID_ERROR_MARKERS)
+
+
+def engine_id_to_hex(value) -> str:
+    """Convert a raw snmpEngineID value (bytes / OctetString) to lowercase hex.
+
+    Returns "" for empty values or values outside the RFC 3411 size range
+    (5-32 octets), which are treated as "not available".
+    """
+    if value is None:
+        return ""
+    try:
+        raw = bytes(value)
+    except Exception:
+        return ""
+    if not 5 <= len(raw) <= 32:
+        return ""
+    return raw.hex()
 
 
 # --- Low-level async SNMP helpers ---------------------------------------------
@@ -229,8 +292,13 @@ async def snmp_get(ip: str, port: int, auth,
                    *oids: str,
                    timeout: int = 3,
                    retries: int = 1,
-                   engine: Optional[SnmpEngine] = None) -> Dict[str, str]:
-    """Async GET one or more scalar OIDs. Returns {oid_str: value_str}."""
+                   engine: Optional[SnmpEngine] = None,
+                   error_sink: Optional[list] = None) -> Dict[str, str]:
+    """Async GET one or more scalar OIDs. Returns {oid_str: value_str}.
+
+    If ``error_sink`` is a list, a non-empty error indication is appended to
+    it so callers can inspect why an (otherwise silent) empty result occurred.
+    """
     result: Dict[str, str] = {}
     objects = [ObjectType(ObjectIdentity(o)) for o in oids]
     own_engine = engine is None
@@ -240,6 +308,8 @@ async def snmp_get(ip: str, port: int, auth,
         error_indication, error_status, _, var_binds = await get_cmd(
             engine, auth, await _transport(ip, port, timeout, retries), ContextData(), *objects
         )
+        if error_indication and error_sink is not None:
+            error_sink.append(error_indication)
         if error_indication or error_status:
             return result
         for vb in var_binds:
@@ -254,6 +324,42 @@ async def snmp_get(ip: str, port: int, auth,
             log.warning("snmp_get %s: connection error: %s", ip, exc)
         else:
             log.debug("snmp_get %s: %s: %s", ip, exc_type, exc)
+    finally:
+        if own_engine:
+            try:
+                engine.close_dispatcher()
+            except Exception:
+                pass
+    return result
+
+
+async def snmp_get_raw(ip: str, port: int, auth,
+                       *oids: str,
+                       timeout: int = 3,
+                       retries: int = 1,
+                       engine: Optional[SnmpEngine] = None) -> Dict[str, bytes]:
+    """Async GET returning raw bytes values (for binary OCTET STRINGs such as
+    snmpEngineID). Errors and missing objects yield an empty / partial dict."""
+    result: Dict[str, bytes] = {}
+    objects = [ObjectType(ObjectIdentity(o)) for o in oids]
+    own_engine = engine is None
+    if own_engine:
+        engine = SnmpEngine()
+    try:
+        error_indication, error_status, _, var_binds = await get_cmd(
+            engine, auth, await _transport(ip, port, timeout, retries), ContextData(), *objects
+        )
+        if error_indication or error_status:
+            return result
+        for vb in var_binds:
+            if isinstance(vb[1], (EndOfMibView, NoSuchInstance, NoSuchObject)):
+                continue
+            try:
+                result[str(vb[0])] = bytes(vb[1])
+            except Exception:
+                continue
+    except Exception as exc:
+        log.debug("snmp_get_raw %s: %s: %s", ip, type(exc).__name__, exc)
     finally:
         if own_engine:
             try:
@@ -500,6 +606,27 @@ def _decode_snmp_str(val) -> str:
     return cleaned
 
 
+# --- Engine ID discovery ------------------------------------------------------
+
+async def _read_engine_id(ip: str, snmp_port: int, auth, snmp_timeout: int,
+                          snmp_retries: int, engine: SnmpEngine) -> str:
+    """Read SNMP-FRAMEWORK-MIB::snmpEngineID.0 and return it as lowercase hex.
+
+    Uses the per-scan SnmpEngine, so for SNMPv3 this runs after PySNMP has
+    already performed USM discovery for the first request. Returns "" when the
+    agent does not expose the object or the request fails (never raises).
+    """
+    try:
+        raw = await snmp_get_raw(
+            ip, snmp_port, auth, OID_SNMP_ENGINE_ID,
+            timeout=snmp_timeout, retries=snmp_retries, engine=engine,
+        )
+    except Exception as exc:
+        log.debug("snmpEngineID read failed for %s: %s", ip, exc)
+        return ""
+    return engine_id_to_hex(raw.get(OID_SNMP_ENGINE_ID))
+
+
 # --- Main async scan function -------------------------------------------------
 
 async def scan_switch(
@@ -516,10 +643,13 @@ async def scan_switch(
     v3_priv_protocol: str = "AES-128",
     v3_priv_password: str = "",
     scan_type: str = "full",
+    v3_engine_id: str = "",
 ) -> Optional[SwitchData]:
     """Async full SNMP scan of one switch. Returns SwitchData or None on failure."""
 
     scan_mode = scan_type if scan_type in {"discovery", "ports", "links", "macs", "full"} else "full"
+    is_v3 = snmp_version not in (SnmpVersion.V2C, "v2c")
+    engine_id_override = (v3_engine_id or "") if is_v3 else ""
 
     auth = build_auth(
         snmp_version=snmp_version,
@@ -530,6 +660,7 @@ async def scan_switch(
         v3_auth_password=v3_auth_password,
         v3_priv_protocol=v3_priv_protocol,
         v3_priv_password=v3_priv_password,
+        v3_engine_id=engine_id_override,
     )
 
     # Per-session SnmpEngine reuse: create once, pass to all SNMP calls
@@ -537,6 +668,7 @@ async def scan_switch(
     try:
         return await _scan_switch_inner(
             ip, snmp_port, auth, snmp_timeout, snmp_retries, scan_mode, session_engine,
+            engine_id_override=engine_id_override,
         )
     finally:
         try:
@@ -553,10 +685,12 @@ async def _scan_switch_inner(
     snmp_retries: int,
     scan_mode: str,
     engine: SnmpEngine,
+    engine_id_override: str = "",
 ) -> Optional[SwitchData]:
     """Inner scan logic using a pre-created SnmpEngine."""
 
     # -- 1. System scalars ----------------------------------------------------
+    scalar_errors: list = []
     scalars = await snmp_get(
         ip, snmp_port, auth,
         OID_SYS_NAME, OID_SYS_DESCR,
@@ -565,8 +699,16 @@ async def _scan_switch_inner(
         timeout=snmp_timeout,
         retries=snmp_retries,
         engine=engine,
+        error_sink=scalar_errors,
     )
     if not scalars:
+        if engine_id_override and any(is_engine_id_error(e) for e in scalar_errors):
+            # Explicit configuration wins: no auto-clear, no retry without it.
+            log.warning(
+                "SNMPv3 request to %s failed with engine ID override %s (%s); "
+                "the override may be wrong or stale -- consider clearing it to use automatic discovery",
+                ip, engine_id_override, scalar_errors[0],
+            )
         log.warning("No SNMP response from %s", ip)
         return None
 
@@ -579,6 +721,10 @@ async def _scan_switch_inner(
                      or scalars.get(OID_ENT_PHYSICAL_FIRMWARE_REV) or "").strip(),
     )
     sys_oid = scalars.get(OID_SYS_OBJECT_ID, "").strip()
+
+    # -- 1b. Authoritative engine ID (best effort, separate GET so agents that
+    # reject unknown OIDs cannot break the system-scalar request above). -----
+    sw.engine_id = await _read_engine_id(ip, snmp_port, auth, snmp_timeout, snmp_retries, engine)
 
     # -- 2. Vendor detection --------------------------------------------------
     sw.vendor = detect_vendor(sw.sys_descr, sys_oid)

@@ -212,6 +212,12 @@ export interface Credential {
   v3_auth_password: string;
   v3_priv_protocol: string;
   v3_priv_password: string;
+  /** Manual engine ID override (lowercase hex); null = automatic discovery. */
+  v3_engine_id?: string | null;
+  /** Read-only: engine ID observed during the last successful scan (hex). */
+  discovered_engine_id?: string | null;
+  /** Read-only: when discovered_engine_id was last observed (UTC). */
+  engine_id_seen_at?: string | null;
 }
 
 // -- SNMP Profile (SnmpProfilesTab, SettingsPage) -----------------------------

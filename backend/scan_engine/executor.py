@@ -15,6 +15,7 @@ from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from database import (
+    AuditLog,
     Credential,
     Device,
     DryRunResult,
@@ -321,12 +322,18 @@ async def _execute_scan_body(
     ping_by_ip: Dict[str, tuple[bool, int]] = {}
     switch_metrics: List[ScanSwitchMetric] = []
     range_found_ips: List[str] = []  # IPs from ranges that responded to SNMP
+    # IP -> id of the credential (primary or fallback) whose scan succeeded
+    working_cred_by_ip: Dict[str, int] = {}
 
     scan_targets = []
 
     def _cred_to_snmp_dict(cred):
         p = cred.profile
         return {
+            "credential_id": cred.id,
+            # Engine IDs are per device, so the override always comes from the
+            # credential itself, even when a shared profile supplies the secrets.
+            "v3_engine_id": cred.v3_engine_id or "",
             "snmp_port": cred.snmp_port,
             "snmp_version": p.snmp_version if p else cred.snmp_version,
             "community": decrypt(p.community if p else cred.community),
@@ -470,10 +477,13 @@ async def _execute_scan_body(
                         v3_priv_protocol=cred_set["v3_priv_protocol"],
                         v3_priv_password=cred_set["v3_priv_password"],
                         scan_type=scan_mode,
+                        v3_engine_id=cred_set.get("v3_engine_id", ""),
                     )
                     if data:
                         if cred_set is not target:
                             log.info("Credential fallback succeeded for %s", ip)
+                        if cred_set.get("credential_id") is not None:
+                            working_cred_by_ip[ip] = cred_set["credential_id"]
                         duration_ms = int((time.perf_counter() - started) * 1000)
                         return ip, label, data, "", duration_ms, ping_ok, ping_rtt, is_probe, None
                 except Exception as exc:
@@ -586,6 +596,7 @@ async def _execute_scan_body(
         switch_metrics=switch_metrics,
         lock_token=lock_token,
         lease=lease,
+        working_cred_by_ip=working_cred_by_ip,
     ))
     try:
         result, dry_run_preview = await asyncio.shield(finalization_task)
@@ -610,6 +621,44 @@ async def _execute_scan_body(
     return result
 
 
+def _record_engine_id(db: Session, cred: Credential, engine_id: str, corr: str) -> None:
+    """Store the observed SNMP engine ID on the credential that worked.
+
+    Engine IDs are stored for any SNMP version when the agent exposes
+    snmpEngineID.0 (useful for change detection even with v2c). A change
+    against a previously stored value is logged as a warning and written to
+    the audit log as a system event. The caller commits (lease-guarded).
+    """
+    engine_id = (engine_id or "").lower()
+    if not engine_id:
+        return
+    old = cred.discovered_engine_id
+    if old and old != engine_id:
+        log.warning(
+            "SNMP engine ID changed for %s: %s -> %s; device may have been replaced or reset",
+            cred.ip, old, engine_id,
+        )
+        _log_event(
+            logging.WARNING,
+            "scan.engine_id_changed",
+            correlation_id=corr,
+            ip=cred.ip,
+            credential_id=cred.id,
+            old=old,
+            new=engine_id,
+        )
+        db.add(AuditLog(
+            user_id=None,
+            username="system",
+            action="engine_id_changed",
+            resource="credential",
+            resource_id=str(cred.id) if cred.id is not None else "",
+            details={"ip": cred.ip, "old": old, "new": engine_id, "correlation_id": corr},
+        ))
+    cred.discovered_engine_id = engine_id
+    cred.engine_id_seen_at = datetime.now(timezone.utc)
+
+
 @_guard_scan_transactions
 def _finalize_scan_db(
     db: Session,
@@ -631,6 +680,7 @@ def _finalize_scan_db(
     switch_metrics: List[ScanSwitchMetric],
     lock_token: Optional[str],
     lease: _ScanLease,
+    working_cred_by_ip: Optional[Dict[str, int]] = None,
 ) -> tuple:
     """Synchronous DB rebuild phase -- runs in a worker thread via
     asyncio.to_thread (see _execute_scan_body).
@@ -766,6 +816,17 @@ def _finalize_scan_db(
     if discovered_ips:
         cred_by_ip = {c.ip: c for c in db.query(Credential).filter(Credential.ip.in_(list(discovered_ips))).all()}
 
+    # Credentials whose scan succeeded (for engine ID persistence)
+    working_cred_by_ip = working_cred_by_ip or {}
+    working_creds: Dict[int, Credential] = {}
+    if working_cred_by_ip:
+        working_creds = {
+            c.id: c for c in db.query(Credential).filter(
+                Credential.id.in_(list(set(working_cred_by_ip.values())))
+            ).all()
+        }
+    range_found_set = set(range_found_ips)
+
     # Manual vendor overrides (devices whose vendor_override flag is set)
     vendor_overrides: Dict[str, str] = {}
 
@@ -775,6 +836,15 @@ def _finalize_scan_db(
         ping_ok, ping_rtt = ping_by_ip.get(ip, (False, 0))
         ping_status = "online" if ping_ok else "offline"
         cred = cred_by_ip.get(ip)
+
+        observed_engine_id = getattr(sw, "engine_id", "") if sw is not None else ""
+        if isinstance(observed_engine_id, str) and observed_engine_id:
+            engine_cred = working_creds.get(working_cred_by_ip.get(ip))
+            if engine_cred is None and ip in range_found_set:
+                # Auto-created credential from a range probe (single per IP)
+                engine_cred = cred
+            if engine_cred is not None:
+                _record_engine_id(db, engine_cred, observed_engine_id, corr)
 
         # Determine vendor, model and firmware from scan data (overrides now live on Device)
         vendor = (sw.vendor if sw else "generic")

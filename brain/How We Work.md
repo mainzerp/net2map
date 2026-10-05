@@ -11,6 +11,11 @@ work is done; only the user moves them to `Done`.
 - Backend tests: `cd backend && python -m pytest tests/ -v` (CI uses
   `DATABASE_URL=sqlite:///./test.db` and a dummy SECRET_TOKEN; pytest.ini enforces
   coverage with `--cov-fail-under=10`).
+  On a host Python 3.13 the 7 `test_snmp_driver.py` cases fail (pysnmp needs
+  `asyncore`); run the suite in a clean container of the built image instead:
+  `docker run --rm --entrypoint sh -e DATABASE_URL=sqlite:///./test.db -e SECRET_TOKEN=test-token switch-map-backend -c "cd /app && python -m pytest tests/ -q -o addopts=''"`.
+  Do not run tests inside the live `netmap-backend` container: its compose env
+  (Redis, JWT) breaks test assumptions.
 - Frontend: `cd frontend && npm run typecheck` and `npm test` (vitest, run mode).
 - Full stack smoke: `docker compose up --build -d` -- UI at http://localhost:3000.
 

@@ -19,6 +19,8 @@ import snmp_scanner as scanner
 SCALAR = scanner.OID_SYS_NAME
 TABLE = scanner.OID_IF_DESCR
 BITMASK = scanner.OID_DOT1Q_VLAN_STATIC_EGRESS
+# Binary engine ID with non-printable bytes (enterprise 47196, MAC format).
+ENGINE_ID_BYTES = bytes.fromhex("80000b85030011223344ff")
 
 
 class LoopbackAgent(asyncio.DatagramProtocol):
@@ -47,6 +49,7 @@ class LoopbackAgent(asyncio.DatagramProtocol):
                     scanner.OID_SYS_DESCR: OctetString("ArubaOS-CX fixture"),
                     scanner.OID_SYS_LOCATION: OctetString("test-rack"),
                     scanner.OID_SYS_OBJECT_ID: api.v2c.ObjectIdentifier("1.3.6.1.4.1.47196"),
+                    scanner.OID_SNMP_ENGINE_ID: OctetString(ENGINE_ID_BYTES),
                 }
                 response_rows = [(oid, values.get(str(oid), NoSuchObject())) for oid, _ in varbinds]
             else:
@@ -103,6 +106,17 @@ def check_credentials():
         from pysnmp.proto.secmod.rfc3826.priv.aes import PysnmpCryptoError as aes_missing
 
         assert not (des_missing or des3_missing or aes_missing)
+        # Engine ID override is passed as securityEngineId; empty means discovery.
+        pinned = scanner.build_auth("v3", v3_username="pinned", v3_auth_password="auth-test-pass",
+                                    v3_priv_password="priv-test-pass", v3_engine_id="80000b85030011223344ff")
+        assert bytes(pinned.securityEngineId) == ENGINE_ID_BYTES
+        config.add_v3_user(engine, pinned.userName, pinned.authentication_protocol, pinned.authentication_key,
+                           pinned.privacy_protocol, pinned.privacy_key,
+                           securityEngineId=pinned.securityEngineId)
+        assert default.securityEngineId is None
+        assert scanner.build_auth("v2c", v3_engine_id="80000b85030011223344ff").communityName == "public"
+        assert scanner.engine_id_to_hex(OctetString(ENGINE_ID_BYTES)) == ENGINE_ID_BYTES.hex()
+        assert scanner.engine_id_to_hex(OctetString(b"\x01\x02")) == ""
         encoded = encoder.encode(Integer32(42))
         decoded, tail = decoder.decode(encoded, asn1Spec=Integer32())
         assert int(decoded) == 42 and not tail
@@ -142,7 +156,10 @@ async def check_udp(scenario):
             assert result.sys_name == "fixture-switch"
             assert result.location == "test-rack"
             assert result.vendor == "aruba_cx"
-            assert agent.requests == 1
+            # Raw binary snmpEngineID must survive as lowercase hex.
+            assert result.engine_id == ENGINE_ID_BYTES.hex(), result.engine_id
+            # System scalars + separate snmpEngineID.0 GET.
+            assert agent.requests == 2
         assert agent.failure is None, agent.failure
     finally:
         transport.close()

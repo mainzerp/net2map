@@ -12,6 +12,8 @@ import {
 } from "../../hooks/api";
 import { Badge, Button, Card, EmptyState, Input, Modal, Select, StatusDot } from "../ui";
 import { ConfirmDeleteModal, Field, SectionHeader, TabLoading } from "./shared";
+import { normalizeEngineId, validateEngineId } from "./engineId";
+import { formatRelativeTime, formatTimestamp } from "../../utils/datetime";
 
 // ── Local interfaces ────────────────────────────────────────────────────────
 interface CredentialForm {
@@ -30,6 +32,7 @@ interface CredentialForm {
   v3_auth_password: string;
   v3_priv_protocol: string;
   v3_priv_password: string;
+  v3_engine_id: string;
 }
 
 interface EditState {
@@ -50,6 +53,7 @@ const EMPTY_FORM: CredentialForm = {
   v3_security_level: "authPriv", v3_username: "",
   v3_auth_protocol: "SHA-256", v3_auth_password: "",
   v3_priv_protocol: "AES-128", v3_priv_password: "",
+  v3_engine_id: "",
 };
 
 function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) {
@@ -95,6 +99,7 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
       v3_security_level: c.v3_security_level, v3_username: c.v3_username,
       v3_auth_protocol: c.v3_auth_protocol, v3_auth_password: unmask(c.v3_auth_password),
       v3_priv_protocol: c.v3_priv_protocol, v3_priv_password: unmask(c.v3_priv_password),
+      v3_engine_id: c.v3_engine_id ?? "",
     });
     setEditState({ id: c.id, open: true });
     setErr("");
@@ -141,17 +146,24 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
     },
   });
 
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setErr("");
-    saveMutation.mutate({ id: editState.id, form });
-  };
-
   const F = form;
   const set = <K extends keyof CredentialForm>(k: K, v: CredentialForm[K]) => setForm((p) => ({ ...p, [k]: v }));
   const isV3 = F.snmp_version === "v3";
   const needAuth = isV3 && F.v3_security_level !== "noAuthNoPriv";
   const needPriv = isV3 && F.v3_security_level === "authPriv";
+  // Engine ID override applies to v3 only; with a profile the profile's version decides.
+  const selectedProfile = F.profile_id != null ? profiles.find((p) => p.id === F.profile_id) : null;
+  const effectiveV3 = F.profile_id != null ? selectedProfile?.snmp_version === "v3" : isV3;
+  const engineIdError = effectiveV3 ? validateEngineId(F.v3_engine_id) : "";
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErr("");
+    if (engineIdError) return;
+    // Engine IDs are only meaningful for v3; an empty override means discovery.
+    const engineId = effectiveV3 ? normalizeEngineId(F.v3_engine_id) : "";
+    saveMutation.mutate({ id: editState.id, form: { ...form, v3_engine_id: engineId } });
+  };
 
   const ignoreButton = (d: TopologyNode) => (
     <Button
@@ -284,6 +296,23 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
                 )}
               </>
             )}
+            {effectiveV3 && (
+              <Field label="Engine ID override (optional)" error={engineIdError || undefined}>
+                <Input
+                  value={F.v3_engine_id}
+                  invalid={!!engineIdError}
+                  onChange={(e) => set("v3_engine_id", e.target.value)}
+                  placeholder="e.g. 80000b8503001122334455"
+                  className="font-mono"
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+                <span className="block mt-1 text-[10px] text-muted leading-relaxed">
+                  Leave empty to use automatic discovery. Discovery still runs; an override only fixes the
+                  engine ID the keys are localized to, for agents that expect a specific one.
+                </span>
+              </Field>
+            )}
             <label className="flex items-center gap-1.5 text-[11px] text-muted cursor-pointer select-none">
               <input type="checkbox" className="accent-accent" checked={F.enabled} onChange={(e) => set("enabled", e.target.checked)} />
               Include in scan
@@ -345,6 +374,31 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
                           ? <> - {c.community}</>
                           : <> - {c.v3_username}</>}
                     </div>
+                    {(c.discovered_engine_id || c.v3_engine_id) && (
+                      <div className="text-[10px] mt-0.5 pl-3.5 flex items-baseline gap-1 flex-wrap min-w-0">
+                        <span className="text-muted">Engine ID</span>
+                        {c.discovered_engine_id ? (
+                          <>
+                            <span className="font-mono text-primary break-all" data-testid="engine-id">
+                              {c.discovered_engine_id}
+                            </span>
+                            {c.engine_id_seen_at && (
+                              <span className="text-muted" title={formatTimestamp(c.engine_id_seen_at)}>
+                                seen {formatRelativeTime(c.engine_id_seen_at)}
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-muted">not yet discovered</span>
+                        )}
+                        {c.v3_engine_id && (
+                          <Badge
+                            tone={c.discovered_engine_id && c.discovered_engine_id !== c.v3_engine_id ? "warning" : "neutral"}
+                            title={`Manual override: ${c.v3_engine_id}`}
+                          >override</Badge>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="flex gap-1.5 justify-end">

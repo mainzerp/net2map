@@ -43,6 +43,17 @@ Arbeitsstand, noch nicht veroeffentlicht; Prototyp fuer das UI-Redesign.
   Bewegung nur kurze Einblendungen.
 - "Auto-Layout" erscheint nur noch, wenn kein Hintergrundbild (Grundriss) fuer
   die Karte hinterlegt ist, damit die manuelle Anordnung nicht verloren geht.
+- SNMP-Engine-ID: Jeder erfolgreiche Scan liest `snmpEngineID.0` und speichert
+  sie (hex) mit Zeitstempel an der Credential, die funktioniert hat (fuer v2c
+  und v3, sofern der Agent sie liefert). Aendert sie sich, erscheint eine
+  Warnung im Log und ein Audit-Eintrag (`engine_id_changed`), da das Geraet
+  ersetzt oder zurueckgesetzt worden sein kann. Optional laesst sich fuer
+  v3-Credentials eine Engine-ID manuell festlegen (5-32 Oktette hex, `0x` und
+  `:` erlaubt); ohne Angabe gilt die automatische Discovery. Die Discovery
+  laeuft auch mit Override; er legt nur die Engine-ID fest, an die die
+  Schluessel gebunden werden. Passt der
+  Override nicht, warnt der Scan mit dem Hinweis, ihn zu entfernen. Anzeige
+  und Eingabe in Settings > Credentials; Migration 018.
 
 ### Aenderungen
 
@@ -55,6 +66,16 @@ Arbeitsstand, noch nicht veroeffentlicht; Prototyp fuer das UI-Redesign.
   mehr nach Kabelanzahl dicker (Anzahl steht im Label); 10M-Links sind bernsteinfarben.
 - Port-Hervorhebungen im Rack-Panel der Karte nutzen Ringe statt Leuchteffekte.
 - Neue Abhaengigkeit `motion` (ca. +31 kB gzip beim Start).
+- API-Versionierung: Alle Backend-Endpunkte liegen jetzt kanonisch unter
+  `/api/v1/...` (nur diese erscheinen in OpenAPI). Der bisherige Praefix
+  `/api/...` bleibt als veralteter Alias erhalten; Antworten darueber tragen
+  `Deprecation: true` und `Link: </api/v1/...>; rel="successor-version"`.
+  `/health`, `/metrics` und `/ws/scan-progress` bleiben unversioniert.
+- Das Frontend sendet alle Requests zentral ueber `/api/v1` (Abbildung in
+  `src/api.ts`, Helfer `apiUrl()`), auch das Kartenhintergrundbild.
+- Auth-Ausnahmen (Login, Refresh, Kartenhintergrund) gelten fuer beide
+  Praefixe; Prometheus-Metriken fassen `/api/x` und `/api/v1/x` in einer Serie
+  (`/api/v1/x`) zusammen.
 
 ## v2.1.2 -- Sitzungs-Sicherheit, Scan-Stabilitaet und UI-Polish
 

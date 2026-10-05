@@ -145,6 +145,14 @@ class Credential(Base):
     v3_priv_protocol   = Column(String, default="AES-128")
     v3_priv_password   = Column(String, default="")
 
+    # ── SNMP engine ID (not secret, stored unencrypted as lowercase hex) ────
+    # Manual override of the authoritative engine ID (v3 only); NULL means
+    # automatic discovery.
+    v3_engine_id         = Column(String, nullable=True)
+    # Engine ID observed via snmpEngineID.0 during the last successful scan.
+    discovered_engine_id = Column(String, nullable=True)
+    engine_id_seen_at    = Column(DateTime, nullable=True)
+
     # Optional reference to a shared profile (overrides per-device SNMP fields when set)
     profile_id = Column(Integer, ForeignKey("snmp_profiles.id"), nullable=True)
     profile    = relationship("SnmpProfile", back_populates="credentials")

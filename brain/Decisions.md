@@ -127,3 +127,22 @@
 - **Auto-Layout only without a floor-plan background.** The map's value is nodes
   placed by hand on the uploaded plan; a full re-layout would destroy that. The
   function stays for maps without a background image.
+
+## API versioning and SNMPv3 engine ID (2026-10-05)
+
+- **Routers are versioned for real, not by path rewriting.** Route decorators drop
+  the literal `/api` prefix; every router is included under `/api/v1` (canonical,
+  in OpenAPI) and again under `/api` as a deprecated alias (`include_in_schema=False`,
+  `Deprecation` + `Link: rel="successor-version"` headers). A future `/api/v2` can
+  then diverge per router. `/health`, `/metrics` and `/ws/*` stay unversioned.
+  The frontend client maps its logical `/api/...` paths to `/api/v1` centrally in
+  `src/api.ts`, so call sites and test mocks keep their logical paths.
+- **SNMPv3 engine ID: observe, do not pin.** PySNMP performs RFC 3414 discovery
+  per engine. The discovered authoritative engine ID is stored per credential for
+  display and change detection (audit/log when it changes, e.g. device replaced);
+  it is not fed back into requests, because a pinned stale ID would break scans
+  after a replacement. A manual `v3_engine_id` override on the credential is
+  applied as `securityEngineId` only when set. Verified: PySNMP 7 still sends its
+  discovery probe with an override, so it does not help agents that ignore
+  discovery; it only fixes the engine ID keys are localized to.
+  Context engine ID / context name stay out of scope until a device needs them.
