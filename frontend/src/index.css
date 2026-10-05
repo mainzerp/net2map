@@ -515,15 +515,19 @@ progress {
    --tile-color by RackElevation via theme/visual.ts speedColor) with a
    slightly darker ink-mixed border; down = hollow tile with a line-strong
    border. Endpoint presence = centered dot (panel color on up tiles, muted on
-   down tiles). 9x9px tiles fit 48 access + 4 uplink ports in two rows of a
-   1U plate inside the 480px rack interior. */
+   down tiles). 10x10px tiles (uplinks 14x10) fit 48 access + 4 uplink ports
+   in two rows of a 1U plate: access 24*10 + 23 gaps = 263px, group gap 4px,
+   uplink group 3 + 1 + 2*14 + 1 = 33px -> 300px of the ~373px port area
+   (480px interior minus ears, LED, U stepper, paddings); height 2*10 + 1 =
+   21px of the 22px plate content height. Device names live in the label
+   column right of the rack, not on the plate. */
 .rack-tile {
   position: relative;
   display: inline-block;
   flex-shrink: 0;
   box-sizing: border-box;
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
   border: 1px solid var(--line-strong);
   border-radius: 2px;
   background-color: transparent;
@@ -538,7 +542,7 @@ progress {
 }
 /* Uplink / SFP tile: same style, wider */
 .rack-tile-uplink {
-  width: 13px;
+  width: 14px;
 }
 /* Compact mode (> 96 ports): small solid tiles, no endpoint marker */
 .rack-tile-compact {
@@ -584,6 +588,38 @@ progress {
   }
 }
 
+/* Label column right of the rack: plan-style annotations. A dashed 1px
+   leader runs from the right rail (small anchor dot on the rail edge) to the
+   label; on shared hover/focus with the faceplate it turns solid accent. */
+.rack-leader {
+  position: relative;
+  flex: none;
+  width: 22px;
+  height: 0;
+  border-top: 1px dashed var(--line-strong);
+  transition: border-color 120ms ease;
+}
+.rack-leader::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: -2px;
+  width: 3px;
+  height: 3px;
+  border-radius: 9999px;
+  background-color: var(--line-strong);
+}
+.rack-label-highlight .rack-leader {
+  border-top-style: solid;
+  border-top-color: var(--accent);
+}
+.rack-label-highlight .rack-leader::before {
+  background-color: var(--accent);
+}
+.rack-plate-highlight {
+  border-color: var(--accent);
+}
+
 /* Port legend under the rack */
 .rack-legend {
   display: flex;
@@ -621,6 +657,9 @@ progress {
 @media (prefers-reduced-motion: reduce) {
   .rack-tile-blink {
     animation: none;
+  }
+  .rack-leader {
+    transition: none;
   }
   .port-ring-pulse {
     animation: none;

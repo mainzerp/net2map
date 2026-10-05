@@ -35,6 +35,9 @@ Arbeitsstand, noch nicht veroeffentlicht; Prototyp fuer das UI-Redesign.
   Ports als stilisierte Kacheln: gefuellt in Geschwindigkeitsfarbe wenn aktiv,
   hohl wenn inaktiv, Punkt fuer angeschlossene Endgeraete, Uplinks rechts
   abgesetzt; Legende unter dem Rack. Optionaler "Activity"-Schalter.
+- Geraetename und Typenbezeichnung stehen rechts neben dem Rack auf Hoehe des
+  Geraets, verbunden ueber eine Hinweislinie; Hover hebt Front und Beschriftung
+  gemeinsam hervor, Klick oeffnet die Details.
 - Ruhige Animationen mit `motion` 13.4.4: Inspector, Befehlspalette, Dialoge,
   Toasts, Seitenwechsel, Dashboard-Aufbau und Mobil-Menue. Bei reduzierter
   Bewegung nur kurze Einblendungen.

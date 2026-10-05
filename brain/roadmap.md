@@ -46,6 +46,7 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Done
 
+- Rack device labels beside the rack · priority: done · area: frontend · v2.2.0
 - Cartography phase 4-5: racks (stylized port tiles) and motion · priority: done · area: frontend · v2.2.0
 - Hide Auto-Layout when a floor-plan background is set · priority: done · area: frontend · v2.2.0
 - Cartography phase 3: topology map · priority: done · area: frontend · v2.2.0

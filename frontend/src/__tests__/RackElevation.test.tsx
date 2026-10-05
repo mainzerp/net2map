@@ -121,8 +121,78 @@ describe("RacksPage / RackElevation", () => {
     expect(row2).toBe(7);
     expect((fp2.parentElement as HTMLElement).style.top).toBe(`${row2 * U_PX + 1}px`);
 
-    expect(within(fp1).getByText("sw-bottom")).toBeTruthy();
-    expect(within(fp2).getByText("sw-mid")).toBeTruthy();
+    // Visible names moved to the label column; faceplates keep them in their
+    // accessible name only.
+    expect(within(fp1).queryByText("sw-bottom")).toBeNull();
+    expect(within(fp2).queryByText("sw-mid")).toBeNull();
+    expect(fp1.getAttribute("aria-label")).toBe("sw-bottom - open details");
+    expect(fp2.getAttribute("aria-label")).toBe("sw-mid - open details");
+    expect(within(screen.getByTestId("rack-label-1")).getByText("sw-bottom")).toBeTruthy();
+    expect(within(screen.getByTestId("rack-label-2")).getByText("sw-mid")).toBeTruthy();
+  });
+
+  it("renders one label per placed device with name and model, aligned with its faceplate", async () => {
+    const topo = structuredClone(TOPOLOGY);
+    topo.nodes[0] = { ...topo.nodes[0], model: "CX 6300" };
+    topo.nodes[1] = { ...topo.nodes[1], model: "USW-24" };
+    mockApiGet.mockImplementation((path: string) => {
+      if (path === "/api/topology") return Promise.resolve(structuredClone(topo));
+      return Promise.resolve([]);
+    });
+
+    renderWithRouter(<RacksPage />, { route: "/racks?rack=1" });
+    const column = await screen.findByTestId("rack-label-column");
+
+    // Only placed devices get a label; tray devices do not.
+    expect(column.querySelectorAll("[data-testid^='rack-label-button-']")).toHaveLength(2);
+    expect(screen.queryByTestId("rack-label-3")).toBeNull();
+    expect(screen.queryByTestId("rack-label-4")).toBeNull();
+
+    for (const [id, name, model] of [
+      [1, "sw-bottom", "CX 6300"],
+      [2, "sw-mid", "USW-24"],
+    ] as const) {
+      const label = screen.getByTestId(`rack-label-${id}`);
+      const fp = screen.getByTestId(`faceplate-${id}`);
+      expect(within(label).getByText(name)).toBeTruthy();
+      expect(within(label).getByText(model)).toBeTruthy();
+      // Same top as the faceplate (both measured from the rack body top).
+      expect(label.style.top).toBe((fp.parentElement as HTMLElement).style.top);
+      expect(label.style.top).not.toBe("");
+      // One U high: multi-U devices are annotated at their top U.
+      expect(label.style.height).toBe(`${U_PX - 2}px`);
+      const button = within(label).getByRole("button", { name: `Open details for ${name}` });
+      expect(button.getAttribute("title")).toBe(`${name} - ${model}`);
+    }
+  });
+
+  it("highlights the faceplate while its label is hovered or focused, and vice versa", async () => {
+    renderWithRouter(<RacksPage />, { route: "/racks?rack=1" });
+    const fp = await screen.findByTestId("faceplate-2");
+    const label = screen.getByTestId("rack-label-2");
+    const button = screen.getByRole("button", { name: "Open details for sw-mid" });
+
+    expect(fp.className).not.toContain("rack-plate-highlight");
+    fireEvent.mouseEnter(button);
+    expect(fp.className).toContain("rack-plate-highlight");
+    expect(label.className).toContain("rack-label-highlight");
+    // Other devices are not highlighted.
+    expect(screen.getByTestId("faceplate-1").className).not.toContain("rack-plate-highlight");
+    fireEvent.mouseLeave(button);
+    expect(fp.className).not.toContain("rack-plate-highlight");
+    expect(label.className).not.toContain("rack-label-highlight");
+
+    fireEvent.focus(button);
+    expect(fp.className).toContain("rack-plate-highlight");
+    fireEvent.blur(button);
+    expect(fp.className).not.toContain("rack-plate-highlight");
+
+    // Hovering the faceplate highlights the label.
+    fireEvent.mouseEnter(fp);
+    expect(label.className).toContain("rack-label-highlight");
+    expect(within(label).getByText("sw-mid").className).toContain("text-accent");
+    fireEvent.mouseLeave(fp);
+    expect(label.className).not.toContain("rack-label-highlight");
   });
 
   it("lists unplaced and rack-less devices in the tray, not in the rack", async () => {
@@ -333,6 +403,42 @@ describe("RackElevation faceplate click vs drag", () => {
     expect(screen.getByTestId("location").textContent).toBe("?rack=1");
     // The drag ended: the faceplate is no longer dimmed.
     expect(fp.className).not.toContain("opacity-40");
+  });
+
+  it("opens the inspector when a device label is clicked, without starting a drag", async () => {
+    renderRacks();
+    const button = await screen.findByRole("button", { name: "Open details for sw-mid" });
+
+    fireEvent.pointerDown(button, { button: 0, clientX: 600, clientY: 100 });
+    // No drag started: neither the faceplate nor the label is dimmed and no
+    // drop ghost appears.
+    expect(screen.getByTestId("faceplate-2").className).not.toContain("opacity-40");
+    expect(screen.getByTestId("rack-label-2").className).not.toContain("opacity-40");
+    fireEvent.pointerMove(window, { clientX: 600, clientY: 160 });
+    expect(screen.queryByTestId("drop-ghost")).toBeNull();
+    fireEvent.pointerUp(window, { button: 0, clientX: 600, clientY: 160 });
+    fireEvent.click(button);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("location").textContent).toBe("?rack=1&inspect=device:2"),
+    );
+    expect(mockApiPatch).not.toHaveBeenCalled();
+  });
+
+  it("dims the dragged device's label while the faceplate is dragged", async () => {
+    renderRacks();
+    const fp = await screen.findByTestId("faceplate-2");
+    const label = screen.getByTestId("rack-label-2");
+    const topBefore = label.style.top;
+
+    fireEvent.pointerDown(fp, { button: 0, clientX: 100, clientY: 100 });
+    expect(label.className).toContain("opacity-40");
+    expect(screen.getByTestId("rack-label-1").className).not.toContain("opacity-40");
+    fireEvent.pointerMove(window, { clientX: 100, clientY: 140 });
+    // The label stays in place (no ghost following).
+    expect(label.style.top).toBe(topBefore);
+    fireEvent.pointerUp(window, { button: 0, clientX: 100, clientY: 140 });
+    expect(label.className).not.toContain("opacity-40");
   });
 
   it("opens the inspector with Enter on a focused faceplate", async () => {
