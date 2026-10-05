@@ -5,6 +5,17 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Backlog
 
+- Cartography phase 2: Ctrl+K command palette and shared detail drawer · priority: P1 · area: frontend
+  Outcome: search devices/IP/MAC/port from anywhere; one right-side inspector
+  opened from map, tables and racks instead of page hops.
+  Verify: typecheck/tests/build; palette finds a known MAC and opens its drawer.
+- Cartography phase 3-5: map, racks, motion · priority: P2 · area: frontend
+  Ink-stroke cables by speed, semantic zoom, scan sweep on the map; realistic rack
+  faceplates with port LEDs; `motion` transitions honoring reduced-motion.
+- Cartography polish leftovers · priority: P3 · area: frontend
+  22 ad-hoc rounded-lg panels -> rounded-card, bg-black overlays -> token scrim,
+  vendor label contrast on map (<4.5:1), dark primary hover 3.95:1, ASCII vendor tags.
+
 - Persistent database fencing across Redis lease changes · priority: P2 · area: backend
   Observed lease loss, missing-client split brain and orphan finalizers are fixed
   in the security follow-up. Commit/post-flush checks do not provide an atomic
@@ -40,15 +51,6 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 (none)
 
 ## Testing
-
-- UI redesign prototype "Cartography" (Billio palette) · priority: P1 · area: frontend
-  Done: paper-light default + ink-night dark tokens (soft/sidebar/radius/shadow),
-  system font, lucide-react 1.48.0 nav icons, hardcoded chrome colors removed,
-  /styleguide page, dashboard rebuilt (status sentence, scan bar, attention list).
-  Passed: frontend typecheck, 65 vitest tests, build. Not yet viewed in a browser.
-  User review: `cd frontend && npm run dev` (backend on :8000) -> /styleguide and /
-  in both themes. Then decide phases 2-5 (shell + Ctrl+K palette, map, racks, motion).
-  Open polish: 22 ad-hoc rounded-lg panels, bg-black overlays, vendor label contrast.
 
 - Close remaining security gaps and gate CI builds (2026-10-01) · priority: P1 · area: security
   SNMP/frontend migrations, live WebSocket revocation and scan cleanup are implemented.
@@ -119,6 +121,8 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
   verification pending.
 
 ## Done
+
+- UI redesign prototype "Cartography" (Billio palette) · priority: done · area: frontend · v2.2.0 (03426f4)
 
 - Endpoint table separation · priority: done · area: full-stack · v1.16.0
 - TypeScript migration, component tests, lazy loading, toasts, keyboard shortcuts ·
