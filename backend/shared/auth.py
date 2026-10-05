@@ -53,7 +53,7 @@ _AUTH_EXEMPT_PATHS = {"/health"}
 # API paths exempt from authentication, relative to the version prefix so that
 # every mount ("/api/v1/...", the legacy "/api/..." alias, future versions)
 # shares one list.
-_AUTH_EXEMPT_API_PATHS = {"/auth/login", "/map-background", "/auth/refresh"}
+_AUTH_EXEMPT_API_PATHS = {"/auth/login", "/map-background", "/auth/refresh", "/auth/logout"}
 
 
 def _is_auth_exempt(path: str) -> bool:

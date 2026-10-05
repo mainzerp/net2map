@@ -130,3 +130,67 @@ class TestAuditPurgeTask:
         db.commit()
         tasks.purge_old_audit_logs()
         assert db.query(AuditLog).count() == 0
+
+
+class TestAuditRetentionSetting:
+    """The audit_retention_days app setting overrides AUDIT_RETENTION_DAYS."""
+
+    def _set(self, db, value):
+        from database import AppSetting
+        db.add(AppSetting(key="audit_retention_days", value=value))
+        db.commit()
+
+    def _add_entry(self, db, age_days):
+        db.add(AuditLog(username="u", action="a", resource="r", resource_id="1", details={},
+                        timestamp=datetime.now(timezone.utc) - timedelta(days=age_days)))
+        db.commit()
+
+    def test_env_default_without_db_setting(self, db, monkeypatch):
+        from config import settings
+        from shared.audit import get_audit_retention_days
+        monkeypatch.setattr(settings, "audit_retention_days", 42)
+        assert get_audit_retention_days(db) == 42
+
+    def test_db_setting_wins(self, db, monkeypatch):
+        from config import settings
+        from shared.audit import get_audit_retention_days
+        monkeypatch.setattr(settings, "audit_retention_days", 90)
+        self._set(db, " 7 ")
+        assert get_audit_retention_days(db) == 7
+
+    def test_invalid_db_setting_falls_back_to_env(self, db, monkeypatch):
+        from config import settings
+        from database import AppSetting
+        from shared.audit import get_audit_retention_days
+        monkeypatch.setattr(settings, "audit_retention_days", 30)
+        for bad in ("abc", "0", "-5", "1.5", ""):
+            db.query(AppSetting).delete()
+            self._set(db, bad)
+            assert get_audit_retention_days(db) == 30, bad
+
+    def test_purge_task_uses_db_setting(self, db, monkeypatch):
+        import tasks
+        from config import settings
+        monkeypatch.setattr(settings, "audit_retention_days", 90)
+        self._set(db, "10")
+        self._add_entry(db, 20)
+        self._add_entry(db, 5)
+        tasks.purge_old_audit_logs()
+        assert db.query(AuditLog).count() == 1
+
+    def test_purge_task_disabled_by_env_without_db_setting(self, db, monkeypatch):
+        import tasks
+        from config import settings
+        monkeypatch.setattr(settings, "audit_retention_days", 0)
+        self._add_entry(db, 500)
+        tasks.purge_old_audit_logs()
+        assert db.query(AuditLog).count() == 1
+
+    def test_purge_endpoint_default_uses_db_setting(self, client, jwt_headers, db, monkeypatch):
+        from config import settings
+        monkeypatch.setattr(settings, "audit_retention_days", 90)
+        self._set(db, "10")
+        self._add_entry(db, 20)
+        resp = client.delete("/api/v1/audit-logs/purge", headers=jwt_headers)
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] == 1

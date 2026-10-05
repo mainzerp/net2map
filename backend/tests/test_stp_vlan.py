@@ -590,4 +590,4 @@ def test_alembic_single_head():
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory(str(BACKEND / "alembic"))
-    assert script.get_heads() == ["019"]
+    assert len(script.get_heads()) == 1

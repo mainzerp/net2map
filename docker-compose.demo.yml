@@ -18,6 +18,10 @@ services:
   backend:
     image: switch-map-backend   # reuse already-built image, no rebuild
     container_name: netmap-demo-backend
+    volumes:
+      # seed_db.py is excluded from the image (backend/.dockerignore) so it can
+      # never run in production; the demo mounts it read-only for manual seeding.
+      - ./backend/seed_db.py:/app/seed_db.py:ro
 
   celery-worker:
     image: switch-map-backend

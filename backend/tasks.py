@@ -1,7 +1,6 @@
 """Celery tasks for NetMap background scan execution."""
 import asyncio
 import logging
-import time
 from datetime import datetime, timezone
 
 from celery.exceptions import Retry
@@ -14,6 +13,7 @@ from schemas import ScanResult
 from shared.state import (
     _log_event,
     acquire_scan_lock,
+    claim_scheduled_dispatch,
     is_cancel_requested,
     release_scan_lock,
     update_scan_job,
@@ -103,12 +103,13 @@ def run_scan_task(self, job_id: str, dry_run: bool = False, scan_type: str = "fu
         raise terminal_error
 
 
-_last_dispatch = {"discovery": 0, "links": 0, "macs": 0}
-
-
 @celery_app.task
 def scheduler_tick():
-    """Periodic scheduler tick -- replaces _background_scheduler loop body."""
+    """Periodic scheduler tick -- replaces _background_scheduler loop body.
+
+    Per-interval dispatch is claimed in Redis (claim_scheduled_dispatch), so
+    several workers or a restarted beat never dispatch the same interval twice.
+    """
     from scan_engine.scheduler import _dispatch_scheduled_scan, _read_scheduler_intervals
 
     db = SessionLocal()
@@ -117,42 +118,35 @@ def scheduler_tick():
     finally:
         db.close()
 
-    now = time.time()
-
-    if intervals["macs"] > 0 and (now - _last_dispatch["macs"]) >= intervals["macs"]:
-        _log_event(logging.INFO, "scheduler.macs.start")
-        _dispatch_scheduled_scan("macs")
-        _last_dispatch["macs"] = time.time()
-
-    if intervals["links"] > 0 and (now - _last_dispatch["links"]) >= intervals["links"]:
-        _log_event(logging.INFO, "scheduler.links.start")
-        _dispatch_scheduled_scan("links")
-        _last_dispatch["links"] = time.time()
-
-    if intervals["discovery"] > 0 and (now - _last_dispatch["discovery"]) >= intervals["discovery"]:
-        _log_event(logging.INFO, "scheduler.discovery.start")
-        _dispatch_scheduled_scan("discovery")
-        _last_dispatch["discovery"] = time.time()
+    # Dispatch in priority order: macs > links > discovery
+    for kind in ("macs", "links", "discovery"):
+        if intervals[kind] > 0 and claim_scheduled_dispatch(kind, intervals[kind]):
+            _log_event(logging.INFO, "scheduler.%s.start" % kind)
+            _dispatch_scheduled_scan(kind)
 
 
 @celery_app.task
 def purge_old_audit_logs():
-    """Delete audit log entries older than AUDIT_RETENTION_DAYS."""
+    """Delete audit log entries older than the effective retention.
+
+    Retention comes from the ``audit_retention_days`` app setting when it is a
+    positive integer, else AUDIT_RETENTION_DAYS (see get_audit_retention_days).
+    """
     from datetime import datetime, timedelta, timezone
 
-    from config import settings
     from database import AuditLog, SessionLocal
+    from shared.audit import get_audit_retention_days
 
-    if settings.audit_retention_days <= 0:
-        return
-
-    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.audit_retention_days)
     db = SessionLocal()
     try:
+        retention_days = get_audit_retention_days(db)
+        if retention_days <= 0:
+            return
+        cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
         deleted = db.query(AuditLog).filter(AuditLog.timestamp < cutoff).delete()
         db.commit()
         _log_event(logging.INFO, "audit.purge.complete", deleted=deleted,
-                   retention_days=settings.audit_retention_days)
+                   retention_days=retention_days)
     except Exception as exc:
         db.rollback()
         _log_event(logging.ERROR, "audit.purge.error", error=str(exc))

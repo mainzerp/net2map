@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Column,
     DateTime,
@@ -373,6 +374,19 @@ class DryRunResult(Base):
     scan_run_id  = Column(Integer, ForeignKey("scan_runs.id", ondelete="CASCADE"), nullable=True)
     preview_json = Column(JSONB, default=list)
     created_at   = Column(DateTime, server_default=func.now())
+
+
+class LeaseFence(Base):
+    """Highest fencing token that committed under a distributed lease.
+
+    Guarded transactions upsert their lease token here first; a token lower
+    than the stored one belongs to a stale lease holder and is rejected.
+    """
+    __tablename__ = "lease_fences"
+
+    name       = Column(String, primary_key=True)
+    token      = Column(BigInteger, nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 def _seed_default_settings():

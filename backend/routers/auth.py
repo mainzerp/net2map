@@ -234,22 +234,42 @@ def delete_user(user_id: int, request: Request, db: Session = Depends(get_db)):
 
 @router.post("/auth/logout")
 def logout_token(request: Request):
-    """Blacklist the current token so it can no longer be used."""
+    """Blacklist the current token so it can no longer be used.
+
+    Idempotent for genuine tokens: a valid, expired or already-revoked token
+    yields 200 with a JSON body (kept for frontend compatibility). A missing,
+    malformed or wrongly signed bearer token is rejected with 401 instead of
+    pretending a successful logout. The path is exempt from the app-wide auth
+    dependency (shared/auth.py), so this handler validates the token itself.
+    """
+    import time
+
+    import shared.auth as shared_auth
+
     auth_header = request.headers.get("authorization", "")
     if not auth_header.startswith("Bearer "):
         api_error(401, "AUTH_REQUIRED", "Authentication required")
-    token = auth_header[7:]
+    token = auth_header[7:].strip()
+    if not token:
+        api_error(401, "AUTH_REQUIRED", "Authentication required")
+    legacy = shared_auth._LEGACY_TOKEN
+    if legacy and secrets.compare_digest(token.encode(), legacy.encode()):
+        return {"status": "ok"}  # Static legacy token cannot be revoked per session
+    if not JWT_SECRET:
+        if legacy:
+            api_error(401, "AUTH_INVALID", "Invalid token")
+        return {"status": "ok"}  # Authentication disabled -- no sessions exist
     try:
         payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        jti = payload.get("jti")
-        exp = payload.get("exp", 0)
-        if jti:
-            import time
-            remaining = max(0, exp - int(time.time()))
-            if not blacklist_token(jti, remaining):
-                api_error(503, "AUTH_UNAVAILABLE", "Session revocation service unavailable")
+    except pyjwt.ExpiredSignatureError:
+        return {"status": "ok"}  # Already unusable -- nothing left to revoke
     except pyjwt.InvalidTokenError:
-        pass  # Token already invalid/expired -- no-op
+        api_error(401, "AUTH_INVALID", "Invalid token")
+    jti = payload.get("jti")
+    if jti:
+        remaining = max(0, int(payload.get("exp", 0)) - int(time.time()))
+        if not blacklist_token(jti, remaining):
+            api_error(503, "AUTH_UNAVAILABLE", "Session revocation service unavailable")
     return {"status": "ok"}
 
 

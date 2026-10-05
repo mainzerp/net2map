@@ -65,10 +65,18 @@ services:
       # Trusted proxies for X-Forwarded-For (rate limiting sees real client IPs).
       # Defaults to "*" (any upstream) -- set to your reverse-proxy CIDR,
       # e.g. UVICORN_FORWARDED_ALLOW_IPS: "172.16.0.0/12"
+      UVICORN_FORWARDED_ALLOW_IPS: "${UVICORN_FORWARDED_ALLOW_IPS:-*}"
+      # uvicorn worker processes; >1 is safe because REDIS_URL is set.
+      UVICORN_WORKERS: "${UVICORN_WORKERS:-1}"
       SECRET_TOKEN: "${SECRET_TOKEN:?Set SECRET_TOKEN in .env}"
       JWT_SECRET: "${JWT_SECRET:-}"
+      JWT_EXPIRY_HOURS: "${JWT_EXPIRY_HOURS:-24}"
       DEFAULT_ADMIN_PASSWORD: "${DEFAULT_ADMIN_PASSWORD:?Set DEFAULT_ADMIN_PASSWORD in .env}"
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-}"
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+      REQUEST_LOG_ENABLED: "${REQUEST_LOG_ENABLED:-false}"
+      AUDIT_RETENTION_DAYS: "${AUDIT_RETENTION_DAYS:-90}"
+      OPENAPI_ENABLED: "${OPENAPI_ENABLED:-true}"
     volumes:
       - netmap-data:/data          # persistent storage for map background images etc.
     networks:
@@ -85,6 +93,7 @@ services:
         condition: service_healthy
     logging: *default-logging
     healthcheck:
+      # Liveness: database + Redis only; Celery worker status is /health?deep=1.
       test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")' || exit 1"]
       interval: 10s
       timeout: 5s
@@ -103,6 +112,8 @@ services:
       SECRET_TOKEN: "${SECRET_TOKEN:?Set SECRET_TOKEN in .env}"
       JWT_SECRET: "${JWT_SECRET:-}"
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-}"
+      # Fallback retention for the audit purge task (DB setting wins when set).
+      AUDIT_RETENTION_DAYS: "${AUDIT_RETENTION_DAYS:-90}"
       RUN_MIGRATIONS: "false"
     volumes:
       - netmap-data:/data

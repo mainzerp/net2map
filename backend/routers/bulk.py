@@ -63,6 +63,35 @@ def _normalize_optional_int(value):
     return int(txt)
 
 
+# Leading characters that spreadsheet applications interpret as a formula
+# (OWASP CSV injection guidance).
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_escape_cell(value):
+    """Neutralize a CSV cell against formula injection.
+
+    Only string cells are touched; numbers and booleans are written as-is so
+    e.g. negative integers are never quoted. Strings whose leading quotes are
+    followed by a formula character also get one extra quote so the
+    import-side unescape is an exact inverse.
+    """
+    if isinstance(value, str) and value.lstrip("'").startswith(_CSV_FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
+def _csv_unescape_cell(value):
+    """Inverse of ``_csv_escape_cell`` for cells read from a CSV import."""
+    if (
+        isinstance(value, str)
+        and value.startswith("'")
+        and value.lstrip("'").startswith(_CSV_FORMULA_PREFIXES)
+    ):
+        return value[1:]
+    return value
+
+
 def _parse_bulk_rows(kind: str, body: BulkImportRequest) -> List[dict]:
     if body.format == "json":
         parsed = json.loads(body.data or "[]")
@@ -73,7 +102,10 @@ def _parse_bulk_rows(kind: str, body: BulkImportRequest) -> List[dict]:
         rows = parsed
     else:
         reader = csv.DictReader(io.StringIO(body.data or ""))
-        rows = list(reader)
+        rows = [
+            {k: _csv_unescape_cell(v) for k, v in (src or {}).items()}
+            for src in reader
+        ]
 
     normalized: List[dict] = []
     for src in rows:
@@ -126,7 +158,7 @@ def _serialize_bulk_rows(kind: str, rows: List[dict], fmt: str) -> str:
     writer = csv.DictWriter(buf, fieldnames=fieldnames)
     writer.writeheader()
     for row in rows:
-        writer.writerow({k: row.get(k, "") for k in fieldnames})
+        writer.writerow({k: _csv_escape_cell(row.get(k, "")) for k in fieldnames})
     return buf.getvalue()
 
 

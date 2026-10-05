@@ -36,9 +36,18 @@ from scan_engine.dns import _resolve_host, _resolve_ip
 from scan_engine.ping import _build_ping_cmd
 from schemas import ScanResult, ScanSwitchMetric
 from shared.crypto import decrypt
+from shared.fencing import apply_fence
 from shared.file_settings import _read_dns_settings, _read_scan_settings
-from shared.metrics import DEVICE_COUNT, ENDPOINT_COUNT, PORT_COUNT, SCAN_ACTIVE, SCAN_DURATION, SCAN_TOTAL
-from shared.state import _log_event, renew_scan_lock
+from shared.metrics import (
+    DEVICE_COUNT,
+    ENDPOINT_COUNT,
+    PORT_COUNT,
+    SCAN_ACTIVE,
+    SCAN_DURATION,
+    SCAN_TOTAL,
+    STALE_LEASE_REJECTIONS,
+)
+from shared.state import SCAN_LOCK_FENCE_NAME, _log_event, fence_token_of, renew_scan_lock
 from snmp_scanner import (
     SwitchData,
     auto_layout,
@@ -65,6 +74,10 @@ class ScanOwnershipLost(RuntimeError):
     """The scan must stop after losing its distributed lease."""
 
 
+class StaleLeaseError(ScanOwnershipLost):
+    """The database rejected a transaction whose lease fencing token is stale."""
+
+
 class ScanFinalizationAborted(RuntimeError):
     """An externally cancelled coroutine must stop its worker transaction."""
 
@@ -72,8 +85,30 @@ class ScanFinalizationAborted(RuntimeError):
 class _ScanLease:
     def __init__(self, token):
         self.token = token
+        self.fence = fence_token_of(token)
         self.lost = threading.Event()
         self.aborted = threading.Event()
+
+    def fence_transaction(self, connection, corr: Optional[str] = None):
+        """Write this lease's fencing token in the current DB transaction.
+
+        Authoritative guard: the Redis checks are only an early exit, the
+        database rejects the transaction when a newer lease holder wrote.
+        """
+        if self.fence is None:
+            return
+        if apply_fence(connection, SCAN_LOCK_FENCE_NAME, self.fence):
+            return
+        self.lost.set()
+        STALE_LEASE_REJECTIONS.labels(lease=SCAN_LOCK_FENCE_NAME).inc()
+        _log_event(
+            logging.WARNING,
+            "scan.lease.stale_token_rejected",
+            correlation_id=corr,
+            lease=SCAN_LOCK_FENCE_NAME,
+            fence_token=self.fence,
+        )
+        raise StaleLeaseError("Scan lease fencing token %d is stale" % self.fence)
 
     def check(self):
         if self.lost.is_set():
@@ -91,23 +126,51 @@ def _guard_scan_transactions(finalize):
     def guarded(db, **kwargs):
         lease = kwargs.get("lease") or _ScanLease(kwargs.get("lock_token"))
         kwargs["lease"] = lease
+        corr = kwargs.get("corr")
+        # Root transaction that already carries this lease's fencing token.
+        fenced = {"tx": None}
+
+        def ensure_fenced(session):
+            if lease.fence is None:
+                return
+            # Acquiring the connection may begin the transaction and fence it
+            # via after_begin; only fence explicitly when that did not happen.
+            connection = session.connection()
+            if session.get_transaction() is not fenced["tx"]:
+                lease.fence_transaction(connection, corr)
+                fenced["tx"] = session.get_transaction()
+
+        def after_begin(session, transaction, connection):
+            # Fence first, so on PostgreSQL the fence row lock is held for
+            # the whole transaction and concurrent lease holders serialize.
+            if lease.fence is None or transaction.nested:
+                return
+            lease.fence_transaction(connection, corr)
+            fenced["tx"] = session.get_transaction()
 
         def before_commit(session):
             lease.check()
+            ensure_fenced(session)
 
         def after_flush(session, flush_context):
             # A large flush can outlive the lease checked by before_commit.
             lease.check()
 
+        event.listen(db, "after_begin", after_begin)
         event.listen(db, "before_commit", before_commit)
         event.listen(db, "after_flush_postexec", after_flush)
         try:
             lease.check()
+            if db.in_transaction():
+                # A transaction opened before the guard (scan body reads) is
+                # fenced now, before any guarded write joins it.
+                ensure_fenced(db)
             return finalize(db, **kwargs)
         except BaseException:
             db.rollback()
             raise
         finally:
+            event.remove(db, "after_begin", after_begin)
             event.remove(db, "before_commit", before_commit)
             event.remove(db, "after_flush_postexec", after_flush)
 
@@ -231,39 +294,40 @@ async def _execute_scan_body(
             cred_ips = {c.ip for c in credentials}
             # Load all profiles to try for each range IP
             all_profiles = db.query(SnmpProfile).order_by(SnmpProfile.id).all()
+            # Decrypt once per scan; the list is shared read-only by all range targets.
+            if all_profiles:
+                profiles_data = [
+                    {
+                        "profile_id": p.id,
+                        "profile_label": p.label,
+                        "snmp_version": p.snmp_version,
+                        "community": decrypt(p.community),
+                        "v3_security_level": p.v3_security_level,
+                        "v3_username": p.v3_username,
+                        "v3_auth_protocol": p.v3_auth_protocol,
+                        "v3_auth_password": decrypt(p.v3_auth_password),
+                        "v3_priv_protocol": p.v3_priv_protocol,
+                        "v3_priv_password": decrypt(p.v3_priv_password),
+                    }
+                    for p in all_profiles
+                ]
+            else:
+                # No profiles defined - try SNMPv2c public as fallback
+                profiles_data = [{
+                    "profile_id": None,
+                    "profile_label": "default-public",
+                    "snmp_version": "v2c",
+                    "community": "public",
+                    "v3_security_level": "authPriv",
+                    "v3_username": "",
+                    "v3_auth_protocol": "SHA-256",
+                    "v3_auth_password": "",
+                    "v3_priv_protocol": "AES-128",
+                    "v3_priv_password": "",
+                }]
             for ip in range_ips:
                 if ip in cred_ips or ip in ignored_ips:
                     continue  # already covered by existing credential
-                if all_profiles:
-                    profiles_data = [
-                        {
-                            "profile_id": p.id,
-                            "profile_label": p.label,
-                            "snmp_version": p.snmp_version,
-                            "community": decrypt(p.community),
-                            "v3_security_level": p.v3_security_level,
-                            "v3_username": p.v3_username,
-                            "v3_auth_protocol": p.v3_auth_protocol,
-                            "v3_auth_password": decrypt(p.v3_auth_password),
-                            "v3_priv_protocol": p.v3_priv_protocol,
-                            "v3_priv_password": decrypt(p.v3_priv_password),
-                        }
-                        for p in all_profiles
-                    ]
-                else:
-                    # No profiles defined - try SNMPv2c public as fallback
-                    profiles_data = [{
-                        "profile_id": None,
-                        "profile_label": "default-public",
-                        "snmp_version": "v2c",
-                        "community": "public",
-                        "v3_security_level": "authPriv",
-                        "v3_username": "",
-                        "v3_auth_protocol": "SHA-256",
-                        "v3_auth_password": "",
-                        "v3_priv_protocol": "AES-128",
-                        "v3_priv_password": "",
-                    }]
                 range_targets.append({
                     "ip": ip,
                     "label": ip,
@@ -901,6 +965,10 @@ def _finalize_scan_db(
                 # of a ping-only observation (would erase manual overrides).
                 device.vendor = device.vendor or vendor or "generic"
                 device.model = model or device.model
+                # A ping reply is a sighting too: keep last_seen in step with
+                # ping_status="online" so the dashboard never shows an online
+                # device with a stale "last seen" timestamp.
+                device.last_seen = datetime.now(timezone.utc)
             device.ping_status = ping_status
             device.ping_rtt_ms = ping_rtt if ping_ok else 0
             device.last_ping = datetime.now(timezone.utc)

@@ -5,9 +5,9 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from config import settings
 from database import AuditLog, get_db
 from schemas import AuditLogOut
+from shared.audit import get_audit_retention_days
 from shared.auth import require_role
 from shared.errors import api_error
 
@@ -27,7 +27,7 @@ def list_audit_logs(limit: int = 100, db: Session = Depends(get_db)):
 @router.delete("/audit-logs/purge",
                dependencies=[require_role("admin")])
 def purge_audit_logs(days: Optional[int] = None, db: Session = Depends(get_db)):
-    retention = days if days is not None else settings.audit_retention_days
+    retention = days if days is not None else get_audit_retention_days(db)
     if retention <= 0:
         api_error(400, "INVALID_RETENTION", "days must be a positive integer", field="days")
     cutoff = datetime.now(timezone.utc) - timedelta(days=retention)

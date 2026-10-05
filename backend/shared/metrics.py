@@ -7,5 +7,10 @@ SCAN_ACTIVE = Gauge("netmap_scans_active", "Currently running scans")
 DEVICE_COUNT = Gauge("netmap_devices_total", "Total discovered devices")
 PORT_COUNT = Gauge("netmap_ports_total", "Total ports", ["status"])
 ENDPOINT_COUNT = Gauge("netmap_endpoints_total", "Total discovered endpoints")
+STALE_LEASE_REJECTIONS = Counter(
+    "netmap_stale_lease_rejections_total",
+    "Transactions rejected by the database because their lease fencing token was stale",
+    ["lease"],
+)
 REQUEST_LATENCY = Histogram("netmap_request_duration_seconds", "HTTP request duration", ["method", "endpoint"])
 REQUEST_TOTAL = Counter("netmap_requests_total", "Total HTTP requests", ["method", "endpoint", "status"])

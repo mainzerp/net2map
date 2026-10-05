@@ -1,18 +1,23 @@
 """FastAPI application entry point -- NetMap backend."""
+import base64
+import hashlib
 import logging
+import re
 import threading
 import time
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from config import rate_limit_storage_uri
 from config import settings as app_settings
 from database import create_tables
 from routers import (
@@ -59,7 +64,14 @@ if CORS_ORIGIN == "*":
         "Set CORS_ORIGIN to the specific frontend URL (e.g. https://netmap.example.com)"
     )
 
-limiter = Limiter(key_func=get_remote_address)
+# Shared Redis storage when REDIS_URL is set so limits hold across uvicorn
+# workers; in-memory otherwise (single process, tests). Router-level limiters
+# pick up the same storage via RATELIMIT_STORAGE_URL (see config.py).
+limiter = Limiter(
+    key_func=get_remote_address,
+    storage_uri=rate_limit_storage_uri(),
+    in_memory_fallback_enabled=bool(app_settings.redis_url),
+)
 
 
 @asynccontextmanager
@@ -92,7 +104,17 @@ async def lifespan(app: FastAPI):
     shutdown_scheduler()
 
 
-app = FastAPI(title="NetMap API", version="1.0.0", dependencies=[Depends(_require_auth)], lifespan=lifespan)
+# Docs routes are registered manually below (docs_url/redoc_url=None) so they
+# can carry a docs-specific Content-Security-Policy.
+app = FastAPI(
+    title="NetMap API",
+    version="2.2.0",
+    dependencies=[Depends(_require_auth)],
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url="/openapi.json" if app_settings.openapi_enabled else None,
+)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -183,6 +205,65 @@ for _api_router in API_ROUTERS:
 @app.get("/metrics", include_in_schema=False)
 def metrics():
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+# ---------------------------------------------------------------------------
+# OpenAPI UI (Swagger UI at /docs, ReDoc at /redoc). FastAPI's HTML loads its
+# assets from cdn.jsdelivr.net and contains an inline bootstrap script, which
+# the strict SPA CSP in frontend/nginx.conf would block. These responses carry
+# their own CSP that allows only those CDN origins plus the sha256 of the
+# inline script; nginx does not add its SPA CSP on the docs paths. The pages
+# are static; API calls made from them still require a bearer token.
+# ---------------------------------------------------------------------------
+_DOCS_CDN = "https://cdn.jsdelivr.net"
+_INLINE_SCRIPT_RE = re.compile(r"<script>(.*?)</script>", re.DOTALL)
+
+
+def _inline_script_hashes(html: str) -> list[str]:
+    return [
+        "'sha256-" + base64.b64encode(hashlib.sha256(body.encode()).digest()).decode() + "'"
+        for body in _INLINE_SCRIPT_RE.findall(html)
+    ]
+
+
+def docs_csp(html: str) -> str:
+    """Content-Security-Policy for a generated Swagger UI / ReDoc page."""
+    script_src = " ".join([_DOCS_CDN, *_inline_script_hashes(html)])
+    return (
+        "default-src 'none'; "
+        f"script-src {script_src}; "
+        f"style-src 'unsafe-inline' {_DOCS_CDN} https://fonts.googleapis.com; "
+        "font-src https://fonts.gstatic.com data:; "
+        f"img-src 'self' data: {_DOCS_CDN} https://fastapi.tiangolo.com; "
+        "connect-src 'self'; "
+        "worker-src blob:; "
+        "frame-ancestors 'self'; base-uri 'none'; form-action 'self'"
+    )
+
+
+def _with_docs_csp(response: HTMLResponse) -> HTMLResponse:
+    response.headers["Content-Security-Policy"] = docs_csp(response.body.decode())
+    return response
+
+
+async def swagger_ui(request):
+    return _with_docs_csp(get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=f"{app.title} - Swagger UI",
+        # Disable the external validator badge (would load from validator.swagger.io).
+        swagger_ui_parameters={"validatorUrl": None, "persistAuthorization": True},
+    ))
+
+
+async def redoc_ui(request):
+    return _with_docs_csp(get_redoc_html(openapi_url=app.openapi_url, title=f"{app.title} - ReDoc"))
+
+
+if app_settings.openapi_enabled:
+    # add_route (not @app.get): plain Starlette routes skip the app-level auth
+    # dependency, matching FastAPI's built-in /openapi.json route.
+    app.add_route("/docs", swagger_ui, include_in_schema=False)
+    app.add_route("/redoc", redoc_ui, include_in_schema=False)
 
 
 @app.exception_handler(Exception)

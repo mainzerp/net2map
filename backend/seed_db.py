@@ -657,7 +657,8 @@ def seed(db: Session):
     total_racks   = db.query(RackModel).count()
     total_cls     = db.query(SwitchClass).count()
 
-    print(f"\n{'─'*52}")
+    # ASCII only: box-drawing characters crash on Windows cp1252 consoles.
+    print(f"\n{'-'*52}")
     print(f"  SNMP Profiles  : {total_profiles:>4}  (2 global profiles)")
     print(f"  Managed Racks  : {total_racks:>4}  (Rack A-E)")
     print(f"  Switch Classes : {total_cls:>4}  (TOR, Access, Aggregation, Core, AP)")
@@ -665,7 +666,7 @@ def seed(db: Session):
     print(f"  Ports          : {total_port:>4}")
     print(f"  LLDP links     : {total_link:>4}")
     print(f"  Credentials    : {total_cred:>4}  (SNMPv3 switches, SNMPv2c APs)")
-    print(f"{'─'*52}")
+    print(f"{'-'*52}")
     print("  Seed complete")
 
     # Invalidate the topology cache: the /api/topology ETag is derived from the

@@ -302,6 +302,18 @@ def normalize_engine_id(value: Optional[str]) -> Optional[str]:
     return v
 
 
+def validate_credential_ip(v: Optional[str]) -> str:
+    """Shared IP/hostname validation for credential create and update."""
+    if v is None:
+        raise ValueError("IP address or hostname is required")
+    v = v.strip()
+    if not v:
+        raise ValueError("IP address or hostname is required")
+    if re.search(r'[\s;|&`$]', v):
+        raise ValueError("IP address contains invalid characters")
+    return v
+
+
 class CredentialBase(BaseModel):
     label:        str
     ip:           str
@@ -335,12 +347,7 @@ class CredentialCreate(CredentialBase):
     @field_validator("ip")
     @classmethod
     def validate_ip(cls, v):
-        v = v.strip()
-        if not v:
-            raise ValueError("IP address or hostname is required")
-        if re.search(r'[\s;|&`$]', v):
-            raise ValueError("IP address contains invalid characters")
-        return v
+        return validate_credential_ip(v)
 
 
 class CredentialUpdate(BaseModel):
@@ -366,6 +373,12 @@ class CredentialUpdate(BaseModel):
     def validate_engine_id(cls, v):
         # Empty string / None clears the override (back to discovery).
         return normalize_engine_id(v)
+
+    @field_validator("ip")
+    @classmethod
+    def validate_ip(cls, v):
+        # Only runs when "ip" is provided; an omitted ip leaves the value unchanged.
+        return validate_credential_ip(v)
 
 
 class CredentialOut(CredentialBase):

@@ -1,0 +1,30 @@
+# Prebuilt-image override: runs the stack from the images CI pushes to GHCR on
+# v* tags (ghcr.io/mainzerp/netmap/backend:<tag> and /frontend:<tag>) instead
+# of building locally. celery-worker and celery-beat use the backend image
+# (same Dockerfile, different command).
+#
+# Usage (NETMAP_VERSION is the git tag, e.g. v1.2.3; there is no "latest" tag):
+#   NETMAP_VERSION=v1.2.3 docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull
+#   NETMAP_VERSION=v1.2.3 docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
+# NETMAP_VERSION can also be set in .env. Private packages need
+# `docker login ghcr.io` first.
+services:
+  backend:
+    image: ghcr.io/mainzerp/netmap/backend:${NETMAP_VERSION:?set NETMAP_VERSION}
+    build: !reset null
+    pull_policy: missing
+
+  celery-worker:
+    image: ghcr.io/mainzerp/netmap/backend:${NETMAP_VERSION:?set NETMAP_VERSION}
+    build: !reset null
+    pull_policy: missing
+
+  celery-beat:
+    image: ghcr.io/mainzerp/netmap/backend:${NETMAP_VERSION:?set NETMAP_VERSION}
+    build: !reset null
+    pull_policy: missing
+
+  frontend:
+    image: ghcr.io/mainzerp/netmap/frontend:${NETMAP_VERSION:?set NETMAP_VERSION}
+    build: !reset null
+    pull_policy: missing

@@ -43,7 +43,11 @@ def _run_scan_job(job_id: str, cancel_event: threading.Event, dry_run: bool = Fa
                           scan_type=scan_type, lock_token=lock_token),
             loop,
         )
-        result = future.result()  # blocks until done
+        # Deliberately no timeout: this dedicated job thread must not release
+        # the scan lock (finally below) while the coroutine still runs. The
+        # scan is bounded by its own cancel_event, per-target SNMP timeouts
+        # and lease checks (it aborts when the lock cannot be renewed).
+        result = future.result()
     except Exception as exc:
         result = ScanResult(
             scanned=0,

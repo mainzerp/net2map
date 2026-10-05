@@ -35,7 +35,116 @@ def test_health_redis_not_configured(client):
         r = client.get("/health")
         data = r.json()
         assert data["checks"]["redis"] == "not_configured"
+        assert "celery" not in data["checks"]
+
+        r = client.get("/health?deep=1")
+        data = r.json()
+        assert r.status_code == 200
         assert data["checks"]["celery"] == "not_configured"
+        assert data["workers"] == "not_configured"
+
+
+def _healthy_redis():
+    mock_redis = MagicMock()
+    mock_redis.ping.return_value = True
+    return mock_redis
+
+
+def test_health_liveness_ignores_missing_celery_worker(client):
+    """Liveness (container healthcheck) stays 200 without a Celery worker."""
+    mock_celery = MagicMock()
+    mock_celery.control.ping.return_value = []
+    with patch("routers.health.get_redis", return_value=_healthy_redis()), \
+         patch("celery_app.celery_app", mock_celery):
+        r = client.get("/health")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["status"] == "ok"
+    assert data["checks"]["redis"] == "ok"
+    assert "workers" not in data
+    mock_celery.control.ping.assert_not_called()
+
+
+def test_health_deep_reports_no_workers_as_503(client):
+    mock_celery = MagicMock()
+    mock_celery.control.ping.return_value = []
+    with patch("routers.health.get_redis", return_value=_healthy_redis()), \
+         patch("celery_app.celery_app", mock_celery):
+        r = client.get("/health?deep=1")
+    assert r.status_code == 503
+    data = r.json()
+    assert data["status"] == "degraded"
+    assert data["workers"] == "none"
+    assert data["checks"]["celery"] == "none"
+
+
+def test_health_deep_ok_with_worker(client):
+    mock_celery = MagicMock()
+    mock_celery.control.ping.return_value = [{"celery@worker": {"ok": "pong"}}]
+    with patch("routers.health.get_redis", return_value=_healthy_redis()), \
+         patch("celery_app.celery_app", mock_celery):
+        r = client.get("/health?deep=1")
+    assert r.status_code == 200
+    assert r.json()["workers"] == "ok"
+
+
+def test_health_deep_reports_unreachable_broker(client):
+    mock_celery = MagicMock()
+    mock_celery.control.ping.side_effect = OSError("broker down")
+    with patch("routers.health.get_redis", return_value=_healthy_redis()), \
+         patch("celery_app.celery_app", mock_celery):
+        r = client.get("/health?deep=1")
+    assert r.status_code == 503
+    assert r.json()["workers"] == "unreachable"
+
+
+def test_health_returns_503_when_redis_fails(client):
+    mock_redis = MagicMock()
+    mock_redis.ping.side_effect = ConnectionError("refused")
+    with patch("routers.health.get_redis", return_value=mock_redis):
+        r = client.get("/health")
+    assert r.status_code == 503
+
+
+class TestOpenApiDocs:
+    def test_docs_served_without_auth_with_docs_csp(self, client):
+        r = client.get("/docs")
+        assert r.status_code == 200
+        csp = r.headers["content-security-policy"]
+        assert "https://cdn.jsdelivr.net" in csp
+        assert "'sha256-" in csp
+        assert "'unsafe-inline'" not in csp.split("script-src", 1)[1].split(";", 1)[0]
+
+    def test_inline_script_hash_matches(self):
+        import base64
+        import hashlib
+
+        from main import docs_csp
+        html = "<html><script>const a = 1;</script></html>"
+        digest = base64.b64encode(hashlib.sha256(b"const a = 1;").digest()).decode()
+        assert f"'sha256-{digest}'" in docs_csp(html)
+
+    def test_redoc_and_schema_served(self, client):
+        assert client.get("/redoc").status_code == 200
+        r = client.get("/openapi.json")
+        assert r.status_code == 200
+        assert any(p.startswith("/api/v1/") for p in r.json()["paths"])
+
+
+class TestRateLimitStorage:
+    def test_memory_without_redis(self):
+        from config import rate_limit_storage_uri
+        assert rate_limit_storage_uri("") == "memory://"
+
+    def test_redis_when_configured(self):
+        from config import rate_limit_storage_uri
+        assert rate_limit_storage_uri("redis://redis:6379/0") == "redis://redis:6379/0"
+
+    def test_test_suite_uses_memory_storage(self):
+        from limits.storage import MemoryStorage
+
+        from main import limiter
+        assert isinstance(limiter._storage, MemoryStorage)
 
 
 class TestRequestLogging:

@@ -313,6 +313,31 @@ async def _transport(ip: str, port: int = 161, timeout: int = 3, retries: int = 
     return await UdpTransportTarget.create((ip, port), timeout=timeout, retries=retries)
 
 
+# Row cap for GETBULK walks. Real tables exceed the former limit of 500 rows:
+# the FDB / dot1qTpFdb and ARP tables of a core or large access switch, LLDP
+# on dense stacks, ifTable / ifXTable on stacked 48-port chassis (hundreds of
+# physical plus logical interfaces). The cap only guards against runaway
+# agents; the subtree / non-increasing-OID checks end normal walks earlier.
+WALK_MAX_ROWS_DEFAULT = 10000
+# Hard upper bound for any per-call max_rows override.
+WALK_MAX_ROWS_HARD_LIMIT = 100000
+
+
+def _clamp_walk_rows(max_rows: int) -> int:
+    try:
+        value = int(max_rows)
+    except (TypeError, ValueError):
+        value = WALK_MAX_ROWS_DEFAULT
+    return max(1, min(value, WALK_MAX_ROWS_HARD_LIMIT))
+
+
+def _warn_walk_truncated(func: str, ip: str, oid: str, cap: int) -> None:
+    log.warning(
+        "%s %s %s: walk stopped at the row cap of %d rows; the table may be truncated",
+        func, ip, oid, cap,
+    )
+
+
 async def snmp_get(ip: str, port: int, auth,
                    *oids: str,
                    timeout: int = 3,
@@ -429,15 +454,17 @@ async def snmp_get_values(ip: str, port: int, auth,
 
 
 async def snmp_bulk_walk(ip: str, port: int, auth,
-                         oid: str, max_rows: int = 500,
+                         oid: str, max_rows: int = WALK_MAX_ROWS_DEFAULT,
                          timeout: int = 3,
                          retries: int = 1,
                          engine: Optional[SnmpEngine] = None) -> List[Tuple[str, str]]:
     """Async SNMPv2c/v3 GETBULK walk. Returns [(oid_str, value_str)].
 
     Advance the cursor through flat PySNMP ObjectType responses. Stop on an
-    exhausted subtree, a non-increasing OID, or the row limit.
+    exhausted subtree, a non-increasing OID, or the row limit (clamped to
+    WALK_MAX_ROWS_HARD_LIMIT; reaching it logs a WARNING).
     """
+    max_rows = _clamp_walk_rows(max_rows)
     rows: List[Tuple[str, str]] = []
     current_oid = oid
     bulk_size = 25
@@ -477,6 +504,7 @@ async def snmp_bulk_walk(ip: str, port: int, auth,
                 current_oid = vb_oid  # advance cursor to last received OID
                 advanced = True
                 if len(rows) >= max_rows:
+                    _warn_walk_truncated("snmp_bulk_walk", ip, oid, max_rows)
                     return rows
 
             if not advanced:
@@ -491,7 +519,7 @@ async def snmp_bulk_walk(ip: str, port: int, auth,
 
 
 async def snmp_bulk_walk_raw(ip: str, port: int, auth,
-                             oid: str, max_rows: int = 500,
+                             oid: str, max_rows: int = WALK_MAX_ROWS_DEFAULT,
                              timeout: int = 3,
                              retries: int = 1,
                              engine: Optional[SnmpEngine] = None) -> List[Tuple[str, bytes]]:
@@ -500,6 +528,7 @@ async def snmp_bulk_walk_raw(ip: str, port: int, auth,
     Identical to snmp_bulk_walk() except values are returned as raw bytes
     instead of decoded strings, preserving binary bitmask data.
     """
+    max_rows = _clamp_walk_rows(max_rows)
     rows: List[Tuple[str, bytes]] = []
     current_oid = oid
     bulk_size = 25
@@ -541,6 +570,7 @@ async def snmp_bulk_walk_raw(ip: str, port: int, auth,
                 current_oid = vb_oid
                 advanced = True
                 if len(rows) >= max_rows:
+                    _warn_walk_truncated("snmp_bulk_walk_raw", ip, oid, max_rows)
                     return rows
 
             if not advanced:
