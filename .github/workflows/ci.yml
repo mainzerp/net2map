@@ -38,7 +38,9 @@ jobs:
           --requirement backend/requirements.txt --strict --progress-spinner off
       - name: Scan Python source for security issues
         run: |
-          "$RUNNER_TEMP/security-venv/bin/bandit" --recursive backend --exclude backend/tests --severity-level medium --confidence-level all --format json | tee "$RUNNER_TEMP/bandit.json"
+          # --output keeps the JSON report clean: bandit prints its progress bar to stdout.
+          "$RUNNER_TEMP/security-venv/bin/bandit" --recursive backend --exclude backend/tests --severity-level medium --confidence-level all --format json --output "$RUNNER_TEMP/bandit.json" || { cat "$RUNNER_TEMP/bandit.json"; exit 1; }
+          cat "$RUNNER_TEMP/bandit.json"
           python -c 'import json, os, sys; report = json.load(open(os.path.join(os.environ["RUNNER_TEMP"], "bandit.json"))); errors = report.get("errors", []); print(json.dumps(errors)); sys.exit(bool(errors))'
       - name: Install all locked frontend dependencies without lifecycle scripts
         working-directory: frontend
