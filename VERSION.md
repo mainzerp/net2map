@@ -25,6 +25,11 @@ erfordert manuelle Schritte: Anleitung in `docs/OPERATIONS.md`, Abschnitt
 - `NETMAP_VERSION` heisst jetzt `NET2MAP_VERSION`; Images kuenftig unter
   `ghcr.io/mainzerp/net2map/{backend,frontend}` (nach Umbenennung des Repos).
 
+### Fixes
+
+- source-map-js 1.2.1 -> 1.2.2 (Build-Abhaengigkeit von Vite/Tailwind,
+  GHSA-68fv-2mgg-jv7q); der Security-Scan in CI ist wieder gruen.
+
 ### Migration
 
 - Das Backend benennt beim Start vorhandene `netmap:*`-Redis-Keys einmalig in
