@@ -110,7 +110,7 @@ async def lifespan(app: FastAPI):
 # can carry a docs-specific Content-Security-Policy.
 app = FastAPI(
     title="Net2Map API",
-    version="3.0.0",
+    version="3.1.0",
     dependencies=[Depends(_require_auth)],
     lifespan=lifespan,
     docs_url=None,

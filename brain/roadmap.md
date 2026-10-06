@@ -18,7 +18,7 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
-- Less SNMP load per scan (v3.1.0, unreleased) · priority: P2 · area: backend
+- Less SNMP load per scan (released v3.1.0, cab1a9c) · priority: P2 · area: backend
   Done: interface name cache (migration 021), configurable bulk size (Settings ->
   Scan, "Bulk Size"), interval fallbacks 60 s / 300 s, separate VLAN (1800 s) and
   STP (300 s) refresh intervals applied in MAC scans. Passed: ruff, 698 backend tests

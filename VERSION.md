@@ -4,7 +4,9 @@
 
 **Type:** MINOR
 
-Noch nicht veroeffentlicht.
+Veroeffentlicht am 2026-10-06 als Tag `v3.1.0` (Images unter
+`ghcr.io/mainzerp/net2map/backend` und `/frontend`). Commit `cab1a9c`.
+Migration 021 laeuft beim Start des Backends automatisch.
 
 ### Features
 
