@@ -19,7 +19,7 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 ## Testing
 
 - Rebranding NetMap -> Net2Map (v3.0.0) · priority: P2 · area: full-stack
-  Done in the working tree (not committed): all names, runtime identifiers, CI,
+  Done in be184f9 (not pushed): all names, runtime identifiers, CI,
   docs; Redis key and localStorage migrations with tests. Passed: ruff, 686 backend
   tests (7 `test_snmp_driver` fail locally on Python 3.13 also without the change),
   typecheck, 192 frontend tests.
