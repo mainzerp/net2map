@@ -18,6 +18,15 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
+- Less SNMP load per scan (v3.1.0, unreleased) · priority: P2 · area: backend
+  Done: interface name cache (migration 021), configurable bulk size (Settings ->
+  Scan, "Bulk Size"), interval fallbacks 60 s / 300 s, separate VLAN (1800 s) and
+  STP (300 s) refresh intervals applied in MAC scans. Passed: ruff, 698 backend tests
+  (snmp_driver deselected, Python 3.13 env issue), typecheck, 192 frontend tests.
+  User to verify on the live stack: ports keep names/aliases after link/MAC scans;
+  scan durations in the scan history drop; optionally try Bulk Size 50; VLAN/STP
+  map layers and port VLANs stay intact between refreshes.
+
 - Rebranding NetMap -> Net2Map (v3.0.0) · priority: P2 · area: full-stack
   Released as v3.0.0 (be184f9; repo renamed to mainzerp/net2map): all names, runtime identifiers, CI,
   docs; Redis key and localStorage migrations with tests. Passed: ruff, 686 backend

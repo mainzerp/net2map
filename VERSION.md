@@ -1,5 +1,35 @@
 # Version History
 
+## v3.1.0 -- Weniger SNMP-Last pro Scan
+
+**Type:** MINOR
+
+Noch nicht veroeffentlicht.
+
+### Features
+
+- Interface-Namen-Cache: Link- und MAC-Scans walken nur noch Status und Speed
+  der Interfaces. Namen und Aliase kommen aus einem Cache pro Geraet (Migration
+  021, `devices.if_names`) und werden hoechstens einmal pro Discovery-Intervall
+  neu gelesen, sofort bei einem unbekannten ifIndex sowie bei jedem manuellen
+  Full-/Ports-Scan.
+- Einstellbare GETBULK-Groesse ("Bulk Size" in den Scan-Einstellungen,
+  `snmp_bulk_size` in `/api/v1/scan-settings`, 5-100, Standard 25). Groessere
+  Werte bedeuten weniger SNMP-Anfragen pro Walk.
+- Eigene Intervalle fuer VLAN- und STP-Daten (Scan-Einstellungen, Standard
+  1800 s bzw. 300 s; Keys `vlan_update_interval_sec`, `stp_update_interval_sec`).
+  Bisher wurden PVID, getaggte VLANs, VLAN-Namen und Spanning Tree bei jedem
+  Link- und MAC-Scan gewalkt. Jetzt aktualisieren MAC-Scans sie nur, wenn das
+  jeweilige Intervall abgelaufen ist (Zeitstempel `devices.vlan_at` / `stp_at`,
+  Migration 021); dazwischen bleiben die gespeicherten Werte an den Ports
+  erhalten. Link-Scans walken VLAN/STP nicht mehr. `0` = nur manuelle Full-Scans.
+
+### Fixes
+
+- Ohne gespeicherte Einstellung fielen Link- und MAC-Intervall im Scheduler und
+  im Einstellungsformular auf 30 s zurueck; jetzt gelten wie beim Seeding 60 s
+  bzw. 300 s.
+
 ## v3.0.0 -- Umbenennung in Net2Map
 
 **Type:** MAJOR

@@ -67,24 +67,25 @@ def _write_db_setting(key: str, value: str):
 
 # ─── Scan Settings (DB-backed) ────────────────────────────────────────────────
 
-DEFAULT_SCAN_SETTINGS = {"max_workers": 12, "snmp_timeout": 3, "snmp_retries": 1}
+DEFAULT_SCAN_SETTINGS = {"max_workers": 12, "snmp_timeout": 3, "snmp_retries": 1, "snmp_bulk_size": 25}
+# GETBULK max-repetitions bounds; mirrors snmp_scanner.BULK_SIZE_MIN/MAX
+# (not imported here so this module stays free of pysnmp).
+_BULK_SIZE_MIN, _BULK_SIZE_MAX = 5, 100
 
 
 def _normalize_scan_settings(value: dict | None):
     value = value or {}
-    max_workers = value.get("max_workers", DEFAULT_SCAN_SETTINGS["max_workers"])
-    snmp_timeout = value.get("snmp_timeout", DEFAULT_SCAN_SETTINGS["snmp_timeout"])
-    snmp_retries = value.get("snmp_retries", DEFAULT_SCAN_SETTINGS["snmp_retries"])
+    merged = {key: value.get(key, default) for key, default in DEFAULT_SCAN_SETTINGS.items()}
     try:
-        max_workers = int(max_workers)
-        snmp_timeout = int(snmp_timeout)
-        snmp_retries = int(snmp_retries)
+        merged = {key: int(v) for key, v in merged.items()}
     except (TypeError, ValueError):
         raise HTTPException(400, "Settings must be integers")
-    max_workers = max(1, min(128, max_workers))
-    snmp_timeout = max(1, min(30, snmp_timeout))
-    snmp_retries = max(0, min(10, snmp_retries))
-    return {"max_workers": max_workers, "snmp_timeout": snmp_timeout, "snmp_retries": snmp_retries}
+    return {
+        "max_workers": max(1, min(128, merged["max_workers"])),
+        "snmp_timeout": max(1, min(30, merged["snmp_timeout"])),
+        "snmp_retries": max(0, min(10, merged["snmp_retries"])),
+        "snmp_bulk_size": max(_BULK_SIZE_MIN, min(_BULK_SIZE_MAX, merged["snmp_bulk_size"])),
+    }
 
 
 def _read_scan_settings():
@@ -92,6 +93,7 @@ def _read_scan_settings():
         "max_workers": max(1, min(128, int(_read_db_setting("scan_max_workers", "12")))),
         "snmp_timeout": max(1, min(30, int(_read_db_setting("scan_snmp_timeout", "3")))),
         "snmp_retries": max(0, min(10, int(_read_db_setting("scan_snmp_retries", "1")))),
+        "snmp_bulk_size": max(_BULK_SIZE_MIN, min(_BULK_SIZE_MAX, int(_read_db_setting("scan_snmp_bulk_size", "25")))),
     }
 
 
@@ -100,6 +102,7 @@ def _write_scan_settings(value: dict | None):
     _write_db_setting("scan_max_workers", str(payload["max_workers"]))
     _write_db_setting("scan_snmp_timeout", str(payload["snmp_timeout"]))
     _write_db_setting("scan_snmp_retries", str(payload["snmp_retries"]))
+    _write_db_setting("scan_snmp_bulk_size", str(payload["snmp_bulk_size"]))
     return payload
 
 

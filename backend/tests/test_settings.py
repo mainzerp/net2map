@@ -83,3 +83,14 @@ def test_stats_endpoint(client, auth_headers):
     assert "port_up_count" in data
     assert "rack_count" in data
     assert "endpoint_count" in data
+
+
+def test_scan_settings_bulk_size_roundtrip_and_clamp(client, jwt_headers):
+    """PUT /api/scan-settings stores the GETBULK size clamped to 5..100."""
+    r = client.put("/api/scan-settings", json={"snmp_bulk_size": 500}, headers=jwt_headers)
+    assert r.status_code == 200
+    assert r.json()["snmp_bulk_size"] == 100
+
+    r = client.put("/api/scan-settings", json={"snmp_bulk_size": 40}, headers=jwt_headers)
+    assert r.json()["snmp_bulk_size"] == 40
+    assert client.get("/api/scan-settings", headers=jwt_headers).json()["snmp_bulk_size"] == 40

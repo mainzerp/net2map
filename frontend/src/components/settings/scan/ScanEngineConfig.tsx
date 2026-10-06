@@ -6,8 +6,8 @@ import { Button, Input } from "../../ui";
 import { SectionHeader } from "../shared";
 
 // ── ScanEngineConfig ─────────────────────────────────────────────────────────
-// Engine settings (workers / timeout / retries) plus the discovery, link and
-// MAC poll intervals. Loads from /api/scan-settings and /api/settings and
+// Engine settings (workers / timeout / retries / bulk size) plus the discovery, link and
+// MAC poll intervals and the VLAN / STP refresh intervals. Loads from /api/scan-settings and /api/settings and
 // saves both in one action.
 function ScanEngineConfig() {
   const { data: scanSettings, isLoading: scanLoading } = useScanSettings();
@@ -17,9 +17,12 @@ function ScanEngineConfig() {
   const [scanWorkers, setScanWorkers] = useState<number | string>(4);
   const [snmpTimeout, setSnmpTimeout] = useState<number | string>(3);
   const [snmpRetries, setSnmpRetries] = useState<number | string>(1);
+  const [snmpBulkSize, setSnmpBulkSize] = useState<number | string>(25);
   const [discoveryIntervalSec, setDiscoveryIntervalSec] = useState<number | string>(1800);
-  const [linkUpdateIntervalSec, setLinkUpdateIntervalSec] = useState<number | string>(30);
-  const [macUpdateIntervalSec, setMacUpdateIntervalSec] = useState<number | string>(30);
+  const [linkUpdateIntervalSec, setLinkUpdateIntervalSec] = useState<number | string>(60);
+  const [macUpdateIntervalSec, setMacUpdateIntervalSec] = useState<number | string>(300);
+  const [vlanUpdateIntervalSec, setVlanUpdateIntervalSec] = useState<number | string>(1800);
+  const [stpUpdateIntervalSec, setStpUpdateIntervalSec] = useState<number | string>(300);
   const [settingsError, setSettingsError] = useState<string>("");
 
   const settingsLoading = scanLoading || appLoading;
@@ -33,16 +36,21 @@ function ScanEngineConfig() {
     if (scanSettings?.max_workers != null) setScanWorkers(Number(scanSettings.max_workers));
     if (scanSettings?.snmp_timeout != null) setSnmpTimeout(Number(scanSettings.snmp_timeout));
     if (scanSettings?.snmp_retries != null) setSnmpRetries(Number(scanSettings.snmp_retries));
+    if (scanSettings?.snmp_bulk_size != null) setSnmpBulkSize(Number(scanSettings.snmp_bulk_size));
 
     const settingsList = appSettings ?? [];
     const discovery = settingsList.find((s) => s.key === "discovery_interval_sec");
     const legacyPorts = settingsList.find((s) => s.key === "port_update_interval_sec");
     const links = settingsList.find((s) => s.key === "link_update_interval_sec");
     const macs = settingsList.find((s) => s.key === "mac_update_interval_sec");
-    const fallbackPortValue = legacyPorts?.value != null ? Number(legacyPorts.value) : 30;
+    const vlan = settingsList.find((s) => s.key === "vlan_update_interval_sec");
+    const stp = settingsList.find((s) => s.key === "stp_update_interval_sec");
+    const legacyValue = legacyPorts?.value != null ? Number(legacyPorts.value) : null;
     if (discovery?.value != null) setDiscoveryIntervalSec(Number(discovery.value));
-    setLinkUpdateIntervalSec(links?.value != null ? Number(links.value) : fallbackPortValue);
-    setMacUpdateIntervalSec(macs?.value != null ? Number(macs.value) : fallbackPortValue);
+    setLinkUpdateIntervalSec(links?.value != null ? Number(links.value) : legacyValue ?? 60);
+    setMacUpdateIntervalSec(macs?.value != null ? Number(macs.value) : legacyValue ?? 300);
+    if (vlan?.value != null) setVlanUpdateIntervalSec(Number(vlan.value));
+    if (stp?.value != null) setStpUpdateIntervalSec(Number(stp.value));
   }, [scanLoading, appLoading, scanSettings, appSettings]);
 
   const saveMutation = useMutation({
@@ -51,19 +59,25 @@ function ScanEngineConfig() {
         max_workers: Math.max(1, Math.min(128, Number(scanWorkers) || 1)),
         snmp_timeout: Math.max(1, Math.min(30, Number(snmpTimeout) || 3)),
         snmp_retries: Math.max(0, Math.min(10, Number(snmpRetries) || 1)),
+        snmp_bulk_size: Math.max(5, Math.min(100, Number(snmpBulkSize) || 25)),
         discovery_interval_sec: Math.max(0, Math.min(86400, Number(discoveryIntervalSec) || 0)),
         link_update_interval_sec: Math.max(0, Math.min(3600, Number(linkUpdateIntervalSec) || 0)),
         mac_update_interval_sec: Math.max(0, Math.min(3600, Number(macUpdateIntervalSec) || 0)),
+        vlan_update_interval_sec: Math.max(0, Math.min(86400, Number(vlanUpdateIntervalSec) || 0)),
+        stp_update_interval_sec: Math.max(0, Math.min(86400, Number(stpUpdateIntervalSec) || 0)),
       };
 
       await api.put("/api/scan-settings", {
         max_workers: normalized.max_workers,
         snmp_timeout: normalized.snmp_timeout,
         snmp_retries: normalized.snmp_retries,
+        snmp_bulk_size: normalized.snmp_bulk_size,
       });
       await api.put("/api/settings/discovery_interval_sec", { value: String(normalized.discovery_interval_sec) });
       await api.put("/api/settings/link_update_interval_sec", { value: String(normalized.link_update_interval_sec) });
       await api.put("/api/settings/mac_update_interval_sec", { value: String(normalized.mac_update_interval_sec) });
+      await api.put("/api/settings/vlan_update_interval_sec", { value: String(normalized.vlan_update_interval_sec) });
+      await api.put("/api/settings/stp_update_interval_sec", { value: String(normalized.stp_update_interval_sec) });
       // Intentional migration sync: the backend still reads the legacy
       // port_update_interval_sec key as a fallback, so keep it in step.
       await api.put("/api/settings/port_update_interval_sec", { value: String(normalized.mac_update_interval_sec) });
@@ -74,9 +88,12 @@ function ScanEngineConfig() {
       setScanWorkers(normalized.max_workers);
       setSnmpTimeout(normalized.snmp_timeout);
       setSnmpRetries(normalized.snmp_retries);
+      setSnmpBulkSize(normalized.snmp_bulk_size);
       setDiscoveryIntervalSec(normalized.discovery_interval_sec);
       setLinkUpdateIntervalSec(normalized.link_update_interval_sec);
       setMacUpdateIntervalSec(normalized.mac_update_interval_sec);
+      setVlanUpdateIntervalSec(normalized.vlan_update_interval_sec);
+      setStpUpdateIntervalSec(normalized.stp_update_interval_sec);
       invalidate(queryKeys.scanSettings, queryKeys.appSettings);
     },
     onError: (ex) => setSettingsError(extractErrorMessage(ex)),
@@ -97,6 +114,10 @@ function ScanEngineConfig() {
       : `${discoverySeconds}s`;
   const linksLabel = linkSeconds === 0 ? "disabled" : `${linkSeconds}s`;
   const macsLabel = macSeconds === 0 ? "disabled" : `${macSeconds}s`;
+  const refreshLabel = (value: number | string) => {
+    const seconds = Math.max(0, Number(value) || 0);
+    return seconds === 0 ? "manual full scans only" : `at most every ${seconds}s`;
+  };
 
   const busy = settingsLoading || saveMutation.isPending;
 
@@ -144,8 +165,10 @@ function ScanEngineConfig() {
           {numberInput(snmpTimeout, setSnmpTimeout, 1, 30, "w-[60px]")}
           <span className="text-muted text-[10px] ml-2">Retries</span>
           {numberInput(snmpRetries, setSnmpRetries, 0, 10, "w-[60px]")}
+          <span className="text-muted text-[10px] ml-2">Bulk Size</span>
+          {numberInput(snmpBulkSize, setSnmpBulkSize, 5, 100, "w-[60px]")}
           <span className="text-muted text-[10px] opacity-70">
-            {settingsLoading ? "Loading settings..." : "1-128 workers"}
+            {settingsLoading ? "Loading settings..." : "1-128 workers; bulk size = rows per SNMP request (5-100)"}
           </span>
         </div>
       </div>
@@ -180,6 +203,27 @@ function ScanEngineConfig() {
           setMacUpdateIntervalSec,
           3600,
           `Set 0 to disable - current MAC schedule: ${macsLabel}`,
+        )}
+      </div>
+
+      <div className="p-3 rounded-card bg-surface border border-line flex flex-col gap-2">
+        <SectionHeader>VLAN / SPANNING TREE UPDATE SETTINGS</SectionHeader>
+        <span className="text-muted text-[10px] opacity-70">
+          Refreshed during MAC polls once the interval has passed; manual full scans always refresh.
+        </span>
+        {intervalInput(
+          "VLAN Refresh Interval (sec)",
+          vlanUpdateIntervalSec,
+          setVlanUpdateIntervalSec,
+          86400,
+          `Set 0 for manual full scans only - current: ${refreshLabel(vlanUpdateIntervalSec)}`,
+        )}
+        {intervalInput(
+          "STP Refresh Interval (sec)",
+          stpUpdateIntervalSec,
+          setStpUpdateIntervalSec,
+          86400,
+          `Set 0 for manual full scans only - current: ${refreshLabel(stpUpdateIntervalSec)}`,
         )}
       </div>
 

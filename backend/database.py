@@ -209,6 +209,14 @@ class Device(Base):
     stp_root_port = Column(String(64), nullable=True)   # port name (if_descr) toward the root
     # VLAN id (string) -> name from dot1qVlanStaticName
     vlan_names    = Column(JSONB, nullable=True, default=dict, server_default="{}")
+    # Interface name cache: ifIndex (string) -> [ifDescr, ifAlias], refreshed
+    # by a full name walk at most every discovery interval.
+    if_names      = Column(JSONB, nullable=True)
+    if_names_at   = Column(DateTime, nullable=True)
+    # Last collection of VLAN data (PVID, tagged VLANs, VLAN names) and of
+    # spanning tree data; MAC scans re-walk them once their interval passed.
+    vlan_at       = Column(DateTime, nullable=True)
+    stp_at        = Column(DateTime, nullable=True)
 
     ports        = relationship("Port", back_populates="device", cascade="all, delete-orphan", lazy="selectin")
     rack         = relationship("Rack", back_populates="devices", lazy="joined")
@@ -401,10 +409,13 @@ def _seed_default_settings():
             ("port_update_interval_sec", "30"),
             ("link_update_interval_sec", "60"),
             ("mac_update_interval_sec", "300"),
+            ("vlan_update_interval_sec", "1800"),
+            ("stp_update_interval_sec", "300"),
             ("discovery_scan_ranges", "[]"),
             ("scan_max_workers", "12"),
             ("scan_snmp_timeout", "3"),
             ("scan_snmp_retries", "1"),
+            ("scan_snmp_bulk_size", "25"),
             ("dns_servers", "[]"),
             ("map_opacity", "0.3"),
             ("map_scale", "1.0"),

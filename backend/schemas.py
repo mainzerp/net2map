@@ -760,6 +760,7 @@ class ScanSettingsUpdate(BaseModel):
     max_workers: Optional[int] = None
     snmp_timeout: Optional[int] = None
     snmp_retries: Optional[int] = None
+    snmp_bulk_size: Optional[int] = None
 
     @model_validator(mode="after")
     def _clamp_values(self):
@@ -769,12 +770,15 @@ class ScanSettingsUpdate(BaseModel):
             self.snmp_timeout = max(1, min(30, self.snmp_timeout))
         if self.snmp_retries is not None:
             self.snmp_retries = max(0, min(10, self.snmp_retries))
+        if self.snmp_bulk_size is not None:
+            self.snmp_bulk_size = max(5, min(100, self.snmp_bulk_size))
         return self
 
 class ScanSettingsOut(BaseModel):
     max_workers: int
     snmp_timeout: int
     snmp_retries: int
+    snmp_bulk_size: int = 25
 
 
 # ─── DNS Settings ─────────────────────────────────────────────────────────────

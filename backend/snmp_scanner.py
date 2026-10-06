@@ -6,6 +6,7 @@ never blocked. scan_switch() is now a coroutine; call it with await.
 import asyncio
 import logging
 import math
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
@@ -220,6 +221,13 @@ class SwitchData:
     # root_port) or None when the device reports no STP data.
     stp:            Optional[dict] = None
     vlan_names:     Dict[str, str] = field(default_factory=dict)  # "vlan id" -> name
+    # True when ifDescr/ifAlias were walked in this scan (the caller stores
+    # them as the device's interface name cache); False when served from it.
+    if_names_refreshed: bool = False
+    # False when the VLAN (PVID, tagged VLANs, VLAN names) or STP data was not
+    # collected in this scan; the caller then keeps the previously stored values.
+    vlan_collected: bool = True
+    stp_collected: bool = True
 
 
 # --- Credentials builder ------------------------------------------------------
@@ -321,6 +329,20 @@ async def _transport(ip: str, port: int = 161, timeout: int = 3, retries: int = 
 WALK_MAX_ROWS_DEFAULT = 10000
 # Hard upper bound for any per-call max_rows override.
 WALK_MAX_ROWS_HARD_LIMIT = 100000
+
+# GETBULK max-repetitions (rows per request). scan_switch() sets it per scan
+# from the scan settings; tasks spawned by asyncio.gather inherit the value.
+BULK_SIZE_DEFAULT = 25
+BULK_SIZE_MIN = 5
+BULK_SIZE_MAX = 100
+_BULK_SIZE: ContextVar[int] = ContextVar("snmp_bulk_size", default=BULK_SIZE_DEFAULT)
+
+
+def clamp_bulk_size(value) -> int:
+    try:
+        return max(BULK_SIZE_MIN, min(BULK_SIZE_MAX, int(value)))
+    except (TypeError, ValueError):
+        return BULK_SIZE_DEFAULT
 
 
 def _clamp_walk_rows(max_rows: int) -> int:
@@ -467,7 +489,7 @@ async def snmp_bulk_walk(ip: str, port: int, auth,
     max_rows = _clamp_walk_rows(max_rows)
     rows: List[Tuple[str, str]] = []
     current_oid = oid
-    bulk_size = 25
+    bulk_size = _BULK_SIZE.get()
     own_engine = engine is None
     if own_engine:
         engine = SnmpEngine()
@@ -531,7 +553,7 @@ async def snmp_bulk_walk_raw(ip: str, port: int, auth,
     max_rows = _clamp_walk_rows(max_rows)
     rows: List[Tuple[str, bytes]] = []
     current_oid = oid
-    bulk_size = 25
+    bulk_size = _BULK_SIZE.get()
     own_engine = engine is None
     if own_engine:
         engine = SnmpEngine()
@@ -727,8 +749,12 @@ async def _collect_stp_and_vlan_names(
     snmp_retries: int,
     engine: SnmpEngine,
     bridge_to_ifindex: Dict[int, int],
+    collect_stp: bool = True,
+    collect_vlan_names: bool = True,
 ) -> None:
     """Fill sw.stp, sw.vlan_names and the per-interface STP fields.
+
+    ``collect_stp`` / ``collect_vlan_names`` skip the respective reads.
 
     Best effort: missing MIBs, noSuchObject and timeouts leave the fields at
     their defaults (None / {}); this never raises. One GET reads the STP
@@ -740,25 +766,23 @@ async def _collect_stp_and_vlan_names(
     require community@vlan (v2c) or context "vlan-<id>" (v3) and are out of
     scope.
     """
+    async def _const(value):
+        return value
+
     try:
-        if not get_scanner(sw.vendor).supports_stp():
-            stp_scalars: Dict[str, object] = {}
-            name_rows = await snmp_bulk_walk(
+        want_stp = collect_stp and get_scanner(sw.vendor).supports_stp()
+        stp_scalars, name_rows = await asyncio.gather(
+            snmp_get_values(
+                ip, snmp_port, auth, *STP_SCALAR_OIDS,
+                timeout=snmp_timeout, retries=snmp_retries, engine=engine,
+            ) if want_stp else _const({}),
+            snmp_bulk_walk(
                 ip, snmp_port, auth, OID_DOT1Q_VLAN_STATIC_NAME,
                 timeout=snmp_timeout, retries=snmp_retries, engine=engine,
-            )
-        else:
-            stp_scalars, name_rows = await asyncio.gather(
-                snmp_get_values(
-                    ip, snmp_port, auth, *STP_SCALAR_OIDS,
-                    timeout=snmp_timeout, retries=snmp_retries, engine=engine,
-                ),
-                snmp_bulk_walk(
-                    ip, snmp_port, auth, OID_DOT1Q_VLAN_STATIC_NAME,
-                    timeout=snmp_timeout, retries=snmp_retries, engine=engine,
-                ),
-            )
-        sw.vlan_names = parse_vlan_names(name_rows)
+            ) if collect_vlan_names else _const([]),
+        )
+        if collect_vlan_names:
+            sw.vlan_names = parse_vlan_names(name_rows)
     except Exception:
         log.debug("STP scalar / VLAN name read failed for %s", ip)
         return
@@ -813,6 +837,7 @@ async def _collect_stp_and_vlan_names(
 
 # --- Main async scan function -------------------------------------------------
 
+
 async def scan_switch(
     ip: str,
     snmp_version: str = "v2c",
@@ -828,8 +853,19 @@ async def scan_switch(
     v3_priv_password: str = "",
     scan_type: str = "full",
     v3_engine_id: str = "",
+    bulk_size: int = BULK_SIZE_DEFAULT,
+    if_names: Optional[Dict[int, Tuple[str, str]]] = None,
+    collect_vlan: bool = True,
+    collect_stp: bool = True,
 ) -> Optional[SwitchData]:
-    """Async full SNMP scan of one switch. Returns SwitchData or None on failure."""
+    """Async full SNMP scan of one switch. Returns SwitchData or None on failure.
+
+    ``if_names`` is a cached ifIndex -> (ifDescr, ifAlias) map. When given,
+    the two name walks are skipped as long as every reported ifIndex is in the
+    cache; an unknown ifIndex triggers a fresh walk of both columns.
+    ``collect_vlan`` / ``collect_stp`` skip the VLAN and spanning tree walks
+    (the result then reports ``vlan_collected`` / ``stp_collected`` False).
+    """
 
     scan_mode = scan_type if scan_type in {"discovery", "ports", "links", "macs", "full"} else "full"
     is_v3 = snmp_version not in (SnmpVersion.V2C, "v2c")
@@ -849,12 +885,15 @@ async def scan_switch(
 
     # Per-session SnmpEngine reuse: create once, pass to all SNMP calls
     session_engine = SnmpEngine()
+    bulk_token = _BULK_SIZE.set(clamp_bulk_size(bulk_size))
     try:
         return await _scan_switch_inner(
             ip, snmp_port, auth, snmp_timeout, snmp_retries, scan_mode, session_engine,
-            engine_id_override=engine_id_override,
+            engine_id_override=engine_id_override, if_names=if_names,
+            collect_vlan=collect_vlan, collect_stp=collect_stp,
         )
     finally:
+        _BULK_SIZE.reset(bulk_token)
         try:
             session_engine.close_dispatcher()
         except Exception:
@@ -870,6 +909,9 @@ async def _scan_switch_inner(
     scan_mode: str,
     engine: SnmpEngine,
     engine_id_override: str = "",
+    if_names: Optional[Dict[int, Tuple[str, str]]] = None,
+    collect_vlan: bool = True,
+    collect_stp: bool = True,
 ) -> Optional[SwitchData]:
     """Inner scan logic using a pre-created SnmpEngine."""
 
@@ -921,19 +963,34 @@ async def _scan_switch_inner(
     if scan_mode == "discovery":
         return sw
 
-    # -- 3. Interface table (all four walks in parallel) ----------------------
-    descr_rows, status_rows, hspeed_rows, alias_rows = await asyncio.gather(
-        snmp_bulk_walk(ip, snmp_port, auth, OID_IF_DESCR, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
-        snmp_bulk_walk(ip, snmp_port, auth, OID_IF_OPER_STATUS, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
-        snmp_bulk_walk(ip, snmp_port, auth, OID_IF_HIGH_SPEED, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
-        snmp_bulk_walk(ip, snmp_port, auth, OID_IF_ALIAS, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
-    )
+    # -- 3. Interface table ----------------------------------------------------
+    # Status and speed change at runtime and are always walked. Names and
+    # aliases are static; they come from the cache when it covers every
+    # reported ifIndex, otherwise both columns are walked again.
+    def _walk(oid: str):
+        return snmp_bulk_walk(ip, snmp_port, auth, oid, timeout=snmp_timeout, retries=snmp_retries, engine=engine)
 
     def _idx(oid_s: str) -> Optional[int]:
         try:
             return int(_last_n(oid_s, 1)[0])
         except ValueError:
             return None
+
+    if if_names:
+        status_rows, hspeed_rows = await asyncio.gather(_walk(OID_IF_OPER_STATUS), _walk(OID_IF_HIGH_SPEED))
+        reported = {_idx(o) for o, _ in status_rows} | {_idx(o) for o, _ in hspeed_rows}
+        reported.discard(None)
+        if reported and reported <= if_names.keys():
+            descr_rows = [(f"{OID_IF_DESCR}.{i}", if_names[i][0]) for i in sorted(reported)]
+            alias_rows = [(f"{OID_IF_ALIAS}.{i}", if_names[i][1]) for i in sorted(reported)]
+        else:
+            descr_rows, alias_rows = await asyncio.gather(_walk(OID_IF_DESCR), _walk(OID_IF_ALIAS))
+            sw.if_names_refreshed = True
+    else:
+        descr_rows, status_rows, hspeed_rows, alias_rows = await asyncio.gather(
+            _walk(OID_IF_DESCR), _walk(OID_IF_OPER_STATUS), _walk(OID_IF_HIGH_SPEED), _walk(OID_IF_ALIAS),
+        )
+        sw.if_names_refreshed = True
 
     for oid_s, val in descr_rows:
         idx = _idx(oid_s)
@@ -1104,89 +1161,95 @@ async def _scan_switch_inner(
             len(sw.arp_table), len(sw.mac_ifindex),
         )
 
+    sw.vlan_collected = collect_vlan
+    sw.stp_collected = collect_stp
+
     # -- 6. VLAN (dot1qPvid) - fault-tolerant --------------------------------
-    try:
-        # If bridge_to_ifindex wasn't populated (no MAC walk), fetch it now
-        if not bridge_to_ifindex:
-            bp_rows = await snmp_bulk_walk(
-                ip, snmp_port, auth, OID_DOT1D_BASE_PORT_IF_INDEX,
+    if collect_vlan:
+        try:
+            # If bridge_to_ifindex wasn't populated (no MAC walk), fetch it now
+            if not bridge_to_ifindex:
+                bp_rows = await snmp_bulk_walk(
+                    ip, snmp_port, auth, OID_DOT1D_BASE_PORT_IF_INDEX,
+                    timeout=snmp_timeout, retries=snmp_retries, engine=engine,
+                )
+                for oid_s, ifindex_val in bp_rows:
+                    try:
+                        bp = int(_last_n(oid_s, 1)[0])
+                        bridge_to_ifindex[bp] = int(ifindex_val)
+                    except ValueError:
+                        continue
+
+            pvid_rows = await snmp_bulk_walk(
+                ip, snmp_port, auth, OID_DOT1Q_PVID,
                 timeout=snmp_timeout, retries=snmp_retries, engine=engine,
             )
-            for oid_s, ifindex_val in bp_rows:
+            for oid_s, val in pvid_rows:
                 try:
                     bp = int(_last_n(oid_s, 1)[0])
-                    bridge_to_ifindex[bp] = int(ifindex_val)
-                except ValueError:
+                    pvid = int(val)
+                except (ValueError, IndexError):
                     continue
+                ifindex = bridge_to_ifindex.get(bp)
+                if ifindex is not None and ifindex in sw.interfaces:
+                    sw.interfaces[ifindex].vlan = pvid
 
-        pvid_rows = await snmp_bulk_walk(
-            ip, snmp_port, auth, OID_DOT1Q_PVID,
-            timeout=snmp_timeout, retries=snmp_retries, engine=engine,
-        )
-        for oid_s, val in pvid_rows:
+            # -- 6b. Tagged VLANs (dot1qVlanStaticEgressPorts / UntaggedPorts) ----
             try:
-                bp = int(_last_n(oid_s, 1)[0])
-                pvid = int(val)
-            except (ValueError, IndexError):
-                continue
-            ifindex = bridge_to_ifindex.get(bp)
-            if ifindex is not None and ifindex in sw.interfaces:
-                sw.interfaces[ifindex].vlan = pvid
+                egress_rows, untagged_rows = await asyncio.gather(
+                    snmp_bulk_walk_raw(
+                        ip, snmp_port, auth, OID_DOT1Q_VLAN_STATIC_EGRESS,
+                        timeout=snmp_timeout, retries=snmp_retries, engine=engine,
+                    ),
+                    snmp_bulk_walk_raw(
+                        ip, snmp_port, auth, OID_DOT1Q_VLAN_STATIC_UNTAGGED,
+                        timeout=snmp_timeout, retries=snmp_retries, engine=engine,
+                    ),
+                )
 
-        # -- 6b. Tagged VLANs (dot1qVlanStaticEgressPorts / UntaggedPorts) ----
-        try:
-            egress_rows, untagged_rows = await asyncio.gather(
-                snmp_bulk_walk_raw(
-                    ip, snmp_port, auth, OID_DOT1Q_VLAN_STATIC_EGRESS,
-                    timeout=snmp_timeout, retries=snmp_retries, engine=engine,
-                ),
-                snmp_bulk_walk_raw(
-                    ip, snmp_port, auth, OID_DOT1Q_VLAN_STATIC_UNTAGGED,
-                    timeout=snmp_timeout, retries=snmp_retries, engine=engine,
-                ),
-            )
+                if egress_rows:
+                    egress_by_vlan = {}
+                    for oid_s, raw_val in egress_rows:
+                        try:
+                            vlan_id = int(_last_n(oid_s, 1)[0])
+                        except (ValueError, IndexError):
+                            continue
+                        egress_by_vlan[vlan_id] = parse_port_bitmask(raw_val)
 
-            if egress_rows:
-                egress_by_vlan = {}
-                for oid_s, raw_val in egress_rows:
-                    try:
-                        vlan_id = int(_last_n(oid_s, 1)[0])
-                    except (ValueError, IndexError):
-                        continue
-                    egress_by_vlan[vlan_id] = parse_port_bitmask(raw_val)
+                    untagged_by_vlan = {}
+                    for oid_s, raw_val in untagged_rows:
+                        try:
+                            vlan_id = int(_last_n(oid_s, 1)[0])
+                        except (ValueError, IndexError):
+                            continue
+                        untagged_by_vlan[vlan_id] = parse_port_bitmask(raw_val)
 
-                untagged_by_vlan = {}
-                for oid_s, raw_val in untagged_rows:
-                    try:
-                        vlan_id = int(_last_n(oid_s, 1)[0])
-                    except (ValueError, IndexError):
-                        continue
-                    untagged_by_vlan[vlan_id] = parse_port_bitmask(raw_val)
+                    tagged_by_bp = {}
+                    for vlan_id, egress_ports in egress_by_vlan.items():
+                        untagged_ports = untagged_by_vlan.get(vlan_id, set())
+                        tagged_ports = egress_ports - untagged_ports
+                        for bp in tagged_ports:
+                            tagged_by_bp.setdefault(bp, []).append(vlan_id)
 
-                tagged_by_bp = {}
-                for vlan_id, egress_ports in egress_by_vlan.items():
-                    untagged_ports = untagged_by_vlan.get(vlan_id, set())
-                    tagged_ports = egress_ports - untagged_ports
-                    for bp in tagged_ports:
-                        tagged_by_bp.setdefault(bp, []).append(vlan_id)
+                    for bp, vlans in tagged_by_bp.items():
+                        ifindex = bridge_to_ifindex.get(bp)
+                        if ifindex is not None and ifindex in sw.interfaces:
+                            sw.interfaces[ifindex].tagged_vlans = sorted(vlans)
 
-                for bp, vlans in tagged_by_bp.items():
-                    ifindex = bridge_to_ifindex.get(bp)
-                    if ifindex is not None and ifindex in sw.interfaces:
-                        sw.interfaces[ifindex].tagged_vlans = sorted(vlans)
+                    log.debug("Tagged VLANs for %s: %d ports have tagged VLANs",
+                              ip, len(tagged_by_bp))
+            except Exception:
+                log.debug("Tagged VLAN walk failed for %s (static egress tables not supported)", ip)
 
-                log.debug("Tagged VLANs for %s: %d ports have tagged VLANs",
-                          ip, len(tagged_by_bp))
         except Exception:
-            log.debug("Tagged VLAN walk failed for %s (static egress tables not supported)", ip)
-
-    except Exception:
-        log.debug("VLAN walk failed for %s (Q-BRIDGE-MIB not supported)", ip)
+            log.debug("VLAN walk failed for %s (Q-BRIDGE-MIB not supported)", ip)
 
     # -- 7. Spanning tree + VLAN names - best effort ----------------------------
-    await _collect_stp_and_vlan_names(
-        sw, ip, snmp_port, auth, snmp_timeout, snmp_retries, engine, bridge_to_ifindex,
-    )
+    if collect_stp or collect_vlan:
+        await _collect_stp_and_vlan_names(
+            sw, ip, snmp_port, auth, snmp_timeout, snmp_retries, engine, bridge_to_ifindex,
+            collect_stp=collect_stp, collect_vlan_names=collect_vlan,
+        )
 
     log.info("Scanned %s (%s) vendor=%s: %d ifaces, %d LLDP nbrs",
              ip, sw.sys_name, sw.vendor, len(sw.interfaces), len(sw.lldp_neighbors))

@@ -8,7 +8,7 @@ import threading
 import time
 import uuid
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 from sqlalchemy import event
@@ -37,7 +37,7 @@ from scan_engine.ping import _build_ping_cmd
 from schemas import ScanResult, ScanSwitchMetric
 from shared.crypto import decrypt
 from shared.fencing import apply_fence
-from shared.file_settings import _read_dns_settings, _read_scan_settings
+from shared.file_settings import _read_db_setting, _read_dns_settings, _read_scan_settings
 from shared.metrics import (
     DEVICE_COUNT,
     ENDPOINT_COUNT,
@@ -284,6 +284,9 @@ async def _execute_scan_body(
     configured_max_workers = scan_settings.get("max_workers", 4)
     global_snmp_timeout = scan_settings.get("snmp_timeout", 3)
     global_snmp_retries = scan_settings.get("snmp_retries", 1)
+    bulk_size = scan_settings.get("snmp_bulk_size", 25)
+    if_names_by_ip = _load_if_name_cache(db) if scan_mode in {"links", "macs"} else {}
+    vlan_stp_plan = _plan_vlan_stp_collection(db, scan_mode)
 
     # ── Range-based discovery (only for discovery/full scans) ──────────────────
     range_targets: List[dict] = []
@@ -542,6 +545,10 @@ async def _execute_scan_body(
                         v3_priv_password=cred_set["v3_priv_password"],
                         scan_type=scan_mode,
                         v3_engine_id=cred_set.get("v3_engine_id", ""),
+                        bulk_size=bulk_size,
+                        if_names=if_names_by_ip.get(ip),
+                        collect_vlan=vlan_stp_plan.get(ip, (True, True))[0],
+                        collect_stp=vlan_stp_plan.get(ip, (True, True))[1],
                     )
                     if data:
                         if cred_set is not target:
@@ -723,20 +730,104 @@ def _record_engine_id(db: Session, cred: Credential, engine_id: str, corr: str) 
     cred.engine_id_seen_at = datetime.now(timezone.utc)
 
 
+IF_NAME_CACHE_DEFAULT_MAX_AGE = 1800  # seconds; used when discovery is disabled
+
+
+def _load_if_name_cache(db: Session) -> Dict[str, Dict[int, tuple]]:
+    """Return fresh interface name caches as {ip: {ifIndex: (descr, alias)}}.
+
+    A cache is fresh for one discovery interval, so names and aliases are
+    re-walked at most that often (or immediately when an unknown ifIndex
+    appears, see snmp_scanner.scan_switch).
+    """
+    try:
+        max_age = int(_read_db_setting("discovery_interval_sec", str(IF_NAME_CACHE_DEFAULT_MAX_AGE)))
+    except (TypeError, ValueError):
+        max_age = IF_NAME_CACHE_DEFAULT_MAX_AGE
+    if max_age <= 0:
+        max_age = IF_NAME_CACHE_DEFAULT_MAX_AGE
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=max_age)
+    caches: Dict[str, Dict[int, tuple]] = {}
+    rows = db.query(Device.ip, Device.if_names, Device.if_names_at).filter(
+        Device.ignored.is_(False), Device.if_names_at.isnot(None),
+    ).all()
+    for ip, names, stamp in rows:
+        if not isinstance(names, dict) or not names:
+            continue
+        if (stamp.replace(tzinfo=None) if stamp.tzinfo else stamp) < cutoff:
+            continue
+        try:
+            caches[ip] = {int(k): (str(v[0]), str(v[1])) for k, v in names.items()}
+        except (TypeError, ValueError, IndexError):
+            continue
+    return caches
+
+
+def _apply_if_name_cache(device: Device, sw) -> None:
+    """Store freshly walked interface names as the device's name cache."""
+    if not getattr(sw, "if_names_refreshed", False):
+        return
+    device.if_names = {str(i): [iface.descr, iface.alias] for i, iface in sw.interfaces.items()}
+    device.if_names_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _read_interval_setting(key: str, default: int) -> int:
+    try:
+        return int(_read_db_setting(key, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _plan_vlan_stp_collection(db: Session, scan_mode: str) -> Dict[str, tuple]:
+    """Decide per device whether this scan collects VLAN and STP data.
+
+    Returns {ip: (collect_vlan, collect_stp)}; IPs without an entry collect
+    both. Manual full/ports scans always collect. Link scans never do (they do
+    not rebuild ports, so per-port VLAN/STP data would be discarded). MAC scans
+    collect each part once its interval (vlan_update_interval_sec /
+    stp_update_interval_sec) has passed; an interval of 0 leaves that part to
+    manual full scans.
+    """
+    if scan_mode in {"full", "ports", "discovery"}:
+        return {}
+    rows = db.query(Device.ip, Device.vlan_at, Device.stp_at).all()
+    if scan_mode != "macs":
+        return {ip: (False, False) for ip, _, _ in rows}
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    vlan_interval = _read_interval_setting("vlan_update_interval_sec", 1800)
+    stp_interval = _read_interval_setting("stp_update_interval_sec", 300)
+
+    def _due(stamp, interval: int) -> bool:
+        if interval <= 0:
+            return False
+        if stamp is None:
+            return True
+        stamp = stamp.replace(tzinfo=None) if stamp.tzinfo else stamp
+        return (now - stamp).total_seconds() >= interval
+
+    return {ip: (_due(vlan_at, vlan_interval), _due(stp_at, stp_interval)) for ip, vlan_at, stp_at in rows}
+
+
 def _apply_stp_vlan_names(device: Device, sw) -> None:
     """Overwrite the device's STP summary and VLAN names from scan data.
 
     Values the device no longer reports are reset to None / {} so stale
-    spanning tree data does not survive a scan.
+    spanning tree data does not survive a scan. Parts the scan did not collect
+    (``stp_collected`` / ``vlan_collected`` False) keep their stored values.
     """
-    stp = getattr(sw, "stp", None) or {}
-    device.stp_protocol = stp.get("protocol")
-    device.stp_bridge_id = stp.get("bridge_id")
-    device.stp_root_id = stp.get("root_id")
-    device.stp_root_cost = stp.get("root_cost")
-    device.stp_root_port = stp.get("root_port")
-    vlan_names = getattr(sw, "vlan_names", None)
-    device.vlan_names = dict(vlan_names) if isinstance(vlan_names, dict) else {}
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if getattr(sw, "stp_collected", True):
+        stp = getattr(sw, "stp", None) or {}
+        device.stp_protocol = stp.get("protocol")
+        device.stp_bridge_id = stp.get("bridge_id")
+        device.stp_root_id = stp.get("root_id")
+        device.stp_root_cost = stp.get("root_cost")
+        device.stp_root_port = stp.get("root_port")
+        device.stp_at = now
+    if getattr(sw, "vlan_collected", True):
+        vlan_names = getattr(sw, "vlan_names", None)
+        device.vlan_names = dict(vlan_names) if isinstance(vlan_names, dict) else {}
+        device.vlan_at = now
 
 
 @_guard_scan_transactions
@@ -958,6 +1049,7 @@ def _finalize_scan_db(
                 device.last_seen = datetime.now(timezone.utc)
                 if scan_mode != "discovery":
                     _apply_stp_vlan_names(device, sw)
+                    _apply_if_name_cache(device, sw)
             elif ping_ok:
                 device.sys_name = device.sys_name or ip
                 device.sys_descr = device.sys_descr or "Discovered by ping (SNMP unavailable)"
@@ -1001,6 +1093,7 @@ def _finalize_scan_db(
             )
             if scan_mode != "discovery":
                 _apply_stp_vlan_names(new_device, sw)
+                _apply_if_name_cache(new_device, sw)
             db.add(new_device)
             db.flush()
             devices_by_ip[ip] = new_device
@@ -1085,6 +1178,13 @@ def _finalize_scan_db(
                             resolved_host = _resolve_host(resolved_ip, dns_cache, dns_servers, correlation_id=corr)
                         peers_by_ifindex.setdefault(ifindex, []).append((mac, resolved_ip, resolved_host))
 
+                    keep_vlan = not getattr(sw, "vlan_collected", True)
+                    keep_stp = not getattr(sw, "stp_collected", True)
+                    previous_ports: Dict[int, Port] = {}
+                    if keep_vlan or keep_stp:
+                        previous_ports = {
+                            p.if_index: p for p in db.query(Port).filter(Port.device_id == device.id).all()
+                        }
                     db.query(Port).filter(Port.device_id == device.id).delete()
 
                     # Build port objects. Virtual interfaces (loopbacks, VLAN
@@ -1101,6 +1201,9 @@ def _finalize_scan_db(
                             )
                         if is_virtual(iface.descr, effective_vendor) and not endpoint_entries:
                             continue
+                        prev = previous_ports.get(iface.index)
+                        vlan_src = prev if keep_vlan and prev is not None else None
+                        stp_src = prev if keep_stp and prev is not None else iface
                         port_obj = Port(
                             device_id=device.id,
                             if_index=iface.index,
@@ -1108,11 +1211,11 @@ def _finalize_scan_db(
                             if_alias=iface.alias,
                             speed_mbps=iface.speed_mbps,
                             oper_status=iface.oper_status,
-                            vlan=iface.vlan,
-                            tagged_vlans=iface.tagged_vlans,
-                            stp_state=getattr(iface, "stp_state", None),
-                            stp_role=getattr(iface, "stp_role", None),
-                            stp_path_cost=getattr(iface, "stp_path_cost", None),
+                            vlan=vlan_src.vlan if vlan_src else iface.vlan,
+                            tagged_vlans=list(vlan_src.tagged_vlans or []) if vlan_src else iface.tagged_vlans,
+                            stp_state=getattr(stp_src, "stp_state", None),
+                            stp_role=getattr(stp_src, "stp_role", None),
+                            stp_path_cost=getattr(stp_src, "stp_path_cost", None),
                         )
                         ports_with_endpoints.append((port_obj, iface, endpoint_entries))
 

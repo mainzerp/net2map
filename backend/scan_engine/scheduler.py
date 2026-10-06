@@ -37,9 +37,10 @@ def _read_scheduler_intervals(db) -> dict:
     ports_legacy_setting = db.query(AppSetting).filter(AppSetting.key == "port_update_interval_sec").first()
 
     discovery_interval = int(discovery_setting.value) if discovery_setting else 1800
-    legacy_ports_interval = int(ports_legacy_setting.value) if ports_legacy_setting else 30
-    links_interval = int(links_setting.value) if links_setting else legacy_ports_interval
-    macs_interval = int(macs_setting.value) if macs_setting else legacy_ports_interval
+    legacy_ports_interval = int(ports_legacy_setting.value) if ports_legacy_setting else None
+    # Fallbacks match the seeded defaults in database._seed_default_settings.
+    links_interval = int(links_setting.value) if links_setting else (legacy_ports_interval or 60)
+    macs_interval = int(macs_setting.value) if macs_setting else (legacy_ports_interval or 300)
     return {"discovery": discovery_interval, "links": links_interval, "macs": macs_interval}
 
 

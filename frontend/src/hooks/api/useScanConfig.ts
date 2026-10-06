@@ -8,6 +8,7 @@ export interface ScanSettings {
   max_workers?: number;
   snmp_timeout?: number;
   snmp_retries?: number;
+  snmp_bulk_size?: number;
   [key: string]: unknown;
 }
 

@@ -129,7 +129,9 @@ Optional kann die Backend-URL über `VITE_API_URL` gesetzt werden.
 ## Scan-Settings und Metriken
 
 - Die Anzahl paralleler SNMP-Abfragen ist in der UI unter `Settings -> Scan` konfigurierbar.
-- Backend-API für Scan-Worker: `GET/PUT /api/v1/scan-settings` mit `max_workers`.
+- Backend-API für Scan-Worker: `GET/PUT /api/v1/scan-settings` mit `max_workers`, `snmp_timeout`, `snmp_retries` und `snmp_bulk_size` (Zeilen pro SNMP-Anfrage, 5-100, Standard 25).
+- Link- und MAC-Scans lesen Interface-Namen und -Aliase aus einem Cache und walken nur Status und Speed; die Namen werden höchstens einmal pro Discovery-Intervall (oder bei unbekanntem ifIndex) neu gelesen.
+- VLAN- und STP-Daten haben eigene Intervalle (`Settings -> Scan`, Standard 1800 s bzw. 300 s). Sie werden in MAC-Scans aktualisiert, sobald ihr Intervall abgelaufen ist; `0` bedeutet nur bei manuellen Full-Scans.
 - DNS-Resolver für PTR-Lookups sind in der UI unter `Settings -> DNS` konfigurierbar.
 - Backend-API für DNS-Server: `GET/PUT /api/v1/dns-settings` mit `servers` (IP-Liste).
 

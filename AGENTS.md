@@ -263,7 +263,7 @@ Rules of thumb:
   (background scan pipeline: executor, jobs, scheduler, event_loop, ping, dns,
   broadcast), `scanners/` (vendor SNMP scanners: aruba_cx, cisco, fs_scanner, generic,
   opnsense, unifi; plus detection/parsing helpers), `shared/`
-  (auth, crypto, audit, metrics, redis_client, state), `alembic/versions/` (migrations 001-020),
+  (auth, crypto, audit, metrics, redis_client, state), `alembic/versions/` (migrations 001-021),
   `tests/` (pytest suite), plus `config.py`, `database.py`, `schemas.py`,
   `celery_app.py`, `tasks.py`, `seed_db.py`, legacy `snmp_scanner.py`.
 - `frontend/` — React 18 + Vite + TypeScript SPA served by nginx; entry

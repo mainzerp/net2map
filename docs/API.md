@@ -281,7 +281,7 @@ Generic key/value app settings and dashboard statistics.
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
 | GET | `/settings` | any | List all app settings. | `AppSettingOut[]` |
-| PUT | `/settings/{key}` | op+ | Upsert one setting. Only allowlisted keys (`ALLOWED_SETTING_KEYS`: discovery/link/mac/port intervals, `discovery_scan_ranges`, `scan_max_workers`, `scan_snmp_timeout`, `scan_snmp_retries`, `dns_servers`, `map_opacity`, `map_scale`, `map_bg_color`, `audit_retention_days`); others -> `400 UNKNOWN_SETTING_KEY`. 10/min. | `AppSettingUpdate` -> `AppSettingOut` |
+| PUT | `/settings/{key}` | op+ | Upsert one setting. Only allowlisted keys (`ALLOWED_SETTING_KEYS`: discovery/link/mac/port/vlan/stp intervals, `discovery_scan_ranges`, `scan_max_workers`, `scan_snmp_timeout`, `scan_snmp_retries`, `scan_snmp_bulk_size`, `dns_servers`, `map_opacity`, `map_scale`, `map_bg_color`, `audit_retention_days`); others -> `400 UNKNOWN_SETTING_KEY`. 10/min. | `AppSettingUpdate` -> `AppSettingOut` |
 | GET | `/stats` | any | Counts (devices, ports, ports up, racks, endpoints) and last scan time/status. | ad-hoc object |
 
 ### credentials (`routers/credentials.py`)
@@ -400,8 +400,8 @@ Scan tuning, discovery ranges and DNS resolvers.
 
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
-| GET | `/scan-settings` | any | Current values. | `ScanSettingsOut` `{max_workers, snmp_timeout, snmp_retries}` |
-| PUT | `/scan-settings` | op+ | Update (clamped: workers 1..128, timeout 1..30, retries 0..10). | `ScanSettingsUpdate` -> `ScanSettingsOut` |
+| GET | `/scan-settings` | any | Current values. | `ScanSettingsOut` `{max_workers, snmp_timeout, snmp_retries, snmp_bulk_size}` |
+| PUT | `/scan-settings` | op+ | Update (clamped: workers 1..128, timeout 1..30, retries 0..10, bulk size 5..100 = GETBULK rows per request, default 25). | `ScanSettingsUpdate` -> `ScanSettingsOut` |
 | GET | `/discovery-ranges` | any | IP/CIDR ranges for discovery. | `DiscoveryRangesOut` `{ranges}` |
 | PUT | `/discovery-ranges` | op+ | Replace ranges (`400 INVALID_IP_RANGE` on bad entries). | `DiscoveryRangesUpdate` -> `DiscoveryRangesOut` |
 | GET | `/dns-settings` | any | DNS servers for PTR lookups. | `DnsSettingsOut` `{servers}` |

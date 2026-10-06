@@ -175,6 +175,34 @@
   (`--vlan-l/-c/-soft-l/-soft-c`) holding >= 4.85:1 on all surfaces. The golden angle
   was rejected: it puts common ids (10/99, 1/200) almost on the same hue.
 
+## SNMP scan load (2026-10-06)
+
+- **Interface names are cached, status and speed are always walked.** ifDescr/ifAlias
+  are static, so link/MAC scans read them from `devices.if_names` (ifIndex ->
+  [descr, alias]) and only walk ifOperStatus/ifHighSpeed. The cache is fresh for one
+  discovery interval (1800 s when discovery is disabled); any ifIndex missing from the
+  cache triggers a full name walk, and manual full/ports scans always walk. Rejected:
+  "walk once, then GET known OIDs" for FDB/ARP/LLDP -- their rows are the data, so new
+  endpoints or neighbors would never be found; for stable columns GETBULK already
+  needs about as few round trips as GET.
+- **GETBULK size is a scan setting** (`scan_snmp_bulk_size`, 5..100), applied per scan
+  through a ContextVar in `snmp_scanner` instead of threading a parameter through
+  every walk. Default stays 25 so existing installs behave unchanged; larger values
+  are opt-in because weak agents can answer large bulk requests with errors, which
+  ends a walk early.
+- **VLAN and STP have their own refresh intervals, piggybacked on MAC scans**
+  (`vlan_update_interval_sec` default 1800, `stp_update_interval_sec` default 300,
+  0 = manual full scans only). MAC scans rebuild the port rows, so they are the only
+  scheduled scans that can store per-port VLAN/STP data; when a part is not due, the
+  rebuild copies the previous port values (by ifIndex) and the device summary stays.
+  Link scans no longer walk VLAN/STP at all (they discarded the per-port data anyway).
+  Rejected: separate scheduled "vlan"/"stp" scan types -- new lock priorities, task
+  routing, API scan types and in-place port updates for little gain. Consequence: the
+  effective refresh is rounded up to the MAC interval and stops when MAC polling is
+  disabled.
+- **Interval fallbacks match the seeds** (links 60 s, MACs 300 s); the old 30 s
+  fallback only applied when the settings rows were missing.
+
 ## Rebranding to Net2Map (2026-10-06)
 
 - **Name: Net2Map.** Research found "NetMap" heavily used, including same-domain
