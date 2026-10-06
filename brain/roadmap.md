@@ -19,13 +19,12 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 ## Testing
 
 - Rebranding NetMap -> Net2Map (v3.0.0) · priority: P2 · area: full-stack
-  Done in be184f9 (not pushed): all names, runtime identifiers, CI,
+  Released as v3.0.0 (be184f9; repo renamed to mainzerp/net2map): all names, runtime identifiers, CI,
   docs; Redis key and localStorage migrations with tests. Passed: ruff, 686 backend
   tests (7 `test_snmp_driver` fail locally on Python 3.13 also without the change),
   typecheck, 192 frontend tests.
   User to verify: UI shows Net2Map at http://localhost:3000; run the upgrade guide
   in `docs/OPERATIONS.md` on the live stack (data, map background, theme kept).
-  Open: rename GitHub repo to `net2map` before tagging v3.0.0; then release.
 
 - Historical review findings fixed · priority: P2 · area: full-stack
   Done: CredentialUpdate ip validated like create; CSV formula-injection escaping

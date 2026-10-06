@@ -4,7 +4,9 @@
 
 **Type:** MAJOR
 
-Noch nicht veroeffentlicht. Das Produkt heisst jetzt Net2Map (vorher NetMap). Der
+Veroeffentlicht am 2026-10-06 als Tag `v3.0.0` (Images unter
+`ghcr.io/mainzerp/net2map/backend` und `/frontend`; Repo jetzt `mainzerp/net2map`).
+Commit `be184f9`. Das Produkt heisst jetzt Net2Map (vorher NetMap). Der
 Name "NetMap" ist mehrfach belegt, auch von Tools mit gleichem Zweck. Das Update
 erfordert manuelle Schritte: Anleitung in `docs/OPERATIONS.md`, Abschnitt
 "Upgrading from NetMap (v2.x) to Net2Map (v3.0.0)".
