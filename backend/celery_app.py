@@ -1,11 +1,11 @@
-"""Celery application configuration for NetMap background tasks."""
+"""Celery application configuration for Net2Map background tasks."""
 from celery import Celery
 
 from config import settings
 
 REDIS_URL = settings.redis_url or "redis://localhost:6379/0"
 
-celery_app = Celery("netmap", broker=REDIS_URL, backend=REDIS_URL, include=["tasks"])
+celery_app = Celery("net2map", broker=REDIS_URL, backend=REDIS_URL, include=["tasks"])
 celery_app.conf.update(
     task_serializer="json",
     result_serializer="json",

@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 export type Theme = "dark" | "light";
 
-const STORAGE_KEY = "netmap-theme";
+const STORAGE_KEY = "net2map-theme";
 
 // Light ("paper") is the default; only an explicit stored "dark" preference
 // switches to the dark theme. Stored "light"/"dark" values keep working.

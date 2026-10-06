@@ -2,7 +2,7 @@
 
 **User-confirmed 2026-09-15.**
 
-NetMap discovers and visualizes switch topologies via SNMP. It scans the network with
+Net2Map discovers and visualizes switch topologies via SNMP. It scans the network with
 vendor-aware SNMP scanners (Aruba CX, FS.com, UniFi, OPNsense, generic), builds LLDP
 topology and per-port views, renders a network map with backgrounds and rack views, and
 tracks end devices (endpoints) by MAC identity. RBAC, audit logging, a scan queue, and

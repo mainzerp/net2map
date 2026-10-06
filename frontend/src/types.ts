@@ -133,7 +133,7 @@ export interface ScanProgress {
   [key: string]: unknown;
 }
 
-export interface NetmapState {
+export interface Net2MapState {
   // Topology selection (topology data itself lives in TanStack Query)
   selectedRack: SelectedRack | null;
   setSelectedRack: (rack: SelectedRack | null | ((prev: SelectedRack | null) => SelectedRack | null)) => void;

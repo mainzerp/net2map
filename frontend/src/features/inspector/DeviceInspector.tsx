@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Container, MapPin } from "lucide-react";
 import { useDevices, useTopology } from "../../hooks/api";
 import { searchWithInspect, useInspector } from "../../hooks/useInspector";
-import useNetmapStore from "../../store";
+import useNet2MapStore from "../../store";
 import { speedLabel } from "../../theme/visual";
 import { Badge, Button, StatusDot, type BadgeTone } from "../../components/ui";
 import type { PortInfo } from "../../types";
@@ -62,8 +62,8 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
   const devicesQuery = useDevices();
   const { open, close, raw } = useInspector();
   const navigate = useNavigate();
-  const setSelectedRack = useNetmapStore((s) => s.setSelectedRack);
-  const setFocusDevice = useNetmapStore((s) => s.setFocusDevice);
+  const setSelectedRack = useNet2MapStore((s) => s.setSelectedRack);
+  const setFocusDevice = useNet2MapStore((s) => s.setFocusDevice);
 
   const device = useMemo(
     () => data?.nodes.find((n) => n.id === id) ?? devicesQuery.data?.find((n) => n.id === id),

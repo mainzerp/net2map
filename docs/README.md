@@ -1,6 +1,6 @@
-# NetMap -- Documentation Map
+# Net2Map -- Documentation Map
 
-NetMap discovers and visualizes switch topologies via SNMP (FastAPI backend + React
+Net2Map discovers and visualizes switch topologies via SNMP (FastAPI backend + React
 frontend, deployed as a Docker stack). This file is the doc map: what each document
 owns and the reading order. It does not own any topic itself.
 
@@ -22,7 +22,7 @@ owns and the reading order. It does not own any topic itself.
 | `VERSION.md` | Release history and version carrier (`## vX.Y.Z -- Title`) |
 | `AGENTS.md` | Agent operating rules (delegation, language, release process) |
 | `brain/BRAIN.md` | Front door to the brain: mission summary, reading order |
-| `brain/Mission.md` | Why NetMap exists, what winning looks like |
+| `brain/Mission.md` | Why Net2Map exists, what winning looks like |
 | `brain/Goals.md` | Current stretch goals |
 | `brain/How We Work.md` | Build rhythm and verification commands |
 | `brain/Decisions.md` | Decisions with rationale |

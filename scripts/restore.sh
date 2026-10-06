@@ -3,8 +3,8 @@
 # restore.sh -- Restore a PostgreSQL backup into the Docker container
 #
 # Usage:
-#   ./scripts/restore.sh backups/netmap_20260320_120000.sql.gz
-#   ./scripts/restore.sh backups/netmap_20260320_120000.sql
+#   ./scripts/restore.sh backups/net2map_20260320_120000.sql.gz
+#   ./scripts/restore.sh backups/net2map_20260320_120000.sql
 #
 # Supports both plain .sql and gzip-compressed .sql.gz files.
 # ---------------------------------------------------------------------------
@@ -12,9 +12,9 @@
 set -euo pipefail
 
 # ── Configuration ──────────────────────────────────────────────────────────
-CONTAINER="netmap-postgres"
-DB_NAME="netmap"
-DB_USER="netmap"
+CONTAINER="net2map-postgres"
+DB_NAME="net2map"
+DB_USER="net2map"
 
 # ── Argument validation ───────────────────────────────────────────────────
 if [ $# -lt 1 ]; then

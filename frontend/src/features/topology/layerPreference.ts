@@ -4,8 +4,8 @@
 
 import type { MapLayer } from "./overlays";
 
-export const LAYER_STORAGE_KEY = "netmap-map-layer";
-export const LAYER_VLAN_STORAGE_KEY = "netmap-map-layer-vlan";
+export const LAYER_STORAGE_KEY = "net2map-map-layer";
+export const LAYER_VLAN_STORAGE_KEY = "net2map-map-layer-vlan";
 
 export function loadLayerPreference(): MapLayer {
   try {

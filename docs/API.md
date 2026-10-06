@@ -1,6 +1,6 @@
-# NetMap -- API Reference
+# Net2Map -- API Reference
 
-Agent-facing reference for the NetMap backend HTTP and WebSocket API. Derived from
+Agent-facing reference for the Net2Map backend HTTP and WebSocket API. Derived from
 the code; when this document and the code disagree, the code wins.
 
 Sources of truth:

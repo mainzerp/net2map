@@ -35,7 +35,7 @@ import type {
 } from "../../types";
 import { useTheme } from "../../theme/ThemeProvider";
 import { speedLabelToMbps, speedStrokeWidth } from "../../theme/visual";
-import useNetmapStore from "../../store";
+import useNet2MapStore from "../../store";
 import RackNode from "./nodes/RackNode";
 import DeviceNode from "./nodes/DeviceNode";
 import BackgroundNode from "./nodes/BackgroundNode";
@@ -93,7 +93,7 @@ import type { TopoFlowNode, AggregatedFlowEdge, EdgeOverlay } from "./flowTypes"
 const nodeTypes = { rack: RackNode, device: DeviceNode, mapBackground: BackgroundNode } as unknown as NodeTypes;
 const edgeTypes = { aggregated: AggregatedEdge } as unknown as EdgeTypes;
 
-const VIEWPORT_STORAGE_KEY = "netmap-zoom";
+const VIEWPORT_STORAGE_KEY = "net2map-zoom";
 
 // Background image base box (matches the legacy 900x550 map coordinate space).
 const BG_BASE = { width: 900, height: 550 };
@@ -196,8 +196,8 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
   const tier = useStore(s => zoomTier(s.transform[2]));
   const nodesInitialized = useNodesInitialized();
   const reducedMotion = useReducedMotion();
-  const focusDeviceId = useNetmapStore(s => s.focusDeviceId);
-  const clearFocusDevice = useNetmapStore(s => s.clearFocusDevice);
+  const focusDeviceId = useNet2MapStore(s => s.focusDeviceId);
+  const clearFocusDevice = useNet2MapStore(s => s.clearFocusDevice);
   const [flowPref, setFlowPref] = useState<boolean | null>(loadFlowPreference);
   const [layerPref, setLayerPref] = useState<MapLayer>(loadLayerPreference);
   const [vlanPref, setVlanPref] = useState<number | null>(loadLayerVlan);

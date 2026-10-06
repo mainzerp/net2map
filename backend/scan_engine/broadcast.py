@@ -1,7 +1,7 @@
 """Broadcast helpers -- push scan progress/completion to WebSocket clients.
 
 Distribution: when Redis is available, updates are published to the
-``netmap:scan_updates`` pub/sub channel so they also reach WebSocket clients
+``net2map:scan_updates`` pub/sub channel so they also reach WebSocket clients
 connected to another process (e.g. scans running inside a Celery worker). The
 web process runs a subscriber (started lazily on the first WebSocket connect
 in routers/ws.py) that forwards channel messages to its local connections.
@@ -9,7 +9,7 @@ Without Redis, updates are delivered in-process exactly as before.
 """
 import json
 
-SCAN_UPDATES_CHANNEL = "netmap:scan_updates"
+SCAN_UPDATES_CHANNEL = "net2map:scan_updates"
 
 
 def _broadcast(payload: dict) -> None:

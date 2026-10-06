@@ -5,19 +5,19 @@
 # Usage:
 #   ./scripts/backup.sh
 #
-# The script runs pg_dump inside the netmap-postgres container and writes a
-# gzip-compressed SQL dump to backups/netmap_YYYYMMDD_HHMMSS.sql.gz.
+# The script runs pg_dump inside the net2map-postgres container and writes a
+# gzip-compressed SQL dump to backups/net2map_YYYYMMDD_HHMMSS.sql.gz.
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
 
 # ── Configuration ──────────────────────────────────────────────────────────
-CONTAINER="netmap-postgres"
-DB_NAME="netmap"
-DB_USER="netmap"
+CONTAINER="net2map-postgres"
+DB_NAME="net2map"
+DB_USER="net2map"
 BACKUP_DIR="$(cd "$(dirname "$0")/.." && pwd)/backups"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-BACKUP_FILE="${BACKUP_DIR}/netmap_${TIMESTAMP}.sql.gz"
+BACKUP_FILE="${BACKUP_DIR}/net2map_${TIMESTAMP}.sql.gz"
 
 # ── Pre-flight checks ─────────────────────────────────────────────────────
 

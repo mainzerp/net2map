@@ -5,7 +5,7 @@
 
 import { createContext, useContext } from "react";
 
-export const FLOW_STORAGE_KEY = "netmap-map-flow";
+export const FLOW_STORAGE_KEY = "net2map-map-flow";
 
 // Above this many edges the overlay defaults to off to keep large maps light.
 export const FLOW_DEFAULT_EDGE_LIMIT = 300;

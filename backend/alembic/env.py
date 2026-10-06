@@ -1,4 +1,4 @@
-"""Alembic environment configuration for switch-map."""
+"""Alembic environment configuration for net2map."""
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool

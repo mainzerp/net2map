@@ -1,4 +1,4 @@
-"""Celery tasks for NetMap background scan execution."""
+"""Celery tasks for Net2Map background scan execution."""
 import asyncio
 import logging
 from datetime import datetime, timezone
@@ -99,7 +99,7 @@ def run_scan_task(self, job_id: str, dry_run: bool = False, scan_type: str = "fu
         "status": result.status if result.status in {"finished", "cancelled", "dry_run"} else "failed",
     })
     if terminal_error is not None:
-        # Keep Celery's task state consistent with the persisted NetMap job.
+        # Keep Celery's task state consistent with the persisted Net2Map job.
         raise terminal_error
 
 

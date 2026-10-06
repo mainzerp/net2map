@@ -1,4 +1,4 @@
-"""FastAPI application entry point -- NetMap backend."""
+"""FastAPI application entry point -- Net2Map backend."""
 import base64
 import hashlib
 import logging
@@ -61,7 +61,7 @@ CORS_ORIGIN = app_settings.cors_origin
 if CORS_ORIGIN == "*":
     _log.warning(
         "CORS_ORIGIN is set to '*' -- this is insecure in production. "
-        "Set CORS_ORIGIN to the specific frontend URL (e.g. https://netmap.example.com)"
+        "Set CORS_ORIGIN to the specific frontend URL (e.g. https://net2map.example.com)"
     )
 
 # Shared Redis storage when REDIS_URL is set so limits hold across uvicorn
@@ -77,8 +77,10 @@ limiter = Limiter(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from shared.redis_client import get_redis
+    from shared.state import migrate_legacy_redis_keys
     if get_redis():
         _log.info("Starting backend with Redis state store (multi-worker capable)")
+        migrate_legacy_redis_keys()
     else:
         _log.info("Starting single-worker backend (in-process state requires workers=1)")
     create_tables()
@@ -107,8 +109,8 @@ async def lifespan(app: FastAPI):
 # Docs routes are registered manually below (docs_url/redoc_url=None) so they
 # can carry a docs-specific Content-Security-Policy.
 app = FastAPI(
-    title="NetMap API",
-    version="2.2.0",
+    title="Net2Map API",
+    version="3.0.0",
     dependencies=[Depends(_require_auth)],
     lifespan=lifespan,
     docs_url=None,

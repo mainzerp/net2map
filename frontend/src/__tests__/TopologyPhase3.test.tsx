@@ -27,7 +27,7 @@ vi.mock("../api", () => ({
 }));
 
 import InspectorDrawer from "../features/inspector/InspectorDrawer";
-import useNetmapStore from "../store";
+import useNet2MapStore from "../store";
 import {
   VENDOR_BADGE,
   VENDOR_COLOR,
@@ -160,7 +160,7 @@ describe("Show on map", () => {
     vi.clearAllMocks();
     stubMemoryStorage();
     mockApiGet.mockImplementation(apiGetImpl);
-    useNetmapStore.setState({ focusDeviceId: null, selectedRack: null });
+    useNet2MapStore.setState({ focusDeviceId: null, selectedRack: null });
   });
 
   afterEach(() => {
@@ -182,14 +182,14 @@ describe("Show on map", () => {
     await waitFor(() =>
       expect(screen.getByTestId("location").textContent).toBe("/map?inspect=device:1"),
     );
-    expect(useNetmapStore.getState().focusDeviceId).toBe(1);
-    expect(useNetmapStore.getState().selectedRack?.id).toBe(7);
+    expect(useNet2MapStore.getState().focusDeviceId).toBe(1);
+    expect(useNet2MapStore.getState().selectedRack?.id).toBe(7);
   });
 
   it("store focus can be cleared", () => {
-    useNetmapStore.getState().setFocusDevice(42);
-    expect(useNetmapStore.getState().focusDeviceId).toBe(42);
-    useNetmapStore.getState().clearFocusDevice();
-    expect(useNetmapStore.getState().focusDeviceId).toBeNull();
+    useNet2MapStore.getState().setFocusDevice(42);
+    expect(useNet2MapStore.getState().focusDeviceId).toBe(42);
+    useNet2MapStore.getState().clearFocusDevice();
+    expect(useNet2MapStore.getState().focusDeviceId).toBeNull();
   });
 });

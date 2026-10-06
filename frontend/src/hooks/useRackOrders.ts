@@ -1,9 +1,9 @@
-import useNetmapStore from "../store";
+import useNet2MapStore from "../store";
 import type { TopologyNode } from "../types";
 
 export function useRackOrders() {
-  const rackOrders = useNetmapStore(s => s.rackOrders);
-  const setRackOrders = useNetmapStore(s => s.setRackOrders);
+  const rackOrders = useNet2MapStore(s => s.rackOrders);
+  const setRackOrders = useNet2MapStore(s => s.setRackOrders);
 
   const reorderDevice = (
     deviceId: number,

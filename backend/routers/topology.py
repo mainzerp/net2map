@@ -35,7 +35,7 @@ def _get_topo_version() -> int:
     r = get_redis()
     if r:
         try:
-            val = r.get("netmap:topo_version")
+            val = r.get("net2map:topo_version")
             return int(val) if val else 0
         except Exception:
             pass
@@ -47,7 +47,7 @@ def _bump_topo_version():
     r = get_redis()
     if r:
         try:
-            r.incr("netmap:topo_version")
+            r.incr("net2map:topo_version")
             return
         except Exception:
             pass
@@ -58,7 +58,7 @@ def _get_topo_cache() -> dict:
     r = get_redis()
     if r:
         try:
-            raw = r.get("netmap:topo_cache")
+            raw = r.get("net2map:topo_cache")
             return json.loads(raw) if raw else {}
         except Exception:
             pass
@@ -70,7 +70,7 @@ def _set_topo_cache(data: dict):
     r = get_redis()
     if r:
         try:
-            r.set("netmap:topo_cache", json.dumps(data), ex=300)
+            r.set("net2map:topo_cache", json.dumps(data), ex=300)
             return
         except Exception:
             pass

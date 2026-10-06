@@ -8,7 +8,7 @@ import React from "react";
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import TopologyCanvas from "../features/topology/TopologyCanvas";
-import useNetmapStore from "../store";
+import useNet2MapStore from "../store";
 import { FLOW_STORAGE_KEY } from "../features/topology/flowContext";
 import { LAYER_STORAGE_KEY, LAYER_VLAN_STORAGE_KEY } from "../features/topology/layerPreference";
 import { vlanColor } from "../features/topology/vlanColor";
@@ -151,7 +151,7 @@ describe("TopologyCanvas phase 3", () => {
   let storage: Map<string, string>;
   beforeEach(() => {
     storage = stubMemoryStorage();
-    useNetmapStore.setState({ focusDeviceId: null });
+    useNet2MapStore.setState({ focusDeviceId: null });
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -197,15 +197,15 @@ describe("TopologyCanvas phase 3", () => {
   });
 
   it("consumes and clears a focus request for a racked device", async () => {
-    useNetmapStore.getState().setFocusDevice(7);
+    useNet2MapStore.getState().setFocusDevice(7);
     render(<TopologyCanvas {...defaultProps} nodes={nodes} managedRacks={managedRacks} />);
-    await waitFor(() => expect(useNetmapStore.getState().focusDeviceId).toBeNull());
+    await waitFor(() => expect(useNet2MapStore.getState().focusDeviceId).toBeNull());
   });
 
   it("clears a focus request for a device that is not on the canvas", async () => {
-    useNetmapStore.getState().setFocusDevice(12345);
+    useNet2MapStore.getState().setFocusDevice(12345);
     render(<TopologyCanvas {...defaultProps} nodes={nodes} managedRacks={managedRacks} />);
-    await waitFor(() => expect(useNetmapStore.getState().focusDeviceId).toBeNull());
+    await waitFor(() => expect(useNet2MapStore.getState().focusDeviceId).toBeNull());
   });
 });
 
@@ -213,7 +213,7 @@ describe("TopologyCanvas logical layers", () => {
   let storage: Map<string, string>;
   beforeEach(() => {
     storage = stubMemoryStorage();
-    useNetmapStore.setState({ focusDeviceId: null });
+    useNet2MapStore.setState({ focusDeviceId: null });
   });
   afterEach(() => {
     vi.unstubAllGlobals();

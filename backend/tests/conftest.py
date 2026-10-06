@@ -1,4 +1,4 @@
-"""Shared test fixtures for the NetMap backend test suite."""
+"""Shared test fixtures for the Net2Map backend test suite."""
 import os
 import sys
 from unittest.mock import MagicMock

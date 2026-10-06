@@ -57,7 +57,7 @@ export default function LoginPage() {
             <line x1="18" y1="8" x2="18" y2="16" />
           </svg>
           <h2 className="text-primary text-lg font-bold mt-2">
-            NetMap Login
+            Net2Map Login
           </h2>
           <p className="mt-2 text-xs text-muted">Sign in to explore your network.</p>
         </div>

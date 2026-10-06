@@ -1,6 +1,8 @@
-# NetMap
+# Net2Map
 
-NetMap ist eine Web-Anwendung zur Erkennung und Visualisierung von Switch-Topologien via SNMP.
+Net2Map ist eine Web-Anwendung zur Erkennung und Visualisierung von Switch-Topologien via SNMP.
+Bis v2.x hiess das Projekt NetMap; Update-Anleitung von v2.x auf v3.0.0 in
+`docs/OPERATIONS.md` ("Upgrading from NetMap (v2.x) to Net2Map (v3.0.0)").
 Das Projekt besteht aus einem FastAPI-Backend (Scan, Persistenz, API) und einem React/Vite-Frontend (Map, Rack-Ansicht, Settings).
 
 ## Features
@@ -54,11 +56,11 @@ Vorgebaute Images aus der GitHub Container Registry (fuer `v*`-Tags) statt
 lokalem Build:
 
 ```bash
-NETMAP_VERSION=v1.2.3 docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
+NET2MAP_VERSION=v1.2.3 docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
 ```
 
-PostgreSQL speichert die Datenbank persistent im Docker-Volume `netmap-pgdata`.
-Das Volume `netmap-data` enthaelt die unter `/data` abgelegten Dateien.
+PostgreSQL speichert die Datenbank persistent im Docker-Volume `net2map_pgdata`.
+Das Volume `net2map_data` enthaelt die unter `/data` abgelegten Dateien.
 
 Stoppen:
 
@@ -148,7 +150,7 @@ Das Scan-Ergebnis (`POST /api/v1/scan`) enthält zusätzliche Laufzeitdaten:
 `VITE_API_URL` is baked into the frontend bundle at build time.
 To point the frontend at a different backend URL, rebuild the image:
 ```bash
-docker buildx build --build-arg VITE_API_URL=http://your-backend:8000 -t netmap-frontend .
+docker buildx build --build-arg VITE_API_URL=http://your-backend:8000 -t net2map-frontend .
 ```
 
 ## Sicherheit
@@ -172,7 +174,7 @@ docker buildx build --build-arg VITE_API_URL=http://your-backend:8000 -t netmap-
   automatische Wiederholung. Socket-Authentifizierung laeuft ausserhalb des
   Event-Loops mit insgesamt fuenf Sekunden Zeitlimit; die Pruefdauer kommt zum
   Intervall hinzu.
-- **Redis-Persistenz:** Compose verwendet `netmap-redisdata` und AOF mit
+- **Redis-Persistenz:** Compose verwendet `net2map_redisdata` und AOF mit
   `appendfsync everysec`. Bei einem Absturz kann etwa eine Sekunde an Schreibvorgaengen
   verloren gehen. Nach Verlust oder Wiederherstellung veralteter Redis-Daten
   `JWT_SECRET` wechseln, damit zuvor gesperrte Tokens nicht erneut gueltig werden.
@@ -193,23 +195,23 @@ docker buildx build --build-arg VITE_API_URL=http://your-backend:8000 -t netmap-
 
 ## Production Deployment
 
-Before deploying NetMap to production, ensure the following requirements are met:
+Before deploying Net2Map to production, ensure the following requirements are met:
 
-1. **TLS/HTTPS**: NetMap does not include built-in TLS. You MUST place a TLS-terminating reverse proxy in front of the application. See the TLS / HTTPS Setup section below.
+1. **TLS/HTTPS**: Net2Map does not include built-in TLS. You MUST place a TLS-terminating reverse proxy in front of the application. See the TLS / HTTPS Setup section below.
 2. **Authentication**: Set `JWT_SECRET` (recommended) or `SECRET_TOKEN` to enable authentication. Without either, all endpoints are accessible without credentials.
 3. **Encryption at Rest**: Set `ENCRYPTION_KEY` to encrypt SNMP passwords in the database. Without it, passwords are stored in plaintext.
 4. **Strong Passwords**: Use strong, unique values for `POSTGRES_PASSWORD`, `DEFAULT_ADMIN_PASSWORD`, and all secrets. Never use the example values in production.
-5. **CORS**: Set `CORS_ORIGIN` to your actual domain (e.g. `https://netmap.example.com`). Do not use `*` in production.
+5. **CORS**: Set `CORS_ORIGIN` to your actual domain (e.g. `https://net2map.example.com`). Do not use `*` in production.
 
 ## TLS / HTTPS Setup
 
-NetMap ships without TLS. To secure traffic in production, place a TLS-terminating reverse proxy in front of the frontend container. Common options:
+Net2Map ships without TLS. To secure traffic in production, place a TLS-terminating reverse proxy in front of the frontend container. Common options:
 
 ### Option A: Caddy (automatic HTTPS)
 
 ```
 # Caddyfile
-netmap.example.com {
+net2map.example.com {
     reverse_proxy frontend:80
 }
 ```
@@ -223,8 +225,8 @@ Add Traefik labels to the `frontend` service in `docker-compose.yml`:
 ```yaml
 labels:
   - "traefik.enable=true"
-  - "traefik.http.routers.netmap.rule=Host(`netmap.example.com`)"
-  - "traefik.http.routers.netmap.tls.certresolver=letsencrypt"
+  - "traefik.http.routers.net2map.rule=Host(`net2map.example.com`)"
+  - "traefik.http.routers.net2map.tls.certresolver=letsencrypt"
 ```
 
 ### Option C: nginx with TLS
@@ -234,10 +236,10 @@ Create an `nginx-ssl.conf` with:
 ```nginx
 server {
     listen 443 ssl;
-    server_name netmap.example.com;
+    server_name net2map.example.com;
 
-    ssl_certificate     /etc/ssl/certs/netmap.pem;
-    ssl_certificate_key /etc/ssl/private/netmap.key;
+    ssl_certificate     /etc/ssl/certs/net2map.pem;
+    ssl_certificate_key /etc/ssl/private/net2map.key;
     ssl_protocols       TLSv1.2 TLSv1.3;
     ssl_ciphers         HIGH:!aNULL:!MD5;
 
@@ -251,7 +253,7 @@ server {
 }
 ```
 
-For any option, update `CORS_ORIGIN` in `.env` to match the HTTPS URL (e.g. `https://netmap.example.com`).
+For any option, update `CORS_ORIGIN` in `.env` to match the HTTPS URL (e.g. `https://net2map.example.com`).
 
 ## Dependency Management
 

@@ -1,3 +1,7 @@
+# Fixed project name: image, volume and network names do not depend on the
+# checkout folder (images net2map-backend/-frontend, volumes net2map_*).
+name: net2map
+
 x-logging: &default-logging
   driver: json-file
   options:
@@ -9,16 +13,16 @@ services:
   # ─── PostgreSQL Database ──────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
-    container_name: netmap-postgres
+    container_name: net2map-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: netmap
-      POSTGRES_USER: netmap
+      POSTGRES_DB: net2map
+      POSTGRES_USER: net2map
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes:
-      - netmap-pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
     networks:
-      - netmap
+      - net2map
     deploy:
       resources:
         limits:
@@ -26,7 +30,7 @@ services:
           cpus: "1.0"
     logging: *default-logging
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U netmap"]
+      test: ["CMD-SHELL", "pg_isready -U net2map"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -34,13 +38,13 @@ services:
   # ─── Redis ────────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
-    container_name: netmap-redis
+    container_name: net2map-redis
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     volumes:
-      - netmap-redisdata:/data
+      - redisdata:/data
     networks:
-      - netmap
+      - net2map
     deploy:
       resources:
         limits:
@@ -56,10 +60,10 @@ services:
   # ─── FastAPI Backend ──────────────────────────────────────────────────────────
   backend:
     build: ./backend
-    container_name: netmap-backend
+    container_name: net2map-backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: "postgresql://netmap:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres/netmap"
+      DATABASE_URL: "postgresql://net2map:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres/net2map"
       REDIS_URL: "redis://redis:6379/0"
       CORS_ORIGIN: "${CORS_ORIGIN:-http://localhost:3000}"
       # Trusted proxies for X-Forwarded-For (rate limiting sees real client IPs).
@@ -78,9 +82,9 @@ services:
       AUDIT_RETENTION_DAYS: "${AUDIT_RETENTION_DAYS:-90}"
       OPENAPI_ENABLED: "${OPENAPI_ENABLED:-true}"
     volumes:
-      - netmap-data:/data          # persistent storage for map background images etc.
+      - data:/data          # persistent storage for map background images etc.
     networks:
-      - netmap
+      - net2map
     deploy:
       resources:
         limits:
@@ -103,11 +107,11 @@ services:
   # ─── Celery Worker ────────────────────────────────────────────────────────────
   celery-worker:
     build: ./backend
-    container_name: netmap-celery
+    container_name: net2map-celery
     restart: unless-stopped
     command: celery -A celery_app worker --loglevel=info --concurrency=4
     environment:
-      DATABASE_URL: "postgresql://netmap:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres/netmap"
+      DATABASE_URL: "postgresql://net2map:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres/net2map"
       REDIS_URL: "redis://redis:6379/0"
       SECRET_TOKEN: "${SECRET_TOKEN:?Set SECRET_TOKEN in .env}"
       JWT_SECRET: "${JWT_SECRET:-}"
@@ -116,9 +120,9 @@ services:
       AUDIT_RETENTION_DAYS: "${AUDIT_RETENTION_DAYS:-90}"
       RUN_MIGRATIONS: "false"
     volumes:
-      - netmap-data:/data
+      - data:/data
     networks:
-      - netmap
+      - net2map
     deploy:
       resources:
         limits:
@@ -140,18 +144,18 @@ services:
   # ─── Celery Beat Scheduler ───────────────────────────────────────────────────
   celery-beat:
     build: ./backend
-    container_name: netmap-celery-beat
+    container_name: net2map-celery-beat
     restart: unless-stopped
     command: celery -A celery_app beat --loglevel=info --schedule /data/celerybeat-schedule
     environment:
-      DATABASE_URL: "postgresql://netmap:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres/netmap"
+      DATABASE_URL: "postgresql://net2map:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres/net2map"
       REDIS_URL: "redis://redis:6379/0"
       SECRET_TOKEN: "${SECRET_TOKEN:?Set SECRET_TOKEN in .env}"
       JWT_SECRET: "${JWT_SECRET:-}"
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-}"
       RUN_MIGRATIONS: "false"
     networks:
-      - netmap
+      - net2map
     deploy:
       resources:
         limits:
@@ -172,7 +176,7 @@ services:
         # Inside Docker the nginx proxy rewrites /api → backend:8000
         # so we leave VITE_API_URL empty (relative path)
         VITE_API_URL: ""
-    container_name: netmap-frontend
+    container_name: net2map-frontend
     restart: unless-stopped
     ports:
       - "3000:80"
@@ -186,13 +190,13 @@ services:
       backend:
         condition: service_healthy
     networks:
-      - netmap
+      - net2map
 
 volumes:
-  netmap-data:
-  netmap-pgdata:
-  netmap-redisdata:
+  data:
+  pgdata:
+  redisdata:
 
 networks:
-  netmap:
+  net2map:
     driver: bridge

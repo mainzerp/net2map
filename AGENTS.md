@@ -1,12 +1,16 @@
 # AGENTS.md
 
-Operating standard for AI agents working in this repository (**NetMap** — web app that
+Operating standard for AI agents working in this repository (**Net2Map** — web app that
 discovers and visualizes switch topologies via SNMP: vendor-aware scanners, network
 map, rack views, endpoint tracking; FastAPI + React, deployed as a Docker stack).
 
-Naming: the product is "NetMap" everywhere that matters; the GitHub repo is `netmap`,
-the local folder is `switch-map`, the frontend package name is `switch-map`, and older
-files say "Switch-Map" — all refer to the same product. The frontend entry is
+Naming: the product is "Net2Map" (renamed from "NetMap" in v3.0.0; even older files
+say "Switch-Map"). Runtime and build identifiers use `net2map` (`NET2MAP_` for env
+vars); legacy `netmap` strings may only remain in history (`VERSION.md`,
+`docs/SubAgent/`, dated brain entries) and in the one-time migrations
+(`migrate_legacy_redis_keys` in `backend/shared/state.py`,
+`frontend/src/storageMigration.ts`). The GitHub repo is `netmap` until the user renames
+it to `net2map`; the local folder is `switch-map`. The frontend entry is
 `src/main.tsx` (loaded by `index.html`); the former dead duplicate `src/main.jsx`
 has been removed.
 
@@ -284,7 +288,8 @@ Rules of thumb:
 - `workflows/` — n8n export folder (`n8n_mzrsvr_patric_m/`), currently empty; purpose
   unconfirmed — leave untouched.
 - `.github/workflows/ci.yml` — CI: ruff + backend pytest + frontend vitest; on `v*`
-  tags pushes images to `ghcr.io/mainzerp/netmap`.
+  tags pushes images to `ghcr.io/<github.repository>` (`ghcr.io/mainzerp/net2map`
+  after the repo rename).
 - Root files: `README.md` (product overview/quickstart, German), `VERSION.md`
   (version carrier), `BACKUP.md` (backup/restore manual). The roadmap lives in
   `brain/roadmap.md` (the legacy `todo.md` was removed). The one-shot
@@ -362,7 +367,7 @@ to commit or publish.
 `VERSION.md` is the single source of truth for the version (`## vX.Y.Z -- Title`
 headings with a Type label and change sections). The version is not mirrored in code;
 the stale `frontend/package.json` version is ignored. Git tags `v*` drive the CI image
-push to `ghcr.io/mainzerp/netmap`.
+push to `ghcr.io/mainzerp/net2map`.
 
 Release checklist (all required):
 

@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import useNetmapStore from "../store";
+import useNet2MapStore from "../store";
 import { useToast } from "../components/ToastProvider";
 
 /**
@@ -7,7 +7,7 @@ import { useToast } from "../components/ToastProvider";
  * command palette so both report the result through the same toasts.
  */
 export function useStartScan() {
-  const startScan = useNetmapStore((s) => s.startScan);
+  const startScan = useNet2MapStore((s) => s.startScan);
   const { addToast } = useToast();
 
   return useCallback(async () => {

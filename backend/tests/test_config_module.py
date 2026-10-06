@@ -28,14 +28,14 @@ def test_settings_defaults():
 
     # Construct with explicit overrides cleared
     s = Settings(
-        database_url="postgresql://netmap:netmap_pw@postgres/netmap",
+        database_url="postgresql://net2map:net2map_pw@postgres/net2map",
         redis_url="",
         cors_origin="http://localhost:3000",
         jwt_secret="",
         jwt_expiry_hours=24,
         log_level="INFO",
     )
-    assert s.database_url == "postgresql://netmap:netmap_pw@postgres/netmap"
+    assert s.database_url == "postgresql://net2map:net2map_pw@postgres/net2map"
     assert s.redis_url == ""
     assert s.cors_origin == "http://localhost:3000"
     assert s.jwt_expiry_hours == 24

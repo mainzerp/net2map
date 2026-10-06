@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # Database
-    database_url: str = "postgresql://netmap:netmap_pw@postgres/netmap"
+    database_url: str = "postgresql://net2map:net2map_pw@postgres/net2map"
 
     # Redis / Celery
     redis_url: str = ""

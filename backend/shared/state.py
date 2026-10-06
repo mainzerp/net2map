@@ -29,6 +29,35 @@ _LOCAL_JOB_META: Dict[str, dict] = {}
 
 log = logging.getLogger(__name__)
 
+_KEY_PREFIX = "net2map:"
+_LEGACY_KEY_PREFIX = "netmap:"
+
+
+def migrate_legacy_redis_keys() -> int:
+    """Rename keys left over from the NetMap era (``netmap:*`` -> ``net2map:*``).
+
+    Idempotent and safe across concurrent workers: RENAMENX never overwrites a
+    key that already exists under the new prefix. Returns the number of keys
+    renamed.
+    """
+    r = get_redis()
+    if not r:
+        return 0
+    renamed = 0
+    try:
+        for key in list(r.scan_iter(match=_LEGACY_KEY_PREFIX + "*", count=500)):
+            name = key.decode() if isinstance(key, bytes) else key
+            try:
+                if r.renamenx(name, _KEY_PREFIX + name[len(_LEGACY_KEY_PREFIX):]):
+                    renamed += 1
+            except Exception as exc:
+                log.debug("legacy redis key %s not migrated: %s", name, exc)
+    except Exception as exc:
+        log.warning("legacy redis key migration failed: %s", exc)
+    if renamed:
+        log.info("Migrated %d legacy Redis keys from %s* to %s*", renamed, _LEGACY_KEY_PREFIX, _KEY_PREFIX)
+    return renamed
+
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 
@@ -45,8 +74,8 @@ def _log_event(level: int, event: str, **fields) -> None:
     r = get_redis()
     if r:
         try:
-            r.lpush("netmap:logs", json.dumps(payload, default=str))
-            r.ltrim("netmap:logs", 0, 4999)
+            r.lpush("net2map:logs", json.dumps(payload, default=str))
+            r.ltrim("net2map:logs", 0, 4999)
         except Exception:
             with LOG_BUFFER_LOCK:
                 LOG_BUFFER.append(payload)
@@ -74,7 +103,7 @@ def get_log_entries(
         try:
             # The list is newest-first (lpush); normalize to chronological
             # order so filtering and tail-selection match the memory path.
-            raw = redis_client.lrange("netmap:logs", 0, 4999)
+            raw = redis_client.lrange("net2map:logs", 0, 4999)
             rows = [json.loads(x) for x in reversed(raw)]
         except Exception:
             with LOG_BUFFER_LOCK:
@@ -98,9 +127,9 @@ def get_log_entries(
 # ── Scan Jobs ────────────────────────────────────────────────────────────────
 
 
-_SCAN_JOBS_KEY = "netmap:scan_jobs"
+_SCAN_JOBS_KEY = "net2map:scan_jobs"
 # Sorted set job_id -> creation time; drives per-job expiry of the hash.
-_SCAN_JOBS_INDEX_KEY = "netmap:scan_jobs:created"
+_SCAN_JOBS_INDEX_KEY = "net2map:scan_jobs:created"
 _SCAN_JOB_TTL = 86400  # seconds a job entry is kept after it was created
 
 
@@ -154,7 +183,7 @@ def get_scan_job(job_id: str) -> Optional[dict]:
     r = get_redis()
     if r:
         try:
-            raw = r.hget("netmap:scan_jobs", job_id)
+            raw = r.hget("net2map:scan_jobs", job_id)
             if not raw:
                 return None
             data = json.loads(raw)
@@ -172,7 +201,7 @@ def update_scan_job(job_id: str, updates: dict) -> None:
     r = get_redis()
     if r:
         try:
-            raw = r.hget("netmap:scan_jobs", job_id)
+            raw = r.hget("net2map:scan_jobs", job_id)
             if not raw:
                 return
             data = json.loads(raw)
@@ -181,7 +210,7 @@ def update_scan_job(job_id: str, updates: dict) -> None:
                 if k not in ("cancel_event", "thread")
             }
             data.update(serializable)
-            r.hset("netmap:scan_jobs", job_id, json.dumps(data, default=str))
+            r.hset("net2map:scan_jobs", job_id, json.dumps(data, default=str))
             local_updates = {k: v for k, v in updates.items() if k in ("cancel_event", "thread")}
             if local_updates:
                 meta = _LOCAL_JOB_META.setdefault(job_id, {})
@@ -200,7 +229,7 @@ def delete_scan_job(job_id: str) -> None:
     r = get_redis()
     if r:
         try:
-            r.hdel("netmap:scan_jobs", job_id)
+            r.hdel("net2map:scan_jobs", job_id)
         except Exception:
             pass
     _LOCAL_JOB_META.pop(job_id, None)
@@ -213,7 +242,7 @@ def list_scan_jobs() -> Dict[str, dict]:
     r = get_redis()
     if r:
         try:
-            all_raw = r.hgetall("netmap:scan_jobs")
+            all_raw = r.hgetall("net2map:scan_jobs")
             result = {}
             for k, v in all_raw.items():
                 job_id = k if isinstance(k, str) else k.decode()
@@ -234,11 +263,11 @@ def request_scan_cancel(job_id: str) -> bool:
     r = get_redis()
     if r:
         try:
-            raw = r.hget("netmap:scan_jobs", job_id)
+            raw = r.hget("net2map:scan_jobs", job_id)
             if raw:
                 data = json.loads(raw)
                 data["cancel_requested"] = True
-                r.hset("netmap:scan_jobs", job_id, json.dumps(data, default=str))
+                r.hset("net2map:scan_jobs", job_id, json.dumps(data, default=str))
                 found = True
         except Exception:
             pass
@@ -271,7 +300,7 @@ def is_cancel_requested(job_id: str) -> bool:
     r = get_redis()
     if r:
         try:
-            raw = r.hget("netmap:scan_jobs", job_id)
+            raw = r.hget("net2map:scan_jobs", job_id)
             if raw:
                 data = json.loads(raw)
                 return data.get("cancel_requested", False)
@@ -298,9 +327,9 @@ SCAN_PRIORITY = {
 _SCAN_LOCK_TTL = 600  # seconds -- safety TTL for crash recovery; renewed during scans
 
 # Name of the scan lease in the lease_fences table and suffix of the Redis
-# fencing counter key (netmap:fence:<name>).
+# fencing counter key (net2map:fence:<name>).
 SCAN_LOCK_FENCE_NAME = "scan:lock"
-_SCAN_LOCK_FENCE_KEY = "netmap:fence:" + SCAN_LOCK_FENCE_NAME
+_SCAN_LOCK_FENCE_KEY = "net2map:fence:" + SCAN_LOCK_FENCE_NAME
 
 # In-memory fallback when Redis is unavailable
 _LOCAL_SCAN_LOCK = threading.Lock()
@@ -396,7 +425,7 @@ def acquire_scan_lock(scan_type: str, timeout: int = 300) -> Optional[str]:
       - ``scan:lock``          -- simple mutex (NX, TTL), value = owner token
       - ``scan:active_type``   -- which scan type currently holds the lock
       - ``scan:waiting``       -- sorted set of waiting scan types (score = priority)
-      - ``netmap:fence:scan:lock`` -- fencing token counter (INCR on acquire)
+      - ``net2map:fence:scan:lock`` -- fencing token counter (INCR on acquire)
     """
     global _LOCAL_ACTIVE_SCAN, _LOCAL_LOCK_TOKEN
     priority = SCAN_PRIORITY.get(scan_type, 1)
@@ -567,7 +596,7 @@ def can_dispatch_scan(scan_type: str) -> bool:
 
 # ── Scheduler dispatch claims (shared across Celery workers / beat restarts) ──
 
-_SCHED_DISPATCH_KEY_PREFIX = "netmap:sched:last_dispatch:"
+_SCHED_DISPATCH_KEY_PREFIX = "net2map:sched:last_dispatch:"
 
 # In-memory fallback when Redis is unavailable (single process only).
 _LOCAL_LAST_DISPATCH: Dict[str, float] = {}
@@ -601,7 +630,7 @@ def claim_scheduled_dispatch(kind: str, interval: int) -> bool:
     """Claim the scheduler dispatch of ``kind`` for the current interval.
 
     Returns True for exactly one caller per interval across all processes
-    sharing Redis (key ``netmap:sched:last_dispatch:<kind>``), so multiple
+    sharing Redis (key ``net2map:sched:last_dispatch:<kind>``), so multiple
     Celery workers or a restarted beat cannot dispatch duplicates. Falls back
     to process-local timestamps when Redis is unavailable.
     """

@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, extractErrorMessage } from "../api";
-import useNetmapStore from "../store";
+import useNet2MapStore from "../store";
 import { useToast } from "../components/ToastProvider";
 import { useScanProgress } from "../hooks/useScanProgress";
 import { queryKeys } from "../hooks/api/keys";
@@ -31,12 +31,12 @@ export default function MapPage() {
   const loadError = topologyQuery.error ? extractErrorMessage(topologyQuery.error) : null;
 
   const { mapBgUrl, mapBgOpacity, mapBgScale, mapBgColor } = useMapBackground();
-  const selectedRack = useNetmapStore(s => s.selectedRack);
-  const setSelectedRack = useNetmapStore(s => s.setSelectedRack);
-  const highlightPortKey = useNetmapStore(s => s.highlightPortKey);
-  const clearHighlightPortKey = useNetmapStore(s => s.clearHighlightPortKey);
-  const activeScanJobId = useNetmapStore(s => s.activeScanJobId);
-  const setFocusDevice = useNetmapStore(s => s.setFocusDevice);
+  const selectedRack = useNet2MapStore(s => s.selectedRack);
+  const setSelectedRack = useNet2MapStore(s => s.setSelectedRack);
+  const highlightPortKey = useNet2MapStore(s => s.highlightPortKey);
+  const clearHighlightPortKey = useNet2MapStore(s => s.clearHighlightPortKey);
+  const activeScanJobId = useNet2MapStore(s => s.activeScanJobId);
+  const setFocusDevice = useNet2MapStore(s => s.setFocusDevice);
   const { invalidateTopology } = useInvalidateApi();
   const { rackOrders, reorderDevice, reorderClassSection } = useRackOrders();
   const { addToast } = useToast();

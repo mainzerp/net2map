@@ -33,7 +33,7 @@ describe("LoginPage", () => {
 
   it("renders the login form with username and password fields", () => {
     renderWithRouter(<LoginPage />);
-    expect(screen.getByText("NetMap Login")).toBeTruthy();
+    expect(screen.getByText("Net2Map Login")).toBeTruthy();
     expect(screen.getByLabelText(/username/i)).toBeTruthy();
     expect(screen.getByLabelText(/password/i)).toBeTruthy();
   });

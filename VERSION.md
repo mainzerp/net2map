@@ -1,5 +1,37 @@
 # Version History
 
+## v3.0.0 -- Umbenennung in Net2Map
+
+**Type:** MAJOR
+
+Noch nicht veroeffentlicht. Das Produkt heisst jetzt Net2Map (vorher NetMap). Der
+Name "NetMap" ist mehrfach belegt, auch von Tools mit gleichem Zweck. Das Update
+erfordert manuelle Schritte: Anleitung in `docs/OPERATIONS.md`, Abschnitt
+"Upgrading from NetMap (v2.x) to Net2Map (v3.0.0)".
+
+### Aenderungen (breaking)
+
+- Sichtbarer Name ueberall Net2Map: Browser-Titel, Login, Sidebar, OpenAPI-Titel
+  ("Net2Map API"), README und Doku.
+- Compose-Projektname fest auf `net2map` (unabhaengig vom Ordnernamen). Container
+  `net2map-*`, Netzwerk `net2map`, Volumes `net2map_pgdata`, `net2map_redisdata`,
+  `net2map_data`, lokale Images `net2map-backend` / `net2map-frontend`.
+- PostgreSQL-Datenbank und -Rolle heissen `net2map`; Backup-Dateien
+  `backups/net2map_*.sql.gz`; Skripte zielen auf `net2map-postgres`.
+- Redis-Prefix `net2map:`, Celery-App `net2map`, Prometheus-Metriken `net2map_*`
+  (vorher `netmap_*`).
+- `NETMAP_VERSION` heisst jetzt `NET2MAP_VERSION`; Images kuenftig unter
+  `ghcr.io/mainzerp/net2map/{backend,frontend}` (nach Umbenennung des Repos).
+
+### Migration
+
+- Das Backend benennt beim Start vorhandene `netmap:*`-Redis-Keys einmalig in
+  `net2map:*` um (ohne bestehende Keys zu ueberschreiben).
+- Das Frontend uebernimmt gespeicherte Browser-Einstellungen (Theme, Kartenebenen,
+  Zoom, Rack-Reihenfolge, Befehlspalette, Sidebar) einmalig von den alten Keys.
+- Datenbank, Kartenhintergrund und Redis-Daten werden laut Anleitung von den alten
+  Volumes uebernommen; die alten Volumes bleiben fuer ein Rollback erhalten.
+
 ## v2.2.0 -- Neues Erscheinungsbild "Cartography"
 
 **Type:** MINOR

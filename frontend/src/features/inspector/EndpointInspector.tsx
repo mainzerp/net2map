@@ -4,7 +4,7 @@ import { MapPin } from "lucide-react";
 import { normPort } from "../../api";
 import { useEndpoints, useTopology } from "../../hooks/api";
 import { searchWithInspect, useInspector } from "../../hooks/useInspector";
-import useNetmapStore from "../../store";
+import useNet2MapStore from "../../store";
 import { Badge, Button } from "../../components/ui";
 import { formatTimestamp } from "../../utils/datetime";
 import { FactList, InspectorLoading, InspectorNotFound, InspectorSection, InspectorTitle, LinkButton } from "./parts";
@@ -14,7 +14,7 @@ export default function EndpointInspector({ id, titleId }: { id: number; titleId
   const { data: topology } = useTopology();
   const { open, close, raw } = useInspector();
   const navigate = useNavigate();
-  const setHighlightPortKey = useNetmapStore((s) => s.setHighlightPortKey);
+  const setHighlightPortKey = useNet2MapStore((s) => s.setHighlightPortKey);
 
   const endpoint = useMemo(
     () => (Array.isArray(endpointsQuery.data) ? endpointsQuery.data.find((e) => e.id === id) : undefined),

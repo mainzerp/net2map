@@ -71,7 +71,7 @@ function _etagCacheSet(key: string, entry: ETagCacheEntry): void {
   }
 }
 let _sessionVersion = 0;
-export const SESSION_CHANGED_EVENT = "netmap-session-changed";
+export const SESSION_CHANGED_EVENT = "net2map-session-changed";
 
 function resetSessionCaches(): void {
   _sessionVersion += 1;

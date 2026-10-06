@@ -4,7 +4,7 @@ import { m } from "motion/react";
 import { ArrowRight, RefreshCw, Server, Settings, Waypoints, type LucideIcon } from "lucide-react";
 import { useTopology, useStats, useEndpoints, useInvalidateApi } from "../hooks/api";
 import { useScanProgress } from "../hooks/useScanProgress";
-import useNetmapStore from "../store";
+import useNet2MapStore from "../store";
 import { useToast } from "../components/ToastProvider";
 import { Button, Card } from "../components/ui";
 import { ScanHero } from "../features/dashboard/ScanHero";
@@ -147,9 +147,9 @@ export default function DashboardPage() {
   const [cancelling, setCancelling] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
 
-  const activeScanJobId = useNetmapStore((s) => s.activeScanJobId);
-  const startScan = useNetmapStore((s) => s.startScan);
-  const clearScanJob = useNetmapStore((s) => s.clearScanJob);
+  const activeScanJobId = useNet2MapStore((s) => s.activeScanJobId);
+  const startScan = useNet2MapStore((s) => s.startScan);
+  const clearScanJob = useNet2MapStore((s) => s.clearScanJob);
   const progress: ScanProgress | null = useScanProgress(activeScanJobId);
   const { addToast } = useToast();
   const reduced = useReducedMotion();

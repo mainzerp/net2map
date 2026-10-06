@@ -300,7 +300,7 @@ def test_dispatch_claim_is_exclusive_per_interval(claim_redis):
     assert _st.claim_scheduled_dispatch("macs", 30) is False
     claim_redis.now += 1
     assert _st.claim_scheduled_dispatch("macs", 30) is True
-    assert "netmap:sched:last_dispatch:macs" in claim_redis.data
+    assert "net2map:sched:last_dispatch:macs" in claim_redis.data
     # Kinds are independent.
     assert _st.claim_scheduled_dispatch("links", 30) is True
 

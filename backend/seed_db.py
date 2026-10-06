@@ -1,6 +1,6 @@
 # DEVELOPMENT SEED DATA ONLY -- do not run against production databases.
 """
-Seed script – populates the NetMap database with realistic dummy data.
+Seed script – populates the Net2Map database with realistic dummy data.
 
 Topology
 ────────
@@ -677,7 +677,7 @@ def seed(db: Session):
         from shared.redis_client import get_redis
         r = get_redis()
         if r:
-            r.incr("netmap:topo_version")
+            r.incr("net2map:topo_version")
             print("  [OK] Topology cache invalidated (topo_version bumped)")
         else:
             print("  [NOTE] No Redis configured; restart the backend to invalidate the topology cache")

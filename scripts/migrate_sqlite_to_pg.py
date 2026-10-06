@@ -1,13 +1,13 @@
 """
 One-shot migration script: copy all data from the old SQLite database
-(/data/netmap.db) into the running PostgreSQL container.
+(/data/net2map.db) into the running PostgreSQL container.
 
 The SQLite and PostgreSQL schemas are identical (created by the same Alembic
 migrations), so this is a straight column-for-column copy.
 
 Usage inside the running backend container (the script is not part of the image):
     docker compose cp scripts/migrate_sqlite_to_pg.py backend:/tmp/migrate_sqlite_to_pg.py
-    docker compose exec -e SQLITE_PATH=/data/netmap.db -e PG_HOST=postgres backend \
+    docker compose exec -e SQLITE_PATH=/data/net2map.db -e PG_HOST=postgres backend \
         python /tmp/migrate_sqlite_to_pg.py
 """
 
@@ -21,13 +21,13 @@ from psycopg2.extras import execute_values
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-SQLITE_PATH = os.environ.get("SQLITE_PATH", os.path.join(os.path.dirname(__file__), "netmap_migrate.db"))
+SQLITE_PATH = os.environ.get("SQLITE_PATH", os.path.join(os.path.dirname(__file__), "net2map_migrate.db"))
 
 PG_HOST = os.environ.get("PG_HOST", "localhost")
 PG_PORT = int(os.environ.get("PG_PORT", "5432"))
-PG_DB   = os.environ.get("PG_DB",   "netmap")
-PG_USER = os.environ.get("PG_USER", "netmap")
-PG_PASS = os.environ.get("PG_PASS", "netmap_pw")
+PG_DB   = os.environ.get("PG_DB",   "net2map")
+PG_USER = os.environ.get("PG_USER", "net2map")
+PG_PASS = os.environ.get("PG_PASS", "net2map_pw")
 
 # ---------------------------------------------------------------------------
 # Helpers

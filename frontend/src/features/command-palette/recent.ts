@@ -3,7 +3,7 @@
 
 import { formatInspectParam, parseInspectParam, type InspectorTarget } from "../../hooks/useInspector";
 
-export const RECENT_STORAGE_KEY = "netmap.palette.recent";
+export const RECENT_STORAGE_KEY = "net2map.palette.recent";
 export const RECENT_LIMIT = 5;
 
 export function readRecent(): InspectorTarget[] {

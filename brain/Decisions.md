@@ -175,6 +175,28 @@
   (`--vlan-l/-c/-soft-l/-soft-c`) holding >= 4.85:1 on all surfaces. The golden angle
   was rejected: it puts common ids (10/99, 1/200) almost on the same hue.
 
+## Rebranding to Net2Map (2026-10-06)
+
+- **Name: Net2Map.** Research found "NetMap" heavily used, including same-domain
+  tools (xoriin/NetMap, opennetworktools/netmap, FreeBSD netmap) and live US marks;
+  "NetworkAtlas"/"NetAtlas" collide with SolarWinds, Zyxel and natlas. "Net2Map" had
+  no active collision and keeps continuity; "TopologieAtlas" was the alternative.
+  Trademark and domain checks were web-search only, not registry queries.
+- **Full rename including runtime identifiers** (user choice), released as MAJOR
+  v3.0.0: containers, volumes, network, DB name/role, Redis prefix, Celery app,
+  metrics, env var `NET2MAP_VERSION`, GHCR path. Supersedes the `netmap` names in
+  older entries above (ghcr path, Redis keys, jcodemunch repo id once the repo is
+  renamed).
+- **Compose project name pinned (`name: net2map`)** with short volume keys
+  (`pgdata`, `redisdata`, `data` -> `net2map_*`). Reason: image and volume names no
+  longer depend on the checkout folder, which also fixes CI tagging
+  (`net2map-backend`) and the demo override image names.
+- **Data carry-over is manual, not automatic**: dump/restore for Postgres (new role
+  name), volume copy for Redis and map data, documented in `docs/OPERATIONS.md`.
+  Old volumes stay untouched for rollback. Automatic code-side shims only where
+  cheap and safe: Redis `RENAMENX netmap:* -> net2map:*` at backend start, and a
+  one-time localStorage key copy in `frontend/src/storageMigration.ts`.
+
 ## Backlog sweep (2026-10-06)
 
 - **Scan lock fencing in the database.** Acquiring `scan:lock` atomically

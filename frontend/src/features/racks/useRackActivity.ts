@@ -7,7 +7,7 @@
 import { useCallback, useState } from "react";
 import { useReducedMotion } from "../topology/motion";
 
-export const RACK_ACTIVITY_STORAGE_KEY = "netmap-rack-activity";
+export const RACK_ACTIVITY_STORAGE_KEY = "net2map-rack-activity";
 
 function readStored(): boolean {
   try {

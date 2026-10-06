@@ -128,7 +128,7 @@ jobs:
       - run: |
           TAG=${GITHUB_REF#refs/tags/}
           docker compose build
-          docker tag netmap-backend ghcr.io/${{ github.repository }}/backend:$TAG
-          docker tag netmap-frontend ghcr.io/${{ github.repository }}/frontend:$TAG
+          docker tag net2map-backend ghcr.io/${{ github.repository }}/backend:$TAG
+          docker tag net2map-frontend ghcr.io/${{ github.repository }}/frontend:$TAG
           docker push ghcr.io/${{ github.repository }}/backend:$TAG
           docker push ghcr.io/${{ github.repository }}/frontend:$TAG

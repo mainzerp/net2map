@@ -1,10 +1,10 @@
 import { create } from "zustand";
 import { api, apiUrl, _getAuthHeader } from "./api";
-import type { NetmapState, SelectedRack } from "./types";
+import type { Net2MapState, SelectedRack } from "./types";
 import { resolveMapBgColor } from "./theme/mapBackground";
 
 // Map focus slice ("Show on map" / toolbar search). Kept local to the store
-// module so the shared NetmapState type in types.ts stays untouched.
+// module so the shared Net2MapState type in types.ts stays untouched.
 export interface MapFocusSlice {
   // Device the topology canvas should center on; cleared by the canvas once
   // the viewport animation has been issued.
@@ -13,9 +13,9 @@ export interface MapFocusSlice {
   clearFocusDevice: () => void;
 }
 
-export type NetmapStoreState = NetmapState & MapFocusSlice;
+export type Net2MapStoreState = Net2MapState & MapFocusSlice;
 
-const useNetmapStore = create<NetmapStoreState>((set, get) => ({
+const useNet2MapStore = create<Net2MapStoreState>((set, get) => ({
   // ── Map focus slice ──────────────────────────────────────────────────────
   focusDeviceId: null,
   setFocusDevice: (id: number | null) => set({ focusDeviceId: id }),
@@ -72,7 +72,7 @@ const useNetmapStore = create<NetmapStoreState>((set, get) => ({
 
   loadMapSettings: () => {
     api.get<Record<string, unknown>>("/api/map-settings").then((s) => {
-      const patch: Partial<NetmapState> = {};
+      const patch: Partial<Net2MapState> = {};
       if (s.opacity != null) patch.bgOpacity = s.opacity as number;
       if (s.scale != null) patch.bgScale = s.scale as number;
       if (s.bg_color != null) patch.bgColor = resolveMapBgColor(s.bg_color as string);
@@ -100,7 +100,7 @@ const useNetmapStore = create<NetmapStoreState>((set, get) => ({
 
   // ── Rack orders slice ────────────────────────────────────────────────────
   rackOrders: (() => {
-    try { return JSON.parse(localStorage.getItem("netmap_rack_orders") || "{}"); }
+    try { return JSON.parse(localStorage.getItem("net2map_rack_orders") || "{}"); }
     catch { return {}; }
   })(),
 
@@ -109,10 +109,10 @@ const useNetmapStore = create<NetmapStoreState>((set, get) => ({
       const next = typeof ordersOrFn === "function"
         ? ordersOrFn(state.rackOrders)
         : ordersOrFn;
-      try { localStorage.setItem("netmap_rack_orders", JSON.stringify(next)); } catch { /* ignore */ }
+      try { localStorage.setItem("net2map_rack_orders", JSON.stringify(next)); } catch { /* ignore */ }
       return { rackOrders: next };
     });
   },
 }));
 
-export default useNetmapStore;
+export default useNet2MapStore;

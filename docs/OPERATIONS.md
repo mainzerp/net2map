@@ -1,6 +1,6 @@
-# NetMap -- Operations and Deployment Guide
+# Net2Map -- Operations and Deployment Guide
 
-Agent-facing guide for running, configuring, updating and troubleshooting the NetMap
+Agent-facing guide for running, configuring, updating and troubleshooting the Net2Map
 Docker stack. Product overview and quickstart live in the root `README.md` (German);
 backup/restore commands live in `BACKUP.md`; the API is described in `docs/API.md`.
 
@@ -11,25 +11,26 @@ Sources: `docker-compose.yml`, `docker-compose.demo.yml`, `docker-compose.local.
 
 ## Architecture
 
-All services share the bridge network `netmap`. Only the frontend publishes a host
+All services share the bridge network `net2map`. Only the frontend publishes a host
 port.
 
 | Service | Container | Image / build | Port | Role |
 |---|---|---|---|---|
-| `frontend` | `netmap-frontend` | `./frontend` (node:24 build, nginx:alpine runtime) | host `3000` -> `80` | Serves the SPA; proxies `/api/`, `/ws/` and the OpenAPI paths (`/docs`, `/redoc`, `/openapi.json`) to `backend:8000`. |
-| `backend` | `netmap-backend` | `./backend` (python:3.12-slim) | `8000` (internal only) | FastAPI via uvicorn. Runs Alembic migrations at start. |
-| `celery-worker` | `netmap-celery` | `./backend` | none | Runs scan jobs (`celery -A celery_app worker --concurrency=4`). |
-| `celery-beat` | `netmap-celery-beat` | `./backend` | none | Schedules `tasks.scheduler_tick` every 5 s and `tasks.purge_old_audit_logs` every 6 h. Schedule file `/data/celerybeat-schedule`. |
-| `postgres` | `netmap-postgres` | `postgres:16-alpine` | `5432` (internal only) | Database `netmap`, user `netmap`. |
-| `redis` | `netmap-redis` | `redis:7-alpine` | `6379` (internal only) | Celery broker/result backend, shared state, token revocation, WebSocket tickets, scan-update pub/sub. AOF on (`appendfsync everysec`). |
+| `frontend` | `net2map-frontend` | `./frontend` (node:24 build, nginx:alpine runtime) | host `3000` -> `80` | Serves the SPA; proxies `/api/`, `/ws/` and the OpenAPI paths (`/docs`, `/redoc`, `/openapi.json`) to `backend:8000`. |
+| `backend` | `net2map-backend` | `./backend` (python:3.12-slim) | `8000` (internal only) | FastAPI via uvicorn. Runs Alembic migrations at start. |
+| `celery-worker` | `net2map-celery` | `./backend` | none | Runs scan jobs (`celery -A celery_app worker --concurrency=4`). |
+| `celery-beat` | `net2map-celery-beat` | `./backend` | none | Schedules `tasks.scheduler_tick` every 5 s and `tasks.purge_old_audit_logs` every 6 h. Schedule file `/data/celerybeat-schedule`. |
+| `postgres` | `net2map-postgres` | `postgres:16-alpine` | `5432` (internal only) | Database `net2map`, user `net2map`. |
+| `redis` | `net2map-redis` | `redis:7-alpine` | `6379` (internal only) | Celery broker/result backend, shared state, token revocation, WebSocket tickets, scan-update pub/sub. AOF on (`appendfsync everysec`). |
 
-Volumes:
+Volumes (the compose file pins the project name `net2map`, so names do not depend on
+the checkout folder):
 
 | Volume | Mounted at | Content |
 |---|---|---|
-| `netmap-pgdata` | postgres `/var/lib/postgresql/data` | Database. Covered by `BACKUP.md`. |
-| `netmap-redisdata` | redis `/data` | Redis AOF (revocation entries, job state). |
-| `netmap-data` | backend and celery-worker `/data` | Map background image (`/data/map-background.<ext>`). Not covered by the database backup. Map opacity/scale/color are stored in the database. |
+| `net2map_pgdata` | postgres `/var/lib/postgresql/data` | Database. Covered by `BACKUP.md`. |
+| `net2map_redisdata` | redis `/data` | Redis AOF (revocation entries, job state). |
+| `net2map_data` | backend and celery-worker `/data` | Map background image (`/data/map-background.<ext>`). Not covered by the database backup. Map opacity/scale/color are stored in the database. |
 
 Other compose details:
 
@@ -65,7 +66,7 @@ treat as a credential.
 
 | Variable | Default in code | Set by compose | Required | Secret | Purpose |
 |---|---|---|---|---|---|
-| `DATABASE_URL` | `postgresql://netmap:netmap_pw@postgres/netmap` | yes, built from `POSTGRES_PASSWORD` | via `POSTGRES_PASSWORD` | yes (contains password) | SQLAlchemy and Alembic connection string. |
+| `DATABASE_URL` | `postgresql://net2map:net2map_pw@postgres/net2map` | yes, built from `POSTGRES_PASSWORD` | via `POSTGRES_PASSWORD` | yes (contains password) | SQLAlchemy and Alembic connection string. |
 | `REDIS_URL` | empty | yes, `redis://redis:6379/0` (hard-coded) | no | no | Enables Redis state, Celery, revocation, WS tickets. Empty = single-process mode. Celery falls back to `redis://localhost:6379/0` when empty. |
 | `CORS_ORIGIN` | `http://localhost:3000` | yes, `${CORS_ORIGIN:-http://localhost:3000}` (backend only) | no | no | Single allowed CORS origin. `*` logs a warning. Set to the public URL behind TLS. |
 | `JWT_SECRET` | empty | yes, `${JWT_SECRET:-}` | no (recommended) | yes | HS256 signing key; enables JWT mode and RBAC. When set, `SECRET_TOKEN` is ignored. |
@@ -88,12 +89,12 @@ without it they are per process.
 
 | Variable | Default | Where | Required | Secret | Purpose |
 |---|---|---|---|---|---|
-| `POSTGRES_PASSWORD` | none | compose (postgres, backend, celery) | yes | yes | Postgres superuser password and part of `DATABASE_URL`. Only applied when the `netmap-pgdata` volume is first initialized. |
+| `POSTGRES_PASSWORD` | none | compose (postgres, backend, celery) | yes | yes | Postgres superuser password and part of `DATABASE_URL`. Only applied when the `net2map_pgdata` volume is first initialized. |
 | `UVICORN_WORKERS` | `1` | `backend/Dockerfile` CMD; compose `${UVICORN_WORKERS:-1}` (backend) | no | no | uvicorn worker count. More than 1 only with Redis (compose provides it). |
 | `UVICORN_FORWARDED_ALLOW_IPS` | `*` | `backend/Dockerfile` CMD; compose `${UVICORN_FORWARDED_ALLOW_IPS:-*}` (backend) | no | no | Trusted proxies for `X-Forwarded-For` (rate limiting). Restrict to the proxy CIDR, e.g. `172.16.0.0/12`. |
 | `RUN_MIGRATIONS` | `true` | `backend/entrypoint.sh` | no | no | Compose sets `false` for celery-worker and celery-beat so only the backend runs Alembic. |
 | `VITE_API_URL` | empty | frontend build arg | no | no | Baked into the bundle at build time. Empty = same-origin (nginx proxy). Set for a remote backend, then rebuild. |
-| `NETMAP_VERSION` | none | `docker-compose.ghcr.yml` | yes, with that override | no | GHCR image tag (git tag, e.g. `v1.2.3`) for the prebuilt-image override. |
+| `NET2MAP_VERSION` | none | `docker-compose.ghcr.yml` | yes, with that override | no | GHCR image tag (git tag, e.g. `v1.2.3`) for the prebuilt-image override. |
 
 ## First-time setup
 
@@ -104,7 +105,7 @@ without it they are per process.
    - `JWT_SECRET` (`python -c "import secrets; print(secrets.token_hex(32))"`),
      otherwise the stack runs in legacy single-token mode.
    - `ENCRYPTION_KEY` (Fernet key, see above).
-   - `CORS_ORIGIN` = the URL users open (e.g. `https://netmap.example.com`).
+   - `CORS_ORIGIN` = the URL users open (e.g. `https://net2map.example.com`).
 3. `docker compose up --build -d`
 4. Watch startup: `docker compose logs -f backend`. Expect
    `[entrypoint] Running Alembic migrations...` followed by uvicorn startup.
@@ -119,7 +120,7 @@ without it they are per process.
 ## Update procedure
 
 1. Back up first: `./scripts/backup.sh` (see `BACKUP.md`). Also copy `.env` and,
-   if used, the `netmap-data` volume (map background).
+   if used, the `net2map_data` volume (map background).
 2. Note the current version (`VERSION.md` heading or git tag) for a possible
    rollback.
 3. Get the new code: `git fetch --tags && git checkout vX.Y.Z` (or `git pull` on
@@ -140,21 +141,63 @@ without it they are per process.
 ### Prebuilt images
 
 CI (`.github/workflows/ci.yml`, job `docker-push`) builds and pushes
-`ghcr.io/mainzerp/netmap/backend:<tag>` and `ghcr.io/mainzerp/netmap/frontend:<tag>`
+`ghcr.io/mainzerp/net2map/backend:<tag>` and `ghcr.io/mainzerp/net2map/frontend:<tag>`
 only for `v*` git tags (no `latest` tag). The backend image is built from
 `backend/Dockerfile` and serves `backend`, `celery-worker` and `celery-beat` (only
 the command differs). `docker-compose.ghcr.yml` switches those four services from
-`build:` to `ghcr.io/mainzerp/netmap/{backend,frontend}:${NETMAP_VERSION}`:
+`build:` to `ghcr.io/mainzerp/net2map/{backend,frontend}:${NET2MAP_VERSION}`:
 
 ```bash
-export NETMAP_VERSION=v1.2.3   # or set it in .env
+export NET2MAP_VERSION=v1.2.3   # or set it in .env
 docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull
 docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
 ```
 
-Compose aborts with `set NETMAP_VERSION` when the variable is missing. Private
+Compose aborts with `set NET2MAP_VERSION` when the variable is missing. Private
 packages need `docker login ghcr.io` first. Use the same `-f` pair for every later
 command (`ps`, `logs`, `down`), otherwise compose falls back to local builds.
+
+### Upgrading from NetMap (v2.x) to Net2Map (v3.0.0)
+
+v3.0.0 renames every runtime identifier from `netmap` to `net2map`: containers,
+volumes, network, Postgres database and role, Redis key prefix, Prometheus metrics,
+`NETMAP_VERSION` and the GHCR image path. Compose creates new, empty volumes, so the
+data has to be carried over once. The old volumes stay untouched until you delete
+them, which keeps a rollback to v2.x trivial.
+
+1. Still on v2.x (old code, stack running), dump the database:
+   `docker exec netmap-postgres pg_dump -U netmap -d netmap --no-owner --no-acl | gzip > backups/netmap_pre-net2map.sql.gz`
+2. Stop the old stack, keep its volumes: `docker compose down` (with the same `-f`
+   files you normally use).
+3. Note the old volume names (prefixed with the old compose project, usually the
+   checkout folder): `docker volume ls --filter name=netmap`.
+4. Update to v3.0.0 (`git fetch --tags && git checkout v3.0.0`). In `.env`, rename
+   `NETMAP_VERSION` to `NET2MAP_VERSION` if set.
+5. Create the new containers and volumes without starting them:
+   `docker compose up --build --no-start` (GHCR: `NET2MAP_VERSION=v3.0.0`, the
+   `-f docker-compose.yml -f docker-compose.ghcr.yml` pair, `pull` first).
+6. Copy the map background and the Redis data into the new volumes:
+   ```bash
+   docker run --rm -v <old>_netmap-data:/from -v net2map_data:/to alpine sh -c "cp -a /from/. /to/"
+   docker run --rm -v <old>_netmap-redisdata:/from -v net2map_redisdata:/to alpine sh -c "cp -a /from/. /to/"
+   ```
+   The backend renames the legacy `netmap:*` Redis keys to `net2map:*` on start.
+   Copying Redis keeps token revocations; if you skip it, rotate `JWT_SECRET`.
+7. Start only Postgres (initializes database and role `net2map`), wait until
+   `docker compose ps postgres` reports `healthy`, then restore:
+   `docker compose up -d postgres` and
+   `./scripts/restore.sh backups/netmap_pre-net2map.sql.gz`.
+8. Start everything: `docker compose up -d`, then verify as in step 6 of the update
+   procedure.
+9. Follow-ups: update cron jobs (checkout path, backup files are now
+   `backups/net2map_*.sql.gz`), Prometheus/Grafana queries (`netmap_*` metrics are now
+   `net2map_*`) and pinned image references. Browser preferences (theme, map layers,
+   rack order) migrate automatically on first load.
+10. Once everything works, remove the old volumes:
+    `docker volume rm <old>_netmap-pgdata <old>_netmap-redisdata <old>_netmap-data`.
+
+Rollback before step 10: `docker compose down`, check out the previous v2.x tag and
+start it again; it uses the untouched old volumes.
 
 ## Rollback procedure
 
@@ -168,7 +211,7 @@ therefore "old code + database restored from the pre-update backup".
 2. Restore the previous code: `git checkout <previous tag>` (or an override pinning
    the previous `ghcr.io/...:<tag>` images).
 3. Start only the database: `docker compose up -d postgres`.
-4. Restore the pre-update dump: `./scripts/restore.sh backups/netmap_<timestamp>.sql.gz`
+4. Restore the pre-update dump: `./scripts/restore.sh backups/net2map_<timestamp>.sql.gz`
    (details in `BACKUP.md`). All data written after the backup is lost.
 5. Start everything: `docker compose up --build -d` and verify `/health` as above.
    On start the old code runs `alembic upgrade head`, which is a no-op on the
@@ -187,9 +230,9 @@ previously revoked tokens cannot become valid again (README, "Sicherheit").
 See `BACKUP.md` (scripts `scripts/backup.sh` / `scripts/restore.sh`, manual
 commands, cron, retention). Points not covered there:
 
-- The scripts target the container name `netmap-postgres`; they do not work for the
-  demo stack (`netmap-demo-postgres`) without editing.
-- The `netmap-data` volume (map background image) is not part of the database
+- The scripts target the container name `net2map-postgres`; they do not work for the
+  demo stack (`net2map-demo-postgres`) without editing.
+- The `net2map_data` volume (map background image) is not part of the database
   dump.
 
 ## Health checks and metrics
@@ -202,7 +245,7 @@ commands, cron, retention). Points not covered there:
   `503` when no worker answers while Redis is configured. Use it for external
   monitoring of the scan pipeline.
 - Compose healthchecks:
-  - postgres: `pg_isready -U netmap` (5 s).
+  - postgres: `pg_isready -U net2map` (5 s).
   - redis: `redis-cli ping` (5 s).
   - backend: `urlopen("http://localhost:8000/health")` (liveness, no Celery) every
     10 s, start period 15 s. A `503` (database or Redis failing) counts as
@@ -212,11 +255,11 @@ commands, cron, retention). Points not covered there:
 - `GET /metrics` (unversioned): Prometheus format. Requires a bearer token when
   auth is enabled (not auth-exempt) and is not proxied by nginx, so a Prometheus
   scraper needs network access to `backend:8000` and an `Authorization` header.
-  Metrics (`backend/shared/metrics.py`): `netmap_request_duration_seconds`,
-  `netmap_requests_total` (labeled by route template; legacy `/api` folded into
-  `/api/v1`), `netmap_scan_duration_seconds`, `netmap_scans_total`,
-  `netmap_scans_active`, `netmap_devices_total`, `netmap_ports_total`,
-  `netmap_endpoints_total` (at the time of writing; `backend/shared/metrics.py` is
+  Metrics (`backend/shared/metrics.py`): `net2map_request_duration_seconds`,
+  `net2map_requests_total` (labeled by route template; legacy `/api` folded into
+  `/api/v1`), `net2map_scan_duration_seconds`, `net2map_scans_total`,
+  `net2map_scans_active`, `net2map_devices_total`, `net2map_ports_total`,
+  `net2map_endpoints_total` (at the time of writing; `backend/shared/metrics.py` is
   authoritative and new metrics are being added). With `UVICORN_WORKERS > 1` each scrape hits one worker
   (no multiprocess aggregation configured).
 
@@ -240,16 +283,14 @@ commands, cron, retention). Points not covered there:
 network via project name) next to the main one:
 
 ```bash
-docker compose -p netmap-demo -f docker-compose.yml -f docker-compose.demo.yml up -d
-docker compose -p netmap-demo -f docker-compose.yml -f docker-compose.demo.yml exec backend python seed_db.py
-docker compose -p netmap-demo -f docker-compose.yml -f docker-compose.demo.yml down -v
+docker compose -p net2map-demo -f docker-compose.yml -f docker-compose.demo.yml up -d
+docker compose -p net2map-demo -f docker-compose.yml -f docker-compose.demo.yml exec backend python seed_db.py
+docker compose -p net2map-demo -f docker-compose.yml -f docker-compose.demo.yml down -v
 ```
 
 - UI on `http://localhost:3200`.
-- It reuses the locally built images `switch-map-backend` and `switch-map-frontend`
-  (the compose project name derived from the `switch-map` checkout folder), so build
-  the main stack first. In a checkout with a different folder name, adjust the image
-  names.
+- It reuses the locally built images `net2map-backend` and `net2map-frontend`
+  (named after the pinned compose project `net2map`), so build the main stack first.
 - It uses the same `.env` values as the main stack.
 - Seeding is manual (`exec backend python seed_db.py` above). `seed_db.py` is
   excluded from the image by `backend/.dockerignore`, so it can never run in
@@ -277,7 +318,7 @@ host port `3100` when port 3000 is taken:
 | Vite terminal shows `http proxy error ... ECONNREFUSED` for `/api/...` or `/ws/...` | Dev server proxies to `localhost:8000` but no backend is listening there. | Start the backend locally on port 8000 (or point `VITE_API_URL` at a running backend). |
 | Login fails with "Invalid username or password" on a fresh install | Admin password is whatever `DEFAULT_ADMIN_PASSWORD` was when migration 006 first ran (fallback `changeme` if unset at that time). Changing `.env` later does not update it. | Use the original value. Otherwise reset the hash in the `users` table or recreate the database (`docker compose down -v`, destroys data). |
 | Compose aborts with `Set POSTGRES_PASSWORD in .env` (or `SECRET_TOKEN`, `DEFAULT_ADMIN_PASSWORD`) | Required variable missing. | Fill `.env` from `.env.example`. |
-| Postgres auth errors after changing `POSTGRES_PASSWORD` | The password is only applied when the volume is initialized. | Revert the value, or change the role password inside postgres (`ALTER USER netmap PASSWORD ...`). |
+| Postgres auth errors after changing `POSTGRES_PASSWORD` | The password is only applied when the volume is initialized. | Revert the value, or change the role password inside postgres (`ALTER USER net2map PASSWORD ...`). |
 | Frontend container never starts; backend `unhealthy` | `/health` returns 503 (database or Redis check failing). | `docker compose logs backend`; query `/health` inside the backend container to see which check fails. |
 | Scans stay queued | No Celery worker answering. | `/health?deep=1` shows `"workers": "none"`; check `docker compose logs celery-worker`. |
 | API returns `503 AUTH_UNAVAILABLE` | `REDIS_URL` configured but Redis unreachable; token revocation checks fail closed. | Check the `redis` container and its healthcheck. |

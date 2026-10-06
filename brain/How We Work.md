@@ -13,8 +13,8 @@ work is done; only the user moves them to `Done`.
   coverage with `--cov-fail-under=10`).
   On a host Python 3.13 the 7 `test_snmp_driver.py` cases fail (pysnmp needs
   `asyncore`); run the suite in a clean container of the built image instead:
-  `docker run --rm --entrypoint sh -e DATABASE_URL=sqlite:///./test.db -e SECRET_TOKEN=test-token switch-map-backend -c "cd /app && python -m pytest tests/ -q -o addopts=''"`.
-  Do not run tests inside the live `netmap-backend` container: its compose env
+  `docker run --rm --entrypoint sh -e DATABASE_URL=sqlite:///./test.db -e SECRET_TOKEN=test-token net2map-backend -c "cd /app && python -m pytest tests/ -q -o addopts=''"`.
+  Do not run tests inside the live `net2map-backend` container: its compose env
   (Redis, JWT) breaks test assumptions.
 - Backend code changes must also rebuild the workers: compose services are
   `backend`, `celery-worker`, `celery-beat` (`docker compose up -d --build backend
@@ -26,7 +26,7 @@ CI (`.github/workflows/ci.yml`) runs security scans, lint, backend tests and fro
 typecheck/tests on push/PR to `main` and release tags. Image build/publication
 requires successful security checks; the concrete policy and local commands live
 in README's security checks section. Successful `v*` tags publish images to
-`ghcr.io/mainzerp/netmap/{backend,frontend}`.
+`ghcr.io/mainzerp/net2map/{backend,frontend}`.
 
 ## Standards
 

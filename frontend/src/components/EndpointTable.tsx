@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, normPort, extractErrorMessage } from "../api";
 import { useToast } from "./ToastProvider";
-import useNetmapStore from "../store";
+import useNet2MapStore from "../store";
 import { useEndpoints, useInvalidateApi } from "../hooks/api";
 import { queryKeys } from "../hooks/api";
 import { Button, Card, DataTable, Input, type DataTableColumn } from "./ui";
@@ -12,7 +12,7 @@ import type { Endpoint } from "../types";
 
 export default function EndpointTable() {
   const navigate = useNavigate();
-  const setHighlightPortKey = useNetmapStore((s) => s.setHighlightPortKey);
+  const setHighlightPortKey = useNet2MapStore((s) => s.setHighlightPortKey);
   const endpointsQuery = useEndpoints();
   const { invalidate } = useInvalidateApi();
   const { open: openInspector } = useInspector();

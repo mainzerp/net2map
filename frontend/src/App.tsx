@@ -167,7 +167,7 @@ function NavItems({
   );
 }
 
-const SIDEBAR_COLLAPSED_KEY = "netmap-sidebar-collapsed";
+const SIDEBAR_COLLAPSED_KEY = "net2map-sidebar-collapsed";
 
 /** Page transition key: "/settings/credentials" and "/settings/snmp" share "settings". */
 function pageKey(pathname: string): string {
@@ -319,7 +319,7 @@ export default function App() {
         </button>
         <NavLink to="/" className="flex items-center gap-2 no-underline">
           <BrandMark />
-          <span className="text-primary font-semibold text-[15px] tracking-tight">NetMap</span>
+          <span className="text-primary font-semibold text-[15px] tracking-tight">Net2Map</span>
         </NavLink>
         <div className="ml-auto flex items-center gap-1">
           <button
@@ -344,7 +344,7 @@ export default function App() {
           <m.aside {...slidePreset(reduced, "left")} ref={drawerRef} id="mobile-navigation" role="dialog" aria-modal="true" aria-label="Navigation" className="absolute left-0 top-0 bottom-0 w-56 bg-sidebar text-sidebar-text flex flex-col py-3 overflow-y-auto shadow-raised">
             <div className="flex items-center gap-2 px-4 pb-3">
               <BrandMark className="text-sidebar-text" />
-              <span className="text-sidebar-text font-semibold text-[15px] tracking-tight">NetMap</span>
+              <span className="text-sidebar-text font-semibold text-[15px] tracking-tight">Net2Map</span>
               <button
                 type="button"
                 onClick={() => setDrawerOpen(false)}
@@ -368,13 +368,13 @@ export default function App() {
       >
         <NavLink
           to="/"
-          aria-label="NetMap dashboard"
+          aria-label="Net2Map dashboard"
           className={`flex items-center gap-2 no-underline h-14 shrink-0 ${collapsed ? "justify-center" : "px-4"}`}
         >
           <BrandMark className="text-sidebar-text" />
           {!collapsed && (
             <SidebarLabel animate={animateLabels} className="text-sidebar-text font-semibold text-[15px] tracking-tight whitespace-nowrap">
-              NetMap
+              Net2Map
             </SidebarLabel>
           )}
         </NavLink>

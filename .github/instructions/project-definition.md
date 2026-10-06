@@ -1,8 +1,8 @@
-# Project Definition: NetMap
+# Project Definition: Net2Map
 
 ## Overview
 
-NetMap is a web application for discovering, visualizing, and managing network switch topologies using SNMP. It automatically scans the local network, collects device and link information via LLDP, and presents the results as an interactive map, rack view, and log feed.
+Net2Map is a web application for discovering, visualizing, and managing network switch topologies using SNMP. It automatically scans the local network, collects device and link information via LLDP, and presents the results as an interactive map, rack view, and log feed.
 
 ## Purpose
 
@@ -29,7 +29,7 @@ The tool is designed for network administrators who need a clear, up-to-date pic
 - **`celery-beat`** -- Periodic scan scheduling via the `scheduler_tick` Celery task.
 - **`redis`** -- Celery task broker, WebSocket ticket store (30s TTL), and general caching.
 - **`postgres`** -- Primary data store with connection pooling (pool_size=10, max_overflow=20).
-- **`docker-compose.yml`** -- Defines 6 services (`netmap-backend`, `netmap-frontend`, `netmap-celery`, `celery-beat`, `redis`, `postgres`) on a shared bridge network. The frontend is reachable at `http://localhost:3000`.
+- **`docker-compose.yml`** -- Defines 6 services (`net2map-backend`, `net2map-frontend`, `net2map-celery`, `celery-beat`, `redis`, `postgres`) on a shared bridge network. The frontend is reachable at `http://localhost:3000`.
 
 ## Key Features
 
@@ -94,7 +94,7 @@ The FastAPI backend auto-generates OpenAPI docs at `http://localhost:8000/docs`.
 
 ## Data Persistence
 
-Primary data is stored in PostgreSQL 16 with connection pooling (pool_size=10, max_overflow=20). Schema migrations are managed by Alembic. Redis is used as the Celery task broker, for WebSocket ticket storage (30s TTL), and as a general cache. Data volumes: `netmap-pgdata` (PostgreSQL) and `netmap-redis` (Redis).
+Primary data is stored in PostgreSQL 16 with connection pooling (pool_size=10, max_overflow=20). Schema migrations are managed by Alembic. Redis is used as the Celery task broker, for WebSocket ticket storage (30s TTL), and as a general cache. Data volumes: `net2map_pgdata` (PostgreSQL) and `net2map_redisdata` (Redis).
 
 ## Development Setup
 

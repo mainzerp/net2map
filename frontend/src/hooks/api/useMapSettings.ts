@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, apiUrl, _getAuthHeader } from "../../api";
-import useNetmapStore from "../../store";
+import useNet2MapStore from "../../store";
 import { queryKeys } from "./keys";
 
 // ── Map appearance settings (MapSettingsTab) ─────────────────────────────────
@@ -32,7 +32,7 @@ export function useMapBackground() {
     queryFn: async () => {
       const res = await fetch(apiUrl("/api/map-background"), { headers: _getAuthHeader() });
       if (!res.ok) return null;
-      return `${apiUrl("/api/map-background")}?v=${useNetmapStore.getState().bgVersion}`;
+      return `${apiUrl("/api/map-background")}?v=${useNet2MapStore.getState().bgVersion}`;
     },
   });
 }

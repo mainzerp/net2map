@@ -1,7 +1,7 @@
 import React, { useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, apiUrl, _getAuthHeader, extractErrorMessage } from "../../api";
-import useNetmapStore from "../../store";
+import useNet2MapStore from "../../store";
 import { queryKeys, useInvalidateApi, useMapBackground, useMapSettings, type MapSettings } from "../../hooks/api";
 import { useToast } from "../ToastProvider";
 import { debounce } from "../../utils/debounce";
@@ -39,7 +39,7 @@ function MapSettingsTabContent() {
     onSuccess: () => {
       invalidate(queryKeys.mapSettings);
       // Keep the live map store in step with the saved opacity/scale/color.
-      useNetmapStore.getState().loadMapSettings();
+      useNet2MapStore.getState().loadMapSettings();
     },
     onError: (ex) => addToast(`Failed to save map settings: ${extractErrorMessage(ex)}`, "error"),
   });
@@ -69,7 +69,7 @@ function MapSettingsTabContent() {
     onSuccess: () => {
       // Bump the image version first so the refetched preview URL and the
       // store reload both bypass the browser cache for the new image.
-      const store = useNetmapStore.getState();
+      const store = useNet2MapStore.getState();
       store.bumpMapBackgroundVersion();
       store.loadMapBackground();
       invalidate(queryKeys.mapBackground);
@@ -80,7 +80,7 @@ function MapSettingsTabContent() {
   const removeMutation = useMutation({
     mutationFn: () => api.del("/api/map-background"),
     onSuccess: () => {
-      const store = useNetmapStore.getState();
+      const store = useNet2MapStore.getState();
       store.bumpMapBackgroundVersion();
       store.loadMapBackground();
       invalidate(queryKeys.mapBackground);

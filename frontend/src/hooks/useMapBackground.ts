@@ -1,14 +1,14 @@
 import { useEffect, useRef } from "react";
-import useNetmapStore from "../store";
+import useNet2MapStore from "../store";
 
 export function useMapBackground() {
-  const mapBgUrl = useNetmapStore(s => s.bgUrl);
-  const mapBgNat = useNetmapStore(s => s.bgNat);
-  const mapBgOpacity = useNetmapStore(s => s.bgOpacity);
-  const mapBgScale = useNetmapStore(s => s.bgScale);
-  const mapBgColor = useNetmapStore(s => s.bgColor);
-  const loadMapBg = useNetmapStore(s => s.loadMapBackground);
-  const loadMapSettings = useNetmapStore(s => s.loadMapSettings);
+  const mapBgUrl = useNet2MapStore(s => s.bgUrl);
+  const mapBgNat = useNet2MapStore(s => s.bgNat);
+  const mapBgOpacity = useNet2MapStore(s => s.bgOpacity);
+  const mapBgScale = useNet2MapStore(s => s.bgScale);
+  const mapBgColor = useNet2MapStore(s => s.bgColor);
+  const loadMapBg = useNet2MapStore(s => s.loadMapBackground);
+  const loadMapSettings = useNet2MapStore(s => s.loadMapSettings);
   const initializedRef = useRef(false);
 
   useEffect(() => {
