@@ -18,14 +18,16 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
-- Network latency monitor (v3.2.0, unreleased) · priority: P2 · area: full-stack
+- Network latency monitor (released v3.2.0, 935d5bd) · priority: P2 · area: full-stack
   Done: `latency-monitor` service (iputils ping every 10 s, Redis lock), migration
   022 (`devices.latency_monitored`, `latency_samples` minute rollups), API
   `/latency/summary` + `/latency/history`, bulk `PUT /settings`; dashboard card,
   inspector section with sparkline and monitor toggle, map layer "Latency",
   Settings > Scan section. Passed: ruff, 756 backend tests (snmp_driver ignored),
   typecheck, 216 frontend tests, build; cross-review findings fixed.
-  Not run: migration on PostgreSQL, container ping as appuser, browser check.
+  Smoke (local stack): migration 022 applied on PostgreSQL, monitor runs, probe as
+  appuser returns RTT/jitter and 100 % loss for unreachable IPs. Not run: browser
+  check (old netmap stack holds :3000; new DB has no devices yet).
   User to verify: `docker compose up --build -d`, `docker compose logs
   latency-monitor`, dashboard card on :3000 fills within ~1 min, map layer
   "Latency", inspector toggle in mode "selected".

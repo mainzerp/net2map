@@ -4,7 +4,9 @@
 
 **Type:** MINOR
 
-Noch nicht veroeffentlicht. Migration 022 laeuft beim Start des Backends
+Veroeffentlicht am 2026-10-08 als Tag `v3.2.0` (Images unter
+`ghcr.io/mainzerp/net2map/backend` und `/frontend`). Commit `935d5bd`.
+Migration 022 laeuft beim Start des Backends
 automatisch. Neuer Compose-Dienst `latency-monitor` (Backend-Image): nach dem
 Update `docker compose up -d` ausfuehren, damit er startet.
 
