@@ -4,6 +4,7 @@ import ScanEngineConfig from "./scan/ScanEngineConfig";
 import DiscoveryRanges from "./scan/DiscoveryRanges";
 import DryRunPanel from "./scan/DryRunPanel";
 import ScanRunHistory from "./scan/ScanRunHistory";
+import LatencyMonitorConfig from "./scan/LatencyMonitorConfig";
 
 // ── EngineTabContent (orchestrator) ──────────────────────────────────────────
 function EngineTabContent() {
@@ -11,6 +12,10 @@ function EngineTabContent() {
     <div className="flex-1 overflow-y-auto pt-5 flex flex-col gap-5">
       <Card title={<SectionHeader>SCAN ENGINE</SectionHeader>}>
         <ScanEngineConfig />
+      </Card>
+
+      <Card title={<SectionHeader>LATENCY MONITOR</SectionHeader>}>
+        <LatencyMonitorConfig />
       </Card>
 
       <Card title={<SectionHeader>DISCOVERY IP RANGES</SectionHeader>}>

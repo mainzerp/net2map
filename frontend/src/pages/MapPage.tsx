@@ -6,6 +6,7 @@ import { useToast } from "../components/ToastProvider";
 import { useScanProgress } from "../hooks/useScanProgress";
 import { queryKeys } from "../hooks/api/keys";
 import { useInvalidateApi } from "../hooks/api/invalidate";
+import { useLatencySummary } from "../hooks/api/useLatency";
 import TopologyCanvas, {
   type AutoLayoutAssignment,
   type DevicePositionPatch,
@@ -38,6 +39,7 @@ export default function MapPage() {
   const activeScanJobId = useNet2MapStore(s => s.activeScanJobId);
   const setFocusDevice = useNet2MapStore(s => s.setFocusDevice);
   const { invalidateTopology } = useInvalidateApi();
+  const latencyQuery = useLatencySummary();
   const { rackOrders, reorderDevice, reorderClassSection } = useRackOrders();
   const { addToast } = useToast();
 
@@ -313,6 +315,7 @@ export default function MapPage() {
               updatedAt={topologyQuery.dataUpdatedAt || null}
               scan={scanOverlay}
               scanPulseIps={scanPulseIps}
+              latency={latencyQuery.data ?? null}
             />
           </div>
           {topology.nodes.length === 0 && !topologyQuery.isPending && (

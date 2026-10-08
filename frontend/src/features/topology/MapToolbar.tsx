@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, GitBranch, Layers, Tag, type LucideIcon } from "lucide-react";
+import { Activity, GitBranch, Layers, Tag, Timer, type LucideIcon } from "lucide-react";
 import { Button, Input } from "../../components/ui";
 import type { FilterState, RackInfo, SwitchClass, TopologyNode } from "../../types";
 import type { MapLayer, VlanOption } from "./overlays";
 import { vlanColor } from "./vlanColor";
 
 // ── MapToolbar ───────────────────────────────────────────────────────────────
-// Search, rack/class filter chips, logical layer control (Off / STP / VLAN),
+// Search, rack/class filter chips, logical layer control (Off / STP / VLAN / Latency),
 // auto-layout and zoom-reset actions, plus a
 // live "updated Xs ago" staleness indicator. Rendered by TopologyCanvas inside
 // the ReactFlow provider so layout actions can reach the flow instance.
@@ -34,6 +34,7 @@ interface MapToolbarProps {
   onLayerChange?: (layer: MapLayer) => void;
   stpDisabledReason?: string;
   vlanDisabledReason?: string;
+  latencyDisabledReason?: string;
   vlanOptions?: VlanOption[];
   selectedVlan?: number | null;
   onVlanChange?: (vlan: number) => void;
@@ -45,6 +46,7 @@ const LAYER_OPTIONS: { value: MapLayer; label: string; title: string; icon: Luci
   { value: "off", label: "Off", title: "No logical layer", icon: Layers },
   { value: "stp", label: "STP", title: "Spanning tree: root bridge, root paths and blocked links", icon: GitBranch },
   { value: "vlan", label: "VLAN", title: "Highlight links and devices carrying a VLAN", icon: Tag },
+  { value: "latency", label: "Latency", title: "Tint links by the latency status of their endpoints", icon: Timer },
 ];
 
 function formatAge(updatedAt: number | null, now: number): string {
@@ -72,6 +74,7 @@ export default function MapToolbar({
   onLayerChange,
   stpDisabledReason,
   vlanDisabledReason,
+  latencyDisabledReason,
   vlanOptions = [],
   selectedVlan = null,
   onVlanChange,
@@ -257,7 +260,14 @@ export default function MapToolbar({
               className="inline-flex items-center rounded border border-line bg-panel overflow-hidden"
             >
               {LAYER_OPTIONS.map(opt => {
-                const reason = opt.value === "stp" ? stpDisabledReason : opt.value === "vlan" ? vlanDisabledReason : undefined;
+                const reason =
+                  opt.value === "stp"
+                    ? stpDisabledReason
+                    : opt.value === "vlan"
+                      ? vlanDisabledReason
+                      : opt.value === "latency"
+                        ? latencyDisabledReason
+                        : undefined;
                 const disabled = !!reason;
                 const active = layer === opt.value;
                 const Icon = opt.icon;

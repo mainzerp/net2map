@@ -1,13 +1,14 @@
 """App settings and stats endpoints."""
-from typing import List
+from typing import Dict, List
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Body, Depends, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from database import AppSetting, Device, Endpoint, Port, ScanRun, get_db
 from database import Rack as RackModel
+from latency.settings import LATENCY_SETTING_KEYS, validate_setting_value
 from schemas import AppSettingOut, AppSettingUpdate
 from shared.audit import log_audit
 from shared.auth import require_role
@@ -22,7 +23,7 @@ def list_settings(db: Session = Depends(get_db)):
     return db.query(AppSetting).all()
 
 
-# Keys that may be written via PUT /api/v1/settings/{key}. Covers every key read
+# Keys that may be written via PUT /api/v1/settings/{key} and PUT /api/v1/settings. Covers every key read
 # by the backend (scheduler, tasks, scan/dns/map settings) or written by the
 # frontend; unknown keys are rejected to prevent settings-table pollution.
 ALLOWED_SETTING_KEYS = {
@@ -42,24 +43,57 @@ ALLOWED_SETTING_KEYS = {
     "map_scale",
     "map_bg_color",
     "audit_retention_days",
+    *LATENCY_SETTING_KEYS,
 }
+
+
+def _validated_value(key: str, value: str, key_field: str = "key", value_field: str = "value") -> str:
+    """Return the normalized value for ``key`` or raise a 400 api_error."""
+    if key not in ALLOWED_SETTING_KEYS:
+        api_error(400, "UNKNOWN_SETTING_KEY", f"Unknown setting key: '{key}'", field=key_field)
+    if key in LATENCY_SETTING_KEYS:
+        try:
+            return validate_setting_value(key, value)
+        except ValueError as exc:
+            api_error(400, "INVALID_SETTING_VALUE", str(exc), field=value_field)
+    return value
+
+
+def _upsert(db: Session, key: str, value: str) -> AppSetting:
+    setting = db.query(AppSetting).filter(AppSetting.key == key).first()
+    if not setting:
+        setting = AppSetting(key=key, value=value)
+        db.add(setting)
+    else:
+        setting.value = value
+    return setting
+
+
+@router.put("/settings", response_model=List[AppSettingOut],
+            dependencies=[require_role("admin", "operator")])
+@limiter.limit("10/minute")
+def update_settings_bulk(request: Request, body: Dict[str, str] = Body(...), db: Session = Depends(get_db)):
+    """Apply several settings atomically: all keys and values are validated first."""
+    if not body:
+        api_error(400, "EMPTY_SETTINGS", "No settings given")
+    values = {key: _validated_value(key, value, key_field=key, value_field=key) for key, value in body.items()}
+    for key, value in values.items():
+        _upsert(db, key, value)
+    db.commit()
+    log_audit(request, "settings_change", "app_setting", ",".join(sorted(values)),
+              {"keys": sorted(values), "values": values})
+    return db.query(AppSetting).all()
 
 
 @router.put("/settings/{key}", response_model=AppSettingOut,
             dependencies=[require_role("admin", "operator")])
 @limiter.limit("10/minute")
 def update_setting(key: str, body: AppSettingUpdate, request: Request, db: Session = Depends(get_db)):
-    if key not in ALLOWED_SETTING_KEYS:
-        api_error(400, "UNKNOWN_SETTING_KEY", f"Unknown setting key: '{key}'", field="key")
-    setting = db.query(AppSetting).filter(AppSetting.key == key).first()
-    if not setting:
-        setting = AppSetting(key=key, value=body.value)
-        db.add(setting)
-    else:
-        setting.value = body.value
+    value = _validated_value(key, body.value)
+    setting = _upsert(db, key, value)
     db.commit()
     db.refresh(setting)
-    log_audit(request, "settings_change", "app_setting", key, {"value": body.value})
+    log_audit(request, "settings_change", "app_setting", key, {"value": value})
     return setting
 
 

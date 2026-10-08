@@ -32,6 +32,8 @@ import type {
   RackInfo,
   SwitchClass,
   FilterState,
+  LatencyDevice,
+  LatencySummary,
 } from "../../types";
 import { useTheme } from "../../theme/ThemeProvider";
 import { speedLabelToMbps, speedStrokeWidth } from "../../theme/visual";
@@ -70,6 +72,7 @@ import {
   stpDomainCount,
   classifyAggregatedVlan,
   classifyAggregatedStp,
+  classifyAggregatedLatency,
   nodeOverlay,
   type MapLayer,
 } from "./overlays";
@@ -94,6 +97,10 @@ const nodeTypes = { rack: RackNode, device: DeviceNode, mapBackground: Backgroun
 const edgeTypes = { aggregated: AggregatedEdge } as unknown as EdgeTypes;
 
 const VIEWPORT_STORAGE_KEY = "net2map-zoom";
+
+// Shared empty latency index: keeps the edge-overlay memo stable while the
+// latency layer is inactive, so summary polls do not re-render every edge.
+const EMPTY_LATENCY_BY_ID: Map<number, LatencyDevice> = new Map();
 
 // Background image base box (matches the legacy 900x550 map coordinate space).
 const BG_BASE = { width: 900, height: 550 };
@@ -141,6 +148,8 @@ interface TopologyCanvasProps {
   scan?: { active: boolean; progress: number | null; label?: string };
   // IPs touched by the running scan very recently (brief accent ring).
   scanPulseIps?: string[];
+  // Latency monitor summary for the latency layer (polled by the page).
+  latency?: LatencySummary | null;
 }
 
 // Zoom the "Show on map" focus lands on: close tier for devices (port strip
@@ -187,7 +196,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
     onRackPositionChange, onDevicePositionChange, onAutoLayout,
     selectedLink, rackPairColorMap,
     mapBgUrl, mapBgOpacity, mapBgScale, mapBgColor,
-    stats, updatedAt, scan, scanPulseIps = EMPTY_IPS,
+    stats, updatedAt, scan, scanPulseIps = EMPTY_IPS, latency = null,
   } = props;
 
   const rf = useReactFlow();
@@ -312,8 +321,20 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
   const vlanOptions = useMemo(() => collectVlanOptions(nodes), [nodes]);
   const vlanAvailable = vlanOptions.length > 0;
   const stpDomains = useMemo(() => stpDomainCount(nodes), [nodes]);
+  const latencyAvailable = latency?.enabled === true;
   const layer: MapLayer =
-    (layerPref === "stp" && !stpAvailable) || (layerPref === "vlan" && !vlanAvailable) ? "off" : layerPref;
+    (layerPref === "stp" && !stpAvailable) ||
+    (layerPref === "vlan" && !vlanAvailable) ||
+    (layerPref === "latency" && !latencyAvailable)
+      ? "off"
+      : layerPref;
+  const latencyById = useMemo(
+    () =>
+      layer === "latency"
+        ? new Map((latency?.devices ?? []).map(d => [d.device_id, d] as const))
+        : EMPTY_LATENCY_BY_ID,
+    [layer, latency],
+  );
   const selectedVlan =
     vlanPref != null && vlanOptions.some(o => o.id === vlanPref) ? vlanPref : defaultVlan(vlanOptions);
   const selectedVlanLabel = vlanOptions.find(o => o.id === selectedVlan)?.label ?? null;
@@ -326,6 +347,18 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
     const color = selectedVlan == null ? undefined : vlanColor(selectedVlan);
     aggregated.forEach(l => {
       const pairKey = [l.from, l.to].sort().join("|");
+      if (layer === "latency") {
+        // Unknown on both ends: no overlay, the edge keeps its default look.
+        const lat = classifyAggregatedLatency(l, nodesByIp, latencyById);
+        if (!lat.tone) return;
+        result.set(pairKey, {
+          layer: "latency",
+          emphasis: "emphasized",
+          latencyTone: lat.tone,
+          latencyLabel: lat.label,
+        });
+        return;
+      }
       if (layer === "vlan") {
         if (selectedVlan == null) return;
         const carry = classifyAggregatedVlan(l, nodesByIp, selectedVlan);
@@ -346,7 +379,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
       });
     });
     return result;
-  }, [layer, selectedVlan, aggregated, nodes, nodesByIp, managedRacks, switchClasses]);
+  }, [layer, selectedVlan, aggregated, nodes, nodesByIp, managedRacks, switchClasses, latencyById]);
 
   // Which endpoint pair contains the link selected in RackDetail.
   const activePairKey = useMemo(() => {
@@ -691,6 +724,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
         onLayerChange={handleLayerChange}
         stpDisabledReason={stpAvailable ? undefined : "No spanning tree data reported by any device"}
         vlanDisabledReason={vlanAvailable ? undefined : "No VLAN data reported on any port"}
+        latencyDisabledReason={latencyAvailable ? undefined : "Latency monitor is disabled (enable it in Settings > Scan)"}
         vlanOptions={vlanOptions}
         selectedVlan={selectedVlan}
         onVlanChange={handleVlanChange}

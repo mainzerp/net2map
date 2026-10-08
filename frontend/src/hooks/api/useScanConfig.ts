@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api";
 import { queryKeys } from "./keys";
 
@@ -50,6 +50,22 @@ export function useAppSettings() {
     queryFn: async () => {
       const data: unknown = await api.get("/api/settings");
       return Array.isArray(data) ? (data as AppSetting[]) : [];
+    },
+  });
+}
+
+// Atomic multi-key update via PUT /api/settings ({key: value}); one request,
+// so it counts once against the settings rate limit. Resolves with the full
+// settings list, which also refreshes the appSettings cache.
+export function useUpdateAppSettings() {
+  const queryClient = useQueryClient();
+  return useMutation<AppSetting[], unknown, Record<string, string>>({
+    mutationFn: async (values) => {
+      const data: unknown = await api.put("/api/settings", values);
+      return Array.isArray(data) ? (data as AppSetting[]) : [];
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(queryKeys.appSettings, data);
     },
   });
 }

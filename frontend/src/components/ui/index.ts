@@ -14,3 +14,4 @@ export {
   type DataTableAlign,
   type DataTableSortDirection,
 } from "./DataTable";
+export { Sparkline, sparklineGeometry, type SparklineProps, type SparklineTone, type SparklineGeometry } from "./Sparkline";

@@ -462,6 +462,7 @@ class DeviceBase(BaseModel):
     label:     str   = ""
     enabled:   bool  = True
     vendor_override: bool = False
+    latency_monitored: bool = False
 
     @field_validator("*", mode="before")
     @classmethod
@@ -587,6 +588,8 @@ class DeviceMetaUpdate(BaseModel):
     # Explicit control over the manual-vendor flag; wins over the implicit
     # derivation from the vendor field when both are sent.
     vendor_override: Optional[bool] = None
+    # Opt-in for the latency monitor in latency_mode "selected".
+    latency_monitored: Optional[bool] = None
 
 
 class BulkDeviceMetaUpdate(BaseModel):
@@ -820,3 +823,53 @@ class MapSettingsOut(BaseModel):
     opacity: float
     scale: float
     bg_color: str
+
+
+# ─── Latency monitor ──────────────────────────────────────────────────────────
+
+LatencyStatus = Literal["ok", "degraded", "loss", "down", "unknown"]
+
+
+class LatencyNetworkOut(BaseModel):
+    median_ms: Optional[float] = None
+    p95_ms:    Optional[float] = None
+    loss_pct:  Optional[float] = None
+    targets:   int = 0
+    reachable: int = 0
+    degraded:  int = 0
+
+
+class LatencyDeviceOut(BaseModel):
+    device_id:   int
+    name:        str
+    ip:          str
+    rtt_ms:      Optional[float] = None
+    jitter_ms:   Optional[float] = None
+    loss_pct:    Optional[float] = None
+    baseline_ms: Optional[float] = None
+    status:      LatencyStatus = "unknown"
+    updated_at:  Optional[str] = None
+
+
+class LatencySummaryOut(BaseModel):
+    enabled:       bool
+    interval_sec:  int
+    mode:          Literal["all", "selected"]
+    monitor_alive: bool
+    updated_at:    Optional[str] = None
+    network:       LatencyNetworkOut
+    devices:       List[LatencyDeviceOut]
+
+
+class LatencyHistoryPoint(BaseModel):
+    ts:        str
+    rtt_ms:    Optional[float] = None
+    jitter_ms: Optional[float] = None
+    loss_pct:  Optional[float] = None
+
+
+class LatencyHistoryOut(BaseModel):
+    range:      Literal["1h", "24h", "7d"]
+    device_id:  Optional[int] = None
+    bucket_sec: int
+    points:     List[LatencyHistoryPoint]

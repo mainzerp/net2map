@@ -15,12 +15,13 @@ Das Projekt besteht aus einem FastAPI-Backend (Scan, Persistenz, API) und einem 
 - Dashboard mit Status-Karten, Deep-Links und Live-Scan-Anzeige
 - Dark-/Light-Theme (Tailwind-Design-System, Umschalter in der Sidebar)
 - Manuelle Metadaten-Anpassung pro Gerät (z. B. Vendor/Modell)
+- Netzwerk-Latenzmonitor: eigener Dienst pingt die Geräte fortlaufend (Standard alle 10 s), zeigt Latenz, Jitter, Paketverlust und Abweichung von der 24-h-Baseline im Dashboard, im Inspector (mit Verlauf 1 h / 24 h / 7 d) und als Topologie-Ebene "Latenz"
 
 ## Architektur
 
 - `backend/` – FastAPI + SQLAlchemy + SNMP Scanner
 - `frontend/` – React + Vite + TypeScript (Tailwind v4, TanStack Query, React Flow), ausgeliefert über Nginx im Docker-Setup
-- `docker-compose.yml` – Startet Frontend und Backend gemeinsam
+- `docker-compose.yml` – Startet Frontend und Backend gemeinsam (plus PostgreSQL, Redis, Celery-Worker/-Beat und den Latenzmonitor `latency-monitor`)
 
 Weitere Dokumentation (Englisch): `docs/API.md` (API-Referenz), `docs/OPERATIONS.md` (Betrieb, Deployment, Umgebungsvariablen); Uebersicht in `docs/README.md`.
 

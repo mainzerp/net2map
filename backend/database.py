@@ -20,6 +20,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 from config import settings
+from latency.settings import SETTING_DEFAULTS as LATENCY_SETTING_DEFAULTS
 
 DATABASE_URL = settings.database_url
 
@@ -185,6 +186,8 @@ class Device(Base):
     map_y        = Column(Float, default=100.0)
     last_seen    = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     ignored      = Column(Boolean, default=False, nullable=False)
+    # Included by the latency monitor when latency_mode is "selected".
+    latency_monitored = Column(Boolean, default=False, nullable=False, server_default="false")
 
     # Optional assignment to a managed rack and switch class
     rack_id      = Column(Integer, ForeignKey("racks.id"), nullable=True)
@@ -397,6 +400,22 @@ class LeaseFence(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class LatencySample(Base):
+    """Per-minute latency rollup for one device, written by the latency monitor."""
+    __tablename__ = "latency_samples"
+    __table_args__ = (UniqueConstraint("device_id", "bucket_ts", name="uq_latency_samples_device_bucket"),)
+
+    id         = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    device_id  = Column(Integer, ForeignKey("devices.id", ondelete="CASCADE"), nullable=False)
+    bucket_ts  = Column(DateTime(timezone=True), nullable=False, index=True)  # minute start, UTC
+    rtt_avg_ms = Column(Float, nullable=True)
+    rtt_min_ms = Column(Float, nullable=True)
+    rtt_max_ms = Column(Float, nullable=True)
+    jitter_ms  = Column(Float, nullable=True)
+    loss_pct   = Column(Float, nullable=False)
+    probes     = Column(Integer, nullable=False)                             # echo requests sent
+
+
 def _seed_default_settings():
     """Insert default app_settings rows if they do not already exist.
 
@@ -420,6 +439,7 @@ def _seed_default_settings():
             ("map_opacity", "0.3"),
             ("map_scale", "1.0"),
             ("map_bg_color", "#020817"),
+            *LATENCY_SETTING_DEFAULTS.items(),
         ]
         for key, value in defaults:
             conn.execute(

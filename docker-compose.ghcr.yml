@@ -1,7 +1,7 @@
 # Prebuilt-image override: runs the stack from the images CI pushes to GHCR on
 # v* tags (ghcr.io/mainzerp/net2map/backend:<tag> and /frontend:<tag>) instead
-# of building locally. celery-worker and celery-beat use the backend image
-# (same Dockerfile, different command).
+# of building locally. celery-worker, celery-beat and latency-monitor use the
+# backend image (same Dockerfile, different command).
 #
 # Usage (NET2MAP_VERSION is the git tag, e.g. v1.2.3; there is no "latest" tag):
 #   NET2MAP_VERSION=v1.2.3 docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull
@@ -20,6 +20,11 @@ services:
     pull_policy: missing
 
   celery-beat:
+    image: ghcr.io/mainzerp/net2map/backend:${NET2MAP_VERSION:?set NET2MAP_VERSION}
+    build: !reset null
+    pull_policy: missing
+
+  latency-monitor:
     image: ghcr.io/mainzerp/net2map/backend:${NET2MAP_VERSION:?set NET2MAP_VERSION}
     build: !reset null
     pull_policy: missing

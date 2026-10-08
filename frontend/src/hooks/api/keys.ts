@@ -20,4 +20,8 @@ export const queryKeys = {
   dnsSettings: ["dns-settings"] as QueryKey,
   mapSettings: ["map-settings"] as QueryKey,
   mapBackground: ["map-background"] as QueryKey,
+  latencySummary: ["latency", "summary"] as QueryKey,
+  // Prefix ["latency", "history"] matches every range/device variant.
+  latencyHistory: (params?: { range: string; deviceId?: number | null }) =>
+    (params ? ["latency", "history", params.range, params.deviceId ?? null] : ["latency", "history"]) as QueryKey,
 };

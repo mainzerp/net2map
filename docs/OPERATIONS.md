@@ -20,6 +20,7 @@ port.
 | `backend` | `net2map-backend` | `./backend` (python:3.12-slim) | `8000` (internal only) | FastAPI via uvicorn. Runs Alembic migrations at start. |
 | `celery-worker` | `net2map-celery` | `./backend` | none | Runs scan jobs (`celery -A celery_app worker --concurrency=4`). |
 | `celery-beat` | `net2map-celery-beat` | `./backend` | none | Schedules `tasks.scheduler_tick` every 5 s and `tasks.purge_old_audit_logs` every 6 h. Schedule file `/data/celerybeat-schedule`. |
+| `latency-monitor` | `net2map-latency-monitor` | `./backend` | none | `python -m latency.monitor`: pings monitored devices every `latency_interval_sec`, publishes state to Redis, writes per-minute rollups to `latency_samples`. Skips migrations, starts after the backend is healthy. |
 | `postgres` | `net2map-postgres` | `postgres:16-alpine` | `5432` (internal only) | Database `net2map`, user `net2map`. |
 | `redis` | `net2map-redis` | `redis:7-alpine` | `6379` (internal only) | Celery broker/result backend, shared state, token revocation, WebSocket tickets, scan-update pub/sub. AOF on (`appendfsync everysec`). |
 
@@ -37,7 +38,7 @@ Other compose details:
 - Startup order: backend waits for postgres and redis to be healthy; frontend waits
   for backend to be healthy.
 - Resource limits: postgres/backend/celery-worker 1 GB / 1 CPU, redis 256 MB,
-  celery-beat 256 MB / 0.25 CPU, frontend 256 MB.
+  celery-beat 256 MB / 0.25 CPU, latency-monitor 256 MB / 0.5 CPU, frontend 256 MB.
 - Logging: `json-file` driver, `max-size 10m`, `max-file 3` for every service.
 - nginx proxies `/api/` (body limit 25 MB, timeouts 300 s), `/ws/` (upgrade, read
   timeout 24 h) and `/docs`, `/redoc`, `/openapi.json` (OpenAPI UI, see below).
@@ -92,7 +93,7 @@ without it they are per process.
 | `POSTGRES_PASSWORD` | none | compose (postgres, backend, celery) | yes | yes | Postgres superuser password and part of `DATABASE_URL`. Only applied when the `net2map_pgdata` volume is first initialized. |
 | `UVICORN_WORKERS` | `1` | `backend/Dockerfile` CMD; compose `${UVICORN_WORKERS:-1}` (backend) | no | no | uvicorn worker count. More than 1 only with Redis (compose provides it). |
 | `UVICORN_FORWARDED_ALLOW_IPS` | `*` | `backend/Dockerfile` CMD; compose `${UVICORN_FORWARDED_ALLOW_IPS:-*}` (backend) | no | no | Trusted proxies for `X-Forwarded-For` (rate limiting). Restrict to the proxy CIDR, e.g. `172.16.0.0/12`. |
-| `RUN_MIGRATIONS` | `true` | `backend/entrypoint.sh` | no | no | Compose sets `false` for celery-worker and celery-beat so only the backend runs Alembic. |
+| `RUN_MIGRATIONS` | `true` | `backend/entrypoint.sh` | no | no | Compose sets `false` for celery-worker, celery-beat and latency-monitor so only the backend runs Alembic. |
 | `VITE_API_URL` | empty | frontend build arg | no | no | Baked into the bundle at build time. Empty = same-origin (nginx proxy). Set for a remote backend, then rebuild. |
 | `NET2MAP_VERSION` | none | `docker-compose.ghcr.yml` | yes, with that override | no | GHCR image tag (git tag, e.g. `v1.2.3`) for the prebuilt-image override. |
 
@@ -143,8 +144,9 @@ without it they are per process.
 CI (`.github/workflows/ci.yml`, job `docker-push`) builds and pushes
 `ghcr.io/mainzerp/net2map/backend:<tag>` and `ghcr.io/mainzerp/net2map/frontend:<tag>`
 only for `v*` git tags (no `latest` tag). The backend image is built from
-`backend/Dockerfile` and serves `backend`, `celery-worker` and `celery-beat` (only
-the command differs). `docker-compose.ghcr.yml` switches those four services from
+`backend/Dockerfile` and serves `backend`, `celery-worker`, `celery-beat` and
+`latency-monitor` (only the command differs). `docker-compose.ghcr.yml` switches those
+five services from
 `build:` to `ghcr.io/mainzerp/net2map/{backend,frontend}:${NET2MAP_VERSION}`:
 
 ```bash
@@ -251,7 +253,9 @@ commands, cron, retention). Points not covered there:
     10 s, start period 15 s. A `503` (database or Redis failing) counts as
     unhealthy; the frontend only starts once the backend is healthy.
   - celery-worker: `celery inspect ping` every 30 s.
-  - celery-beat and frontend: none.
+  - celery-beat, latency-monitor and frontend: none. Liveness of the latency
+    monitor is its Redis heartbeat, exposed as `monitor_alive` in
+    `GET /api/v1/latency/summary`.
 - `GET /metrics` (unversioned): Prometheus format. Requires a bearer token when
   auth is enabled (not auth-exempt) and is not proxied by nginx, so a Prometheus
   scraper needs network access to `backend:8000` and an `Authorization` header.
@@ -263,10 +267,38 @@ commands, cron, retention). Points not covered there:
   authoritative and new metrics are being added). With `UVICORN_WORKERS > 1` each scrape hits one worker
   (no multiprocess aggregation configured).
 
+## Latency monitor
+
+- Service `latency-monitor` (`backend/latency/monitor.py`). One round every
+  `latency_interval_sec`: `ping -c <latency_pings> -i 0.2 -W 1 -q` per target, up
+  to 32 in parallel, as `appuser` (same iputils-ping as the scan worker).
+- Targets: enabled, not ignored devices (`latency_mode=all`), or only devices with
+  `latency_monitored=true` (`selected`, set per device via
+  `PATCH /api/v1/topology/devices/{id}/meta`). Hard cap 200 devices.
+- Settings (`app_settings`, `PUT /api/v1/settings` or `/settings/{key}`, read every round, seeded
+  on backend start): `latency_enabled` (`true`), `latency_interval_sec` (10, 5-300),
+  `latency_pings` (3, 1-10), `latency_mode` (`all`), `latency_retention_days` (30,
+  1-365).
+- Redis keys: `net2map:latency:state` (hash, device id -> JSON state),
+  `net2map:latency:heartbeat` (JSON, TTL `max(30, 3 x interval)` s),
+  `net2map:latency:baseline` (hash, device id -> baseline ms); state and baseline
+  carry the heartbeat TTL, refreshed every round, so they vanish after the monitor stops,
+  `net2map:latency:monitor_lock` (single-instance lock, same TTL; a second instance
+  logs `latency_monitor_lock_busy` and waits).
+- Storage: table `latency_samples` (migration 022), one row per device and minute;
+  rows older than `latency_retention_days` are purged hourly. Baselines are
+  recomputed every 10 minutes from the last 24 h. Volume: about 1440 rows per
+  device and day.
+- Without Redis it still runs (warning `latency_monitor_no_redis`); the API then
+  reads the newest rollups. Database or Redis errors are logged and the loop
+  continues; unflushed minutes are retried for up to 15 minutes.
+- Check: `docker compose logs latency-monitor` (events `latency_monitor_started`,
+  `latency_monitor_*_failed`) and `monitor_alive` in `GET /api/v1/latency/summary`.
+
 ## Logs
 
 - Container logs: `docker compose logs -f backend` (also `celery-worker`,
-  `celery-beat`, `frontend`, `postgres`, `redis`). Rotated by Docker at 10 MB x 3
+  `celery-beat`, `latency-monitor`, `frontend`, `postgres`, `redis`). Rotated by Docker at 10 MB x 3
   files per container.
 - Backend format: `LEVEL logger: message`. Level via `LOG_LEVEL`; per-request lines
   via `REQUEST_LOG_ENABLED=true` (both set in `.env`, forwarded by compose).
@@ -320,6 +352,8 @@ host port `3100` when port 3000 is taken:
 | Compose aborts with `Set POSTGRES_PASSWORD in .env` (or `SECRET_TOKEN`, `DEFAULT_ADMIN_PASSWORD`) | Required variable missing. | Fill `.env` from `.env.example`. |
 | Postgres auth errors after changing `POSTGRES_PASSWORD` | The password is only applied when the volume is initialized. | Revert the value, or change the role password inside postgres (`ALTER USER net2map PASSWORD ...`). |
 | Frontend container never starts; backend `unhealthy` | `/health` returns 503 (database or Redis check failing). | `docker compose logs backend`; query `/health` inside the backend container to see which check fails. |
+| Latency card shows the monitor as offline (`monitor_alive=false`) | `latency-monitor` container stopped, crash-looping, or waiting for the lock. | `docker compose ps latency-monitor`; `docker compose logs latency-monitor`. |
+| All latency targets `down` although devices answer scans | ICMP blocked between the monitor and the devices, or `ping` lacks `CAP_NET_RAW`. | `docker compose exec latency-monitor ping -c 3 <ip>`. |
 | Scans stay queued | No Celery worker answering. | `/health?deep=1` shows `"workers": "none"`; check `docker compose logs celery-worker`. |
 | API returns `503 AUTH_UNAVAILABLE` | `REDIS_URL` configured but Redis unreachable; token revocation checks fail closed. | Check the `redis` container and its healthcheck. |
 | Scan progress does not update live | WebSocket ticket needs Redis; nginx must pass `/ws/`. | Check Redis; check browser console for WS close codes `1008` (auth) / `1011` (auth service down). |

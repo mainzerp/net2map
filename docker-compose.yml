@@ -168,6 +168,40 @@ services:
       postgres:
         condition: service_healthy
 
+  # ─── Latency Monitor ─────────────────────────────────────────────────────────
+  # Long-running ICMP probe loop (python -m latency.monitor). Uses the backend
+  # image; runs as appuser like the Celery worker (iputils-ping). Migrations are
+  # skipped here and the service waits for a healthy backend, which has applied
+  # them, so it never races alembic or starts against an old schema.
+  latency-monitor:
+    build: ./backend
+    container_name: net2map-latency-monitor
+    restart: unless-stopped
+    command: python -m latency.monitor
+    environment:
+      DATABASE_URL: "postgresql://net2map:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres/net2map"
+      REDIS_URL: "redis://redis:6379/0"
+      SECRET_TOKEN: "${SECRET_TOKEN:?Set SECRET_TOKEN in .env}"
+      JWT_SECRET: "${JWT_SECRET:-}"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-}"
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+      RUN_MIGRATIONS: "false"
+    networks:
+      - net2map
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    logging: *default-logging
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
   # ─── React/Nginx Frontend ─────────────────────────────────────────────────────
   frontend:
     build:

@@ -56,9 +56,17 @@ export default function MapLayerLegend({ layer, vlanId, vlanLabel, stpDomains = 
       data-testid="map-layer-legend"
     >
       <div className="text-[10px] font-semibold uppercase tracking-wider text-primary mb-1.5 truncate">
-        {layer === "vlan" ? `VLAN ${vlanLabel ?? ""}`.trim() : "Spanning tree"}
+        {layer === "vlan" ? `VLAN ${vlanLabel ?? ""}`.trim() : layer === "latency" ? "Latency" : "Spanning tree"}
       </div>
-      {layer === "vlan" ? (
+      {layer === "latency" ? (
+        <ul className="flex flex-col gap-1">
+          <Row icon={<Swatch color="var(--success)" />}>Both ends OK</Row>
+          <Row icon={<Swatch color="var(--warning)" />}>Degraded or packet loss</Row>
+          <Row icon={<Swatch color="var(--danger)" />}>An endpoint is down</Row>
+          <Row icon={<Swatch color="var(--line-strong)" />}>No latency data</Row>
+          <li className="pt-1">Label: highest endpoint RTT</li>
+        </ul>
+      ) : layer === "vlan" ? (
         <ul className="flex flex-col gap-1">
           <Row icon={<Swatch color={vlanStroke} />}>Carries VLAN tagged</Row>
           <Row

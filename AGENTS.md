@@ -263,7 +263,8 @@ Rules of thumb:
   (background scan pipeline: executor, jobs, scheduler, event_loop, ping, dns,
   broadcast), `scanners/` (vendor SNMP scanners: aruba_cx, cisco, fs_scanner, generic,
   opnsense, unifi; plus detection/parsing helpers), `shared/`
-  (auth, crypto, audit, metrics, redis_client, state), `alembic/versions/` (migrations 001-021),
+  (auth, crypto, audit, metrics, redis_client, state), `alembic/versions/` (migrations 001-022), `latency/` (latency monitor: probe,
+  stats, store, `monitor.py` run as the `latency-monitor` compose service),
   `tests/` (pytest suite), plus `config.py`, `database.py`, `schemas.py`,
   `celery_app.py`, `tasks.py`, `seed_db.py`, legacy `snmp_scanner.py`.
 - `frontend/` — React 18 + Vite + TypeScript SPA served by nginx; entry
@@ -273,7 +274,10 @@ Rules of thumb:
   `?inspect=device:|endpoint:|rack:<id>` via `src/hooks/useInspector.ts`),
   `command-palette/` (Ctrl/Cmd+K and `/`, pure scoring in `search.ts`), `topology/` (React Flow map: TopologyCanvas, graph/layout,
   nodes/, edges/, MapToolbar), `racks/` (rack elevation view at route `/racks`:
-  RackElevation, useRackLayout, rackLayout).
+  RackElevation, useRackLayout, rackLayout), `latency/` (latency monitor UI:
+  LatencyCard on the dashboard, DeviceLatencySection in the inspector, helpers in
+  `latency.ts`; the map's "latency" layer lives in `topology/overlays.ts`; dependency-free
+  `Sparkline` primitive in `src/components/ui/`).
   Styling: Tailwind v4 (`@tailwindcss/vite`) with theme tokens in `src/index.css`
   ("Cartography" palette after Billio: light paper default, `[data-theme="dark"]`
   ink night; semantic utilities like `bg-surface`, `text-primary`, `border-line`,

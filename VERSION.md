@@ -1,5 +1,43 @@
 # Version History
 
+## v3.2.0 -- Netzwerk-Latenzmonitor
+
+**Type:** MINOR
+
+Noch nicht veroeffentlicht. Migration 022 laeuft beim Start des Backends
+automatisch. Neuer Compose-Dienst `latency-monitor` (Backend-Image): nach dem
+Update `docker compose up -d` ausfuehren, damit er startet.
+
+### Features
+
+- Latenzmonitor als eigener Dienst (`python -m latency.monitor`): pingt alle
+  aktiven, nicht ignorierten Geraete (max. 200) fortlaufend, Standard alle 10 s
+  mit 3 Pings. Ermittelt Latenz (Median der letzten 6 Messungen), Jitter,
+  Paketverlust und eine Baseline (Median der Minutenwerte der letzten 24 h).
+  Status pro Geraet: ok, erhoeht (deutlich ueber Baseline), Verlust (> 5 %),
+  down (100 % Verlust), unbekannt.
+- Speicherung als Minutenwerte in der neuen Tabelle `latency_samples`
+  (Migration 022), automatische Bereinigung nach `latency_retention_days`
+  (Standard 30 Tage). Aktueller Zustand liegt in Redis.
+- Neue API: `GET /api/v1/latency/summary` (Netzwerk-Kennzahlen und Geraeteliste)
+  und `GET /api/v1/latency/history?range=1h|24h|7d&device_id=` (Verlauf).
+- Neue Einstellungen `latency_enabled`, `latency_interval_sec` (5-300 s),
+  `latency_pings` (1-10), `latency_mode` (`all` oder `selected`),
+  `latency_retention_days` (1-365), mit Validierung in `PUT /api/v1/settings/{key}`.
+- Geraete-Feld `latency_monitored` (Migration 022): Auswahl der Geraete fuer den
+  Modus `selected`, aenderbar ueber `PATCH /api/v1/topology/devices/{id}/meta`.
+- Dashboard-Latenzkarte mit Netzwerk-Median, P95, Verlust und den auffaelligsten
+  Geraeten.
+- Inspector-Abschnitt "Latenz" mit Verlaufsdiagramm (1 h / 24 h / 7 d) und
+  Ueberwachungs-Schalter pro Geraet.
+- Topologie-Ebene "Latenz": Verbindungen nach dem schlechtesten Status ihrer
+  Endgeraete eingefaerbt, Beschriftung mit der hoechsten RTT.
+- Latenz-Einstellungen unter Einstellungen > Scan.
+- Neuer Endpunkt `PUT /api/v1/settings` speichert mehrere Einstellungen in einem
+  Aufruf (alles oder nichts, ein Rate-Limit-Slot).
+- Laeuft der Monitor nicht, meldet die API alle Geraete als unbekannt statt
+  veraltete Messwerte zu zeigen.
+
 ## v3.1.0 -- Weniger SNMP-Last pro Scan
 
 **Type:** MINOR

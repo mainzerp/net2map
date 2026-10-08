@@ -10,6 +10,7 @@ import { Ban } from "lucide-react";
 import { getBorderAnchor, nodeCenter } from "./floating";
 import { useFlowEnabled } from "../flowContext";
 import type { AggregatedFlowEdge, TopoFlowNode } from "../flowTypes";
+import { LATENCY_EDGE_COLOR, type LatencyEdgeTone } from "../../latency/latency";
 
 // ── AggregatedEdge ───────────────────────────────────────────────────────────
 // One edge per endpoint pair (rack<->rack, rack<->device, device<->device).
@@ -36,11 +37,20 @@ import type { AggregatedFlowEdge, TopoFlowNode } from "../flowTypes";
 // VLAN carried untagged only gets a small "U" chip in the label pill. An STP
 // root-path edge gets an arrowhead at the end facing the root bridge. The
 // selected/active edge keeps the terracotta accent in every layer. With a
-// layer active the flow animation only runs on emphasized edges.
+// layer active the flow animation only runs on emphasized edges. The latency
+// layer tints edges in the status token of the worst endpoint (success /
+// warning / danger) and shows the worst endpoint RTT instead of the speed.
 
 const DOWN_DASH = "4 4";
 const BLOCKED_DASH = "5 4";
 const FADED_OPACITY = 0.25;
+
+// Static class strings so Tailwind picks them up.
+const LATENCY_LABEL_BORDER: Record<LatencyEdgeTone, string> = {
+  success: "border-success",
+  warning: "border-warning",
+  danger: "border-danger",
+};
 
 function markerId(edgeId: string): string {
   return `topo-root-arrow-${edgeId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
@@ -73,9 +83,10 @@ function AggregatedEdge({ id, source, target, data, selected }: EdgeProps<Aggreg
   const blockedOnly = overlay?.emphasis === "blocked";
   const faded = overlay?.emphasis === "faded" && !active;
   const isVlan = overlay?.layer === "vlan";
+  const latencyTone = overlay?.layer === "latency" ? overlay.latencyTone ?? null : null;
   const vlanStroke = overlay?.color?.stroke ?? "var(--overlay-vlan)";
   const vlanSoft = overlay?.color?.soft ?? "var(--overlay-vlan-soft)";
-  const overlayColor = isVlan ? vlanStroke : "var(--overlay-stp)";
+  const overlayColor = latencyTone ? LATENCY_EDGE_COLOR[latencyTone] : isVlan ? vlanStroke : "var(--overlay-stp)";
   const baseWidth = data?.width || 1.5;
   const width = baseWidth + (active || emphasized || blockedOnly ? 1 : 0);
   const color = active
@@ -93,19 +104,24 @@ function AggregatedEdge({ id, source, target, data, selected }: EdgeProps<Aggreg
   const blockedCount = overlay?.layer === "stp" ? overlay.blockedCount ?? 0 : 0;
   const untagged = emphasized && overlay?.layer === "vlan" && !!overlay.untagged;
   const blockedText = blockedOnly ? "blocked" : blockedCount > 0 ? `${blockedCount} blocked` : null;
-  const hasLabel = !!data?.label || untagged || !!blockedText;
+  const labelText = latencyTone && overlay?.latencyLabel ? overlay.latencyLabel : data?.label;
+  const hasLabel = !!labelText || untagged || !!blockedText;
   const labelTone = active
     ? "border-accent text-accent"
     : blockedText
       ? "border-danger text-primary"
       : emphasized
-        ? `${isVlan ? "" : "border-overlay-stp"} text-primary`
+        ? `${latencyTone ? LATENCY_LABEL_BORDER[latencyTone] : isVlan ? "" : "border-overlay-stp"} text-primary`
         : up ? "border-line text-primary" : "border-line text-muted";
   // Dynamic VLAN colors cannot be Tailwind classes, so the pill border is inline.
   const labelBorderColor = !active && !blockedText && emphasized && isVlan ? vlanStroke : undefined;
 
   return (
-    <g data-overlay={overlay ? overlay.emphasis : undefined} data-vlan-untagged={untagged ? "true" : undefined}>
+    <g
+      data-overlay={overlay ? overlay.emphasis : undefined}
+      data-latency-tone={latencyTone ?? undefined}
+      data-vlan-untagged={untagged ? "true" : undefined}
+    >
       {arrowId && (
         <defs>
           <marker
@@ -183,7 +199,7 @@ function AggregatedEdge({ id, source, target, data, selected }: EdgeProps<Aggreg
                 {blockedText}
               </span>
             )}
-            {data?.label}
+            {labelText}
           </div>
         </EdgeLabelRenderer>
       )}

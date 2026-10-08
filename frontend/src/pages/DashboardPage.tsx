@@ -11,6 +11,7 @@ import { ScanHero } from "../features/dashboard/ScanHero";
 import { AttentionCard } from "../features/dashboard/AttentionCard";
 import { DistributionPanel } from "../features/dashboard/DistributionCards";
 import { RackOverview } from "../features/dashboard/RackOverview";
+import { LatencyCard } from "../features/latency/LatencyCard";
 import { useLastScanRun } from "../features/dashboard/useLastScanRun";
 import { api, extractErrorMessage } from "../api";
 import { formatTimestamp } from "../utils/datetime";
@@ -340,7 +341,8 @@ export default function DashboardPage() {
         <m.div variants={revealItem} className="lg:col-span-2 min-w-0">
           <AttentionCard nodes={topology.nodes} lastRun={lastRun} />
         </m.div>
-        <m.div variants={revealItem} className="flex flex-col gap-6">
+        <m.div variants={revealItem} className="flex flex-col gap-6 min-w-0">
+          <LatencyCard />
           <DistributionPanel
             vendors={stats.vendors}
             switchTotal={stats.switchCount}

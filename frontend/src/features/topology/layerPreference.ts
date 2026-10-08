@@ -1,5 +1,5 @@
 // ── Map layer preference ─────────────────────────────────────────────────────
-// Persisted logical layer (Off / STP / VLAN) and the selected VLAN, following
+// Persisted logical layer (Off / STP / VLAN / Latency) and the selected VLAN, following
 // the flow toggle pattern in flowContext.ts.
 
 import type { MapLayer } from "./overlays";
@@ -10,7 +10,7 @@ export const LAYER_VLAN_STORAGE_KEY = "net2map-map-layer-vlan";
 export function loadLayerPreference(): MapLayer {
   try {
     const raw = localStorage.getItem(LAYER_STORAGE_KEY);
-    if (raw === "stp" || raw === "vlan" || raw === "off") return raw;
+    if (raw === "stp" || raw === "vlan" || raw === "latency" || raw === "off") return raw;
   } catch { /* ignore */ }
   return "off";
 }

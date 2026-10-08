@@ -1,5 +1,21 @@
 """Tests for the settings router (GET/PUT /api/settings)."""
-from database import AppSetting
+import pytest
+
+from database import AppSetting, AuditLog
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    import routers.settings as _s
+    _s.limiter.reset()
+    yield
+    _s.limiter.reset()
+
+
+def _value(db, key):
+    db.expire_all()
+    row = db.query(AppSetting).filter(AppSetting.key == key).first()
+    return row.value if row else None
 
 
 def test_list_settings_returns_list(client, auth_headers):
@@ -94,3 +110,42 @@ def test_scan_settings_bulk_size_roundtrip_and_clamp(client, jwt_headers):
     r = client.put("/api/scan-settings", json={"snmp_bulk_size": 40}, headers=jwt_headers)
     assert r.json()["snmp_bulk_size"] == 40
     assert client.get("/api/scan-settings", headers=jwt_headers).json()["snmp_bulk_size"] == 40
+
+
+def test_bulk_put_applies_all_and_returns_list(client, jwt_headers, db):
+    """PUT /api/v1/settings applies every key in one call and returns all settings."""
+    payload = {"latency_enabled": "FALSE", "latency_interval_sec": "20", "latency_pings": "5",
+               "latency_mode": "Selected", "latency_retention_days": "60"}
+    r = client.put("/api/v1/settings", json=payload, headers=jwt_headers)
+    assert r.status_code == 200
+    by_key = {s["key"]: s["value"] for s in r.json()}
+    assert by_key["latency_enabled"] == "false" and by_key["latency_mode"] == "selected"
+    assert by_key["latency_interval_sec"] == "20" and by_key["latency_retention_days"] == "60"
+    assert _value(db, "latency_pings") == "5"
+    entries = db.query(AuditLog).filter(AuditLog.resource == "app_setting").all()
+    assert len(entries) == 1
+    assert entries[0].details["keys"] == sorted(payload)
+
+
+def test_bulk_put_unknown_key_rejected(client, jwt_headers, db):
+    r = client.put("/api/v1/settings", json={"latency_pings": "4", "arbitrary_key": "x"}, headers=jwt_headers)
+    assert r.status_code == 400
+    err = r.json()["error"]
+    assert err["code"] == "UNKNOWN_SETTING_KEY" and err["field"] == "arbitrary_key"
+    assert _value(db, "latency_pings") != "4"
+
+
+def test_bulk_put_invalid_value_changes_nothing(client, jwt_headers, db):
+    before = {k: _value(db, k) for k in ("latency_interval_sec", "latency_pings")}
+    r = client.put("/api/v1/settings", json={"latency_interval_sec": "42", "latency_pings": "11"},
+                   headers=jwt_headers)
+    assert r.status_code == 400
+    err = r.json()["error"]
+    assert err["code"] == "INVALID_SETTING_VALUE" and err["field"] == "latency_pings"
+    assert {k: _value(db, k) for k in before} == before
+
+
+def test_bulk_put_viewer_forbidden(client, viewer_jwt_headers, db):
+    r = client.put("/api/v1/settings", json={"latency_pings": "4"}, headers=viewer_jwt_headers)
+    assert r.status_code == 403
+    assert _value(db, "latency_pings") != "4"

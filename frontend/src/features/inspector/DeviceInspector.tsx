@@ -7,6 +7,7 @@ import useNet2MapStore from "../../store";
 import { speedLabel } from "../../theme/visual";
 import { Badge, Button, StatusDot, type BadgeTone } from "../../components/ui";
 import type { PortInfo } from "../../types";
+import { DeviceLatencySection } from "../latency/DeviceLatencySection";
 import {
   FactList,
   InspectorLoading,
@@ -169,6 +170,8 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
           ]}
         />
       </InspectorSection>
+
+      <DeviceLatencySection device={device} />
 
       {stp && (
         <InspectorSection title="Spanning tree">

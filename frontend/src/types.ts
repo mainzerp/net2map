@@ -54,6 +54,8 @@ export interface TopologyNode {
   ports: PortInfo[];
   ping_status?: string;
   ping_rtt_ms?: number;
+  // Per-device opt-in for the latency monitor (only honored in "selected" mode).
+  latency_monitored?: boolean;
   location?: string;
   label?: string;
   enabled?: boolean;
@@ -110,6 +112,58 @@ export interface TopologyData {
   racks: RackInfo[];
   classes: SwitchClass[];
   models: SwitchModel[];
+}
+
+// ── Latency monitor (GET /api/latency/summary, /api/latency/history) ────────
+
+export type LatencyStatus = "ok" | "degraded" | "loss" | "down" | "unknown";
+export type LatencyRange = "1h" | "24h" | "7d";
+export type LatencyMode = "all" | "selected";
+
+export interface LatencyDevice {
+  device_id: number;
+  name: string;
+  ip: string;
+  rtt_ms: number | null;
+  jitter_ms: number | null;
+  loss_pct: number | null;
+  baseline_ms: number | null;
+  status: LatencyStatus;
+  updated_at: string | null;
+}
+
+export interface LatencyNetwork {
+  median_ms: number | null;
+  p95_ms: number | null;
+  loss_pct: number | null;
+  targets: number;
+  reachable: number;
+  degraded: number;
+}
+
+export interface LatencySummary {
+  enabled: boolean;
+  interval_sec: number;
+  mode: LatencyMode;
+  monitor_alive: boolean;
+  updated_at: string | null;
+  network: LatencyNetwork;
+  // Pre-sorted by severity: down, loss, degraded, ok, unknown.
+  devices: LatencyDevice[];
+}
+
+export interface LatencyPoint {
+  ts: string;
+  rtt_ms: number | null;
+  jitter_ms: number | null;
+  loss_pct: number | null;
+}
+
+export interface LatencyHistory {
+  range: LatencyRange | string;
+  device_id: number | null;
+  bucket_sec: number;
+  points: LatencyPoint[];
 }
 
 // ── Store types ──────────────────────────────────────────────────────────────

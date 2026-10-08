@@ -13,6 +13,7 @@ export { useSwitchClasses } from "./useSwitchClasses";
 export {
   useScanSettings,
   useAppSettings,
+  useUpdateAppSettings,
   useDiscoveryRanges,
   useScanRuns,
   type ScanSettings,
@@ -21,3 +22,4 @@ export {
 } from "./useScanConfig";
 export { useDnsServers } from "./useDnsServers";
 export { useMapSettings, useMapBackground, type MapSettings } from "./useMapSettings";
+export { useLatencySummary, useLatencyHistory, latencyRefetchMs } from "./useLatency";

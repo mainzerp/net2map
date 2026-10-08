@@ -10,6 +10,7 @@ import {
   EmptyState,
   Input,
   Select,
+  Sparkline,
   Spinner,
   StatusDot,
   type BadgeTone,
@@ -35,6 +36,17 @@ const TOKEN_GROUPS: { title: string; tokens: string[] }[] = [
 
 const SHADOW_TOKENS = ["shadow-card", "shadow-raised"];
 const RADIUS_TOKENS = ["radius-control", "radius-card"];
+
+const SPARKLINE_DEMOS: {
+  tone: "ok" | "warning" | "danger" | "neutral";
+  values: (number | null)[];
+  baseline?: number;
+}[] = [
+  { tone: "ok", values: [1.2, 1.1, 1.4, 1.3, 1.2, 1.5, 1.3, 1.2, 1.1, 1.3], baseline: 1.3 },
+  { tone: "warning", values: [2, 2.4, 3.1, null, null, 4.2, 5.1, 4.8, 6, 5.5], baseline: 2.2 },
+  { tone: "danger", values: [3, 4, 8, 12, 9, null, 15, 18, null, 20] },
+  { tone: "neutral", values: [5, 7, 6, 8, 7, 9, 8, 10, 9, 11] },
+];
 
 // Reads the resolved value of a CSS custom property; re-run on theme change.
 function useCssVars(names: string[], theme: string): Record<string, string> {
@@ -310,6 +322,26 @@ export default function StyleguidePage() {
           <Card>
             <EmptyState title="Nothing to show" hint="Empty state inside a card." />
           </Card>
+        </div>
+      </Section>
+
+      <Section title="Sparkline" hint="Inline SVG trend line; null values render as gaps, optional dashed baseline.">
+        <div className="grid gap-4 md:grid-cols-2">
+          {SPARKLINE_DEMOS.map((demo) => (
+            <Card key={demo.tone}>
+              <div className="text-[11px] text-muted mb-2">
+                tone=&quot;{demo.tone}&quot;{demo.baseline != null ? `, baseline ${demo.baseline}` : ""}
+              </div>
+              <Sparkline
+                values={demo.values}
+                tone={demo.tone}
+                area
+                baseline={demo.baseline}
+                height={40}
+                ariaLabel={`Sample ${demo.tone} sparkline`}
+              />
+            </Card>
+          ))}
         </div>
       </Section>
 

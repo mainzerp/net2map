@@ -12,11 +12,12 @@
 // role; it is blocked when an endpoint port has the blocked role or a
 // blocking/broken state. Blocked wins over root for a single link.
 
-import type { PortInfo, TopologyLink, TopologyNode } from "../../types";
+import type { LatencyDevice, LatencyStatus, PortInfo, TopologyLink, TopologyNode } from "../../types";
+import { formatMs, latencyEdgeTone, worstStatus, type LatencyEdgeTone } from "../latency/latency";
 import { resolvePort, type AggregatedLink, type EndpointId } from "./graph";
 import { vlanColor, type VlanColor } from "./vlanColor";
 
-export type MapLayer = "off" | "stp" | "vlan";
+export type MapLayer = "off" | "stp" | "vlan" | "latency";
 
 // VLAN options ---------------------------------------------------------------
 
@@ -201,6 +202,39 @@ export function stpDomainCount(nodes: TopologyNode[]): number {
     if (id) roots.add(id.trim().toLowerCase());
   });
   return roots.size;
+}
+
+// Latency classification --------------------------------------------------------
+// An aggregated edge takes the worst monitor status of the devices at the ends
+// of its member links, and the highest RTT among them for the label.
+
+export interface LatencyEdgeClass {
+  status: LatencyStatus;
+  rttMs: number | null;
+  tone: LatencyEdgeTone | null;
+  label: string | null;
+}
+
+export function classifyAggregatedLatency(
+  agg: Pick<AggregatedLink, "individual">,
+  nodesByIp: Map<string, TopologyNode>,
+  latencyById: Map<number, LatencyDevice>,
+): LatencyEdgeClass {
+  let status: LatencyStatus = "unknown";
+  let rttMs: number | null = null;
+  const seen = new Set<number>();
+  for (const link of agg.individual) {
+    for (const ip of [link.local_ip, link.remote_ip]) {
+      const node = nodesByIp.get(ip);
+      if (!node || seen.has(node.id)) continue;
+      seen.add(node.id);
+      const entry = latencyById.get(node.id);
+      if (!entry) continue;
+      status = worstStatus(status, entry.status);
+      if (entry.rtt_ms != null && (rttMs == null || entry.rtt_ms > rttMs)) rttMs = entry.rtt_ms;
+    }
+  }
+  return { status, rttMs, tone: latencyEdgeTone(status), label: rttMs != null ? formatMs(rttMs) : null };
 }
 
 // Node overlay -------------------------------------------------------------------

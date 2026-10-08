@@ -28,6 +28,7 @@ from routers import (
     credentials,
     endpoints,
     health,
+    latency,
     logs,
     map_bg,
     racks,
@@ -192,6 +193,7 @@ API_ROUTERS = (
     auth.router,
     audit.router,
     endpoints.router,
+    latency.router,
 )
 
 # Canonical v1 mount first: Starlette matches routes in registration order, so

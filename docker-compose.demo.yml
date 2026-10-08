@@ -31,6 +31,10 @@ services:
     image: net2map-backend
     container_name: net2map-demo-celery-beat
 
+  latency-monitor:
+    image: net2map-backend
+    container_name: net2map-demo-latency-monitor
+
   frontend:
     image: net2map-frontend
     container_name: net2map-demo-frontend

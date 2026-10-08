@@ -208,7 +208,8 @@ Key fields only; see OpenAPI for the full list.
 
 Fields from `DeviceBase`: `sys_name`, `ip`, `sys_descr`, `model`, `firmware`,
 `vendor`, `location`, `ping_status`, `ping_rtt_ms`, `map_x`, `map_y`, `ignored`,
-`label`, `enabled`, `vendor_override`. Plus:
+`label`, `enabled`, `vendor_override`, `latency_monitored` (opt-in for the latency
+monitor in `latency_mode=selected`). Plus:
 
 - `id`, `last_seen`, `ports: PortOut[]`
 - `rack_id`, `class_id`, `model_id`, `rack_u_position` (1..48 or null = not placed),
@@ -281,7 +282,8 @@ Generic key/value app settings and dashboard statistics.
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
 | GET | `/settings` | any | List all app settings. | `AppSettingOut[]` |
-| PUT | `/settings/{key}` | op+ | Upsert one setting. Only allowlisted keys (`ALLOWED_SETTING_KEYS`: discovery/link/mac/port/vlan/stp intervals, `discovery_scan_ranges`, `scan_max_workers`, `scan_snmp_timeout`, `scan_snmp_retries`, `scan_snmp_bulk_size`, `dns_servers`, `map_opacity`, `map_scale`, `map_bg_color`, `audit_retention_days`); others -> `400 UNKNOWN_SETTING_KEY`. 10/min. | `AppSettingUpdate` -> `AppSettingOut` |
+| PUT | `/settings/{key}` | op+ | Upsert one setting. Only allowlisted keys (`ALLOWED_SETTING_KEYS`: discovery/link/mac/port/vlan/stp intervals, `discovery_scan_ranges`, `scan_max_workers`, `scan_snmp_timeout`, `scan_snmp_retries`, `scan_snmp_bulk_size`, `dns_servers`, `map_opacity`, `map_scale`, `map_bg_color`, `audit_retention_days`, and the latency keys `latency_enabled` (`true`/`false`), `latency_interval_sec` (5-300), `latency_pings` (1-10), `latency_mode` (`all`/`selected`), `latency_retention_days` (1-365)); others -> `400 UNKNOWN_SETTING_KEY`. Latency keys are validated and normalized; invalid values -> `400 INVALID_SETTING_VALUE`. 10/min. | `AppSettingUpdate` -> `AppSettingOut` |
+| PUT | `/settings` | op+ | Atomic multi-key update: JSON object `{key: value}` (string values). Every key and value is validated first with the same rules as `PUT /settings/{key}` (`400 UNKNOWN_SETTING_KEY` / `400 INVALID_SETTING_VALUE`, `field` = offending key; empty object -> `400 EMPTY_SETTINGS`); nothing is written unless all are valid. One audit entry (`details.keys`). Shares the 10/min limit; one call counts once. | `{key: value}` -> `AppSettingOut[]` (all settings, like GET) |
 | GET | `/stats` | any | Counts (devices, ports, ports up, racks, endpoints) and last scan time/status. | ad-hoc object |
 
 ### credentials (`routers/credentials.py`)
@@ -379,7 +381,7 @@ version (invalidates the `GET /topology` ETag cache).
 | PATCH | `/topology/devices/{device_id}/position` | op+ | Persist drag-and-drop position. | `DevicePositionUpdate` `{map_x, map_y}` -> `DeviceOut` |
 | PATCH | `/topology/racks/{rack_id}/position` | op+ | Persist rack position on the map. | `RackPositionUpdate` -> `RackOut` |
 | PATCH | `/topology/devices/bulk-meta` | op+ | Bulk set `ignored`, `rack_id` / `clear_rack`, `class_id` (enforces `allow_outside_rack`). | `BulkDeviceMetaUpdate` -> `{"updated": n}` |
-| PATCH | `/topology/devices/{device_id}/meta` | op+ | Partial update of location, sys_name, vendor (sets `vendor_override`), model, rack/class/model ids, ignored, label, enabled, `rack_u_position` (null unplaces), `u_height`, `vendor_override`. | `DeviceMetaUpdate` -> `DeviceOut` |
+| PATCH | `/topology/devices/{device_id}/meta` | op+ | Partial update of location, sys_name, vendor (sets `vendor_override`), model, rack/class/model ids, ignored, label, enabled, `rack_u_position` (null unplaces), `u_height`, `vendor_override`, `latency_monitored`. Audit-logged with the changed field names. | `DeviceMetaUpdate` -> `DeviceOut` |
 
 ### map_bg (`routers/map_bg.py`)
 
@@ -476,6 +478,44 @@ they were seen on.
 `EndpointOut`: `id`, `mac`, `ip`, `hostname`, `first_seen`, `last_seen`, `ignored`,
 `notes`, `found_on: EndpointPortInfo[]` (`port_id`, `switch_ip`, `switch_name`,
 `port_name`, `vlan_id`, `last_seen`).
+
+### latency (`routers/latency.py`)
+
+Network latency monitor. Data comes from the `latency-monitor` service (see
+`docs/OPERATIONS.md`): live per-device state in Redis, per-minute rollups in the
+`latency_samples` table.
+
+| Method | Path | Role | Description | Schema |
+|---|---|---|---|---|
+| GET | `/latency/summary` | any | Current network and per-device latency. | `LatencySummaryOut` |
+| GET | `/latency/history` | any | Time series; query `range=1h\|24h\|7d` (default `1h`, other values -> 422), optional `device_id` (unknown -> `404 DEVICE_NOT_FOUND`). | `LatencyHistoryOut` |
+
+`LatencySummaryOut`: `enabled`, `interval_sec`, `mode` (`all|selected`),
+`monitor_alive` (monitor heartbeat younger than `max(30 s, 3 x interval)`),
+`updated_at` (ISO or null), `network` {`median_ms`, `p95_ms` (over device `rtt_ms`),
+`loss_pct` (mean device loss), `targets`, `reachable` (status not `down`/`unknown`),
+`degraded` (status `degraded`/`loss`/`down`)}, `devices[]` {`device_id`, `name`
+(label, sys_name or ip), `ip`, `rtt_ms` (median of the last 6 probes), `jitter_ms`,
+`loss_pct`, `baseline_ms` (median of the last 24 h minute averages, null below 30
+values), `status` (`ok|degraded|loss|down|unknown`), `updated_at`}.
+
+- `devices` lists the current targets (enabled, not ignored, opted in for
+  `selected` mode, max 200); targets without data yet are `unknown`. Sorted by
+  severity (down, loss, degraded, ok, unknown), then `rtt_ms` descending. Empty when
+  `latency_enabled=false`.
+- Status: `down` = 100 % loss, `loss` > 5 %, `degraded` = `rtt_ms > max(3 x
+  baseline, baseline + 5 ms)`, else `ok`.
+- While `monitor_alive` is false every device is reported `unknown` with null
+  `rtt_ms`/`jitter_ms`/`loss_pct` (`baseline_ms` and `updated_at` kept as "last
+  seen"); network `median_ms`/`p95_ms`/`loss_pct` are null, `reachable`/`degraded` 0.
+- Without Redis the summary uses the newest rollup per device of the last 5 minutes
+  (`baseline_ms` null, `monitor_alive` = a rollup younger than 3 minutes).
+
+`LatencyHistoryOut`: `range`, `device_id` (or null), `bucket_sec` (1h: 60, 24h:
+300, 7d: 1800), `points[]` {`ts` (bucket start, ISO UTC), `rtt_ms`, `jitter_ms`,
+`loss_pct`}. With `device_id`: means of that device's rollups per bucket. Without:
+network series, per bucket the median across devices of their mean `rtt_ms` /
+`jitter_ms` and the mean of their loss. Only buckets with data, ascending.
 
 ## Open points
 

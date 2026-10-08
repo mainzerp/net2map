@@ -247,3 +247,23 @@
   while garbage tokens get 401.
 - **Scheduler and rate limits are shared through Redis**, with in-memory fallback
   when Redis is unavailable, so multiple workers no longer dispatch or count twice.
+
+## Network latency monitor (2026-10-08)
+
+- **Dedicated `latency-monitor` compose service** (backend image, `python -m
+  latency.monitor`) instead of the API lifespan or Celery: uvicorn may run several
+  workers (duplicate loops), and Celery slots are shared with scans. A Redis lock
+  (`net2map:latency:monitor_lock`) keeps it single-instance.
+- **Probing with the existing `iputils-ping`** (`-c N -i 0.2 -W 1 -q`, summary line
+  gives avg and mdev as jitter): no new dependency, no `CAP_NET_RAW`.
+- **Fixed targets, not random ones**: all enabled devices by default, or only devices
+  with `latency_monitored` (mode `selected`). Random targets make the average move
+  without any network change.
+- **Storage split**: live state and a ~1 min rolling window in Redis, minute rollups
+  in `latency_samples` (migration 022, default retention 30 days).
+- **Status relative to a per-device baseline** (median of the last 24 h, needs 30
+  minutes of data): `down` 100 % loss, `loss` > 5 %, `degraded` median > max(3x
+  baseline, baseline + 5 ms). A network-wide mean hides single bad uplinks, so the
+  per-device view and the topology layer are the primary signals.
+- **Frontend polls** the summary at the probe interval; no WebSocket stream for
+  10 s granularity data.

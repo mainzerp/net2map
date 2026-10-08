@@ -21,6 +21,7 @@ vi.mock("../api", () => ({
   },
   API: "",
   _getAuthHeader: () => ({}),
+  getStoredUser: () => null,
   extractErrorMessage: (ex: unknown) => (ex instanceof Error ? ex.message : String(ex)),
   normPort: (p: string | null) => (p || "").trim().toLowerCase(),
 }));

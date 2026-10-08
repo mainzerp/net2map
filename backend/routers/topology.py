@@ -266,6 +266,8 @@ def update_device_meta(
         device.rack_u_position = payload["rack_u_position"]
     if "u_height" in payload and payload["u_height"] is not None:
         device.u_height = payload["u_height"]
+    if "latency_monitored" in payload and payload["latency_monitored"] is not None:
+        device.latency_monitored = payload["latency_monitored"]
 
     db.commit()
     db.refresh(device)
