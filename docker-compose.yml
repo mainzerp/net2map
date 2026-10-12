@@ -1,6 +1,14 @@
-# Fixed project name: image, volume and network names do not depend on the
-# checkout folder (images net2map-backend/-frontend, volumes net2map_*).
+# Fixed project name: container, volume and network names do not depend on the
+# checkout folder (volumes net2map_*).
+#
+# Images: by default the prebuilt GHCR images are pulled (public, no login):
+#   docker compose up -d
+# NET2MAP_VERSION (in .env) pins a release tag, e.g. v3.2.1; default "latest".
+# To run the local checkout instead, build it (tags the same image names locally):
+#   docker compose up --build -d
 name: net2map
+
+x-backend-image: &backend-image ghcr.io/mainzerp/net2map/backend:${NET2MAP_VERSION:-latest}
 
 x-logging: &default-logging
   driver: json-file
@@ -59,6 +67,7 @@ services:
 
   # ─── FastAPI Backend ──────────────────────────────────────────────────────────
   backend:
+    image: *backend-image
     build: ./backend
     container_name: net2map-backend
     restart: unless-stopped
@@ -106,6 +115,7 @@ services:
 
   # ─── Celery Worker ────────────────────────────────────────────────────────────
   celery-worker:
+    image: *backend-image
     build: ./backend
     container_name: net2map-celery
     restart: unless-stopped
@@ -143,6 +153,7 @@ services:
 
   # ─── Celery Beat Scheduler ───────────────────────────────────────────────────
   celery-beat:
+    image: *backend-image
     build: ./backend
     container_name: net2map-celery-beat
     restart: unless-stopped
@@ -174,6 +185,7 @@ services:
   # skipped here and the service waits for a healthy backend, which has applied
   # them, so it never races alembic or starts against an old schema.
   latency-monitor:
+    image: *backend-image
     build: ./backend
     container_name: net2map-latency-monitor
     restart: unless-stopped
@@ -204,6 +216,7 @@ services:
 
   # ─── React/Nginx Frontend ─────────────────────────────────────────────────────
   frontend:
+    image: ghcr.io/mainzerp/net2map/frontend:${NET2MAP_VERSION:-latest}
     build:
       context: ./frontend
       args:

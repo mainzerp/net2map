@@ -12,8 +12,10 @@ work is done; only the user moves them to `Done`.
   `DATABASE_URL=sqlite:///./test.db` and a dummy SECRET_TOKEN; pytest.ini enforces
   coverage with `--cov-fail-under=10`).
   On a host Python 3.13 the 7 `test_snmp_driver.py` cases fail (pysnmp needs
-  `asyncore`); run the suite in a clean container of the built image instead:
-  `docker run --rm --entrypoint sh -e DATABASE_URL=sqlite:///./test.db -e SECRET_TOKEN=test-token net2map-backend -c "cd /app && python -m pytest tests/ -q -o addopts=''"`.
+  `asyncore`); run the suite in a clean container of the locally built image instead
+  (`docker compose build backend` first, so the image holds the checkout, not the
+  pulled release):
+  `docker run --rm --entrypoint sh -e DATABASE_URL=sqlite:///./test.db -e SECRET_TOKEN=test-token ghcr.io/mainzerp/net2map/backend:latest -c "cd /app && python -m pytest tests/ -q -o addopts=''"`.
   Do not run tests inside the live `net2map-backend` container: its compose env
   (Redis, JWT) breaks test assumptions.
 - Backend code changes must also rebuild the workers: compose services are

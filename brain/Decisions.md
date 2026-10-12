@@ -290,3 +290,12 @@
   `BACKUP.md` and `docs/` already were): one language for every doc, matching the
   code and the English UI. Release notes are English from now on; the history in
   `VERSION.md` was translated in place.
+
+## GHCR images in the default compose file (2026-10-12)
+
+- **`docker-compose.yml` pulls `ghcr.io/mainzerp/net2map/{backend,frontend}`** by
+  default; `docker-compose.ghcr.yml` was removed. Users run `docker compose up -d`
+  without building; `--build` still builds the checkout under the same image names.
+- **Default tag `latest`** (user choice over a pinned release tag): simplest for
+  users. CI pushes `<tag>` and `latest` on every `v*` tag. Trade-off: an old compose
+  file can pull a newer image; `NET2MAP_VERSION` in `.env` pins a release.

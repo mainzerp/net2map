@@ -12,6 +12,9 @@
 # latency-monitor runs the simulator from seed_db.py instead of ICMP probes; it
 # idles until the seed has created devices. Demo logins: see docs/OPERATIONS.md.
 #
+# Images: same as the main stack (GHCR, or the local build after
+# `docker compose up --build`); this override never builds by itself.
+#
 # Frontend: http://localhost:3200  (main instance stays on :3000)
 services:
   postgres:
@@ -21,7 +24,6 @@ services:
     container_name: net2map-demo-redis
 
   backend:
-    image: net2map-backend   # reuse already-built image, no rebuild
     container_name: net2map-demo-backend
     volumes:
       # seed_db.py is excluded from the image (backend/.dockerignore) so it can
@@ -29,11 +31,9 @@ services:
       - ./backend/seed_db.py:/app/seed_db.py:ro
 
   celery-worker:
-    image: net2map-backend
     container_name: net2map-demo-celery
 
   celery-beat:
-    image: net2map-backend
     container_name: net2map-demo-celery-beat
     # No scheduled scans in the demo: every seeded IP is fake, and a beat started
     # before the seed would dispatch scans that mark all devices offline.
@@ -41,7 +41,6 @@ services:
     scale: 0
 
   latency-monitor:
-    image: net2map-backend
     container_name: net2map-demo-latency-monitor
     # Simulated latency for the seeded (fake) devices instead of ICMP probes;
     # replaces the base command (a scalar, so the override wins on merge).
@@ -50,6 +49,5 @@ services:
       - ./backend/seed_db.py:/app/seed_db.py:ro
 
   frontend:
-    image: net2map-frontend
     container_name: net2map-demo-frontend
     ports: !override ["3200:80"]

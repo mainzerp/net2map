@@ -29,7 +29,7 @@ The tool is designed for network administrators who need a clear, up-to-date pic
 - **`celery-beat`** -- Periodic scan scheduling via the `scheduler_tick` Celery task.
 - **`redis`** -- Celery task broker, WebSocket ticket store (30s TTL), and general caching.
 - **`postgres`** -- Primary data store with connection pooling (pool_size=10, max_overflow=20).
-- **`docker-compose.yml`** -- Defines 6 services (`net2map-backend`, `net2map-frontend`, `net2map-celery`, `celery-beat`, `redis`, `postgres`) on a shared bridge network. The frontend is reachable at `http://localhost:3000`.
+- **`docker-compose.yml`** -- Defines 7 services (`net2map-backend`, `net2map-frontend`, `net2map-celery`, `celery-beat`, `latency-monitor`, `redis`, `postgres`) on a shared bridge network. Application images are pulled from GHCR (`ghcr.io/mainzerp/net2map/{backend,frontend}:${NET2MAP_VERSION:-latest}`); `docker compose up --build` builds the checkout instead. The frontend is reachable at `http://localhost:3000`.
 
 ## Key Features
 

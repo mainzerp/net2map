@@ -1,5 +1,7 @@
 # Net2Map
 
+> **Note:** This project is "vibe coded" — the code was written iteratively with AI assistance.
+
 Net2Map is a web application for discovering and visualizing switch topologies via SNMP.
 Up to v2.x the project was called NetMap; upgrade instructions from v2.x to v3.0.0 are in
 `docs/OPERATIONS.md` ("Upgrading from NetMap (v2.x) to Net2Map (v3.0.0)").
@@ -71,18 +73,32 @@ Prerequisite: Docker + Docker Compose
 
 ```bash
 cp .env.example .env   # set POSTGRES_PASSWORD, SECRET_TOKEN, DEFAULT_ADMIN_PASSWORD (required)
+docker compose up -d
+```
+
+This pulls the prebuilt images of the newest release from the GitHub Container
+Registry (`ghcr.io/mainzerp/net2map/backend` and `/frontend`, public, no login
+needed). To pin a release, set `NET2MAP_VERSION` in `.env` (e.g. `v3.2.1`; default
+`latest`).
+
+Update to the newest release:
+
+```bash
+git pull
+docker compose pull && docker compose up -d
+```
+
+To run your local checkout instead (development, unreleased changes), build the
+images from source:
+
+```bash
 docker compose up --build -d
 ```
 
-> **Note:** Always use `--build` so that frontend dependencies from
-> `package-lock.json` are installed correctly and code changes are
-> picked up by the containers.
->
-> If old versions still show up, force a full
-> rebuild without cache:
-> ```bash
-> docker compose build --no-cache && docker compose up -d
-> ```
+> **Note:** The local build is tagged with the same image names, so a later
+> `docker compose pull` replaces it with the released images again. If old assets
+> show up after a build, force a full rebuild without cache:
+> `docker compose build --no-cache && docker compose up -d`.
 
 The UI is then available at:
 
@@ -93,13 +109,6 @@ The UI is then available at:
 Optional settings (e.g. `LOG_LEVEL`, `JWT_EXPIRY_HOURS`,
 `AUDIT_RETENTION_DAYS`, `UVICORN_WORKERS`) are listed as comments in `.env.example`
 and are passed through to the containers by Compose.
-
-Prebuilt images from the GitHub Container Registry (for `v*` tags) instead of
-a local build:
-
-```bash
-NET2MAP_VERSION=v1.2.3 docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
-```
 
 PostgreSQL stores the database persistently in the Docker volume `net2map_pgdata`.
 The volume `net2map_data` contains the files stored under `/data`.

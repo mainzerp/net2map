@@ -292,8 +292,8 @@ Rules of thumb:
 - `workflows/` — n8n export folder (`n8n_mzrsvr_patric_m/`), currently empty; purpose
   unconfirmed — leave untouched.
 - `.github/workflows/ci.yml` — CI: ruff + backend pytest + frontend vitest; on `v*`
-  tags pushes images to `ghcr.io/<github.repository>` (`ghcr.io/mainzerp/net2map`
-  after the repo rename).
+  tags pushes images `<tag>` and `latest` to `ghcr.io/mainzerp/net2map/{backend,frontend}`,
+  which `docker-compose.yml` pulls by default (`NET2MAP_VERSION`, default `latest`).
 - Root files: `README.md` (product overview/quickstart), `VERSION.md`
   (version carrier), `BACKUP.md` (backup/restore manual). The roadmap lives in
   `brain/roadmap.md` (the legacy `todo.md` was removed). The one-shot

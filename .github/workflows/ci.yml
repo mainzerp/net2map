@@ -127,8 +127,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - run: |
           TAG=${GITHUB_REF#refs/tags/}
-          docker compose build
-          docker tag net2map-backend ghcr.io/${{ github.repository }}/backend:$TAG
-          docker tag net2map-frontend ghcr.io/${{ github.repository }}/frontend:$TAG
-          docker push ghcr.io/${{ github.repository }}/backend:$TAG
-          docker push ghcr.io/${{ github.repository }}/frontend:$TAG
+          # docker-compose.yml names the images ghcr.io/mainzerp/net2map/*:${NET2MAP_VERSION:-latest}
+          NET2MAP_VERSION=$TAG docker compose build
+          for img in backend frontend; do
+            docker tag ghcr.io/${{ github.repository }}/$img:$TAG ghcr.io/${{ github.repository }}/$img:latest
+            docker push ghcr.io/${{ github.repository }}/$img:$TAG
+            docker push ghcr.io/${{ github.repository }}/$img:latest
+          done
