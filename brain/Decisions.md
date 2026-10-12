@@ -299,3 +299,10 @@
 - **Default tag `latest`** (user choice over a pinned release tag): simplest for
   users. CI pushes `<tag>` and `latest` on every `v*` tag. Trade-off: an old compose
   file can pull a newer image; `NET2MAP_VERSION` in `.env` pins a release.
+
+## Demo stack is local only (2026-10-12)
+
+- **`docker-compose.demo.yml` and `backend/seed_db.py` are git-ignored** (user
+  decision): they only serve to produce README screenshots and are not part of the
+  product. The files stay on the maintainer's machine; `docs/OPERATIONS.md` keeps
+  the procedure, `backend/.dockerignore` still excludes `seed_db.py`.

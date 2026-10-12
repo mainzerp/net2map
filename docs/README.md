@@ -33,7 +33,7 @@ owns and the reading order. It does not own any topic itself.
 ## Subfolders
 
 - `docs/screenshots/` — UI screenshots embedded in `README.md`, taken from the seeded
-  demo stack (procedure in `docs/OPERATIONS.md`, "Demo stack"). Retake them when the
+  local, git-ignored demo stack (procedure in `docs/OPERATIONS.md`, "Demo stack"). Retake them when the
   UI changes visibly.
 - `docs/SubAgent/` — AI-agent working notes: `*_ANALYSIS.md` / `*_PLAN.md` pairs
   produced during past feature work (auto-refresh bug, code review, endpoint table,

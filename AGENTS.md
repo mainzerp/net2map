@@ -266,7 +266,8 @@ Rules of thumb:
   (auth, crypto, audit, metrics, redis_client, state), `alembic/versions/` (migrations 001-023), `latency/` (latency monitor: probe,
   stats, store, `monitor.py` run as the `latency-monitor` compose service),
   `tests/` (pytest suite), plus `config.py`, `database.py`, `schemas.py`,
-  `celery_app.py`, `tasks.py`, `seed_db.py`, legacy `snmp_scanner.py`.
+  `celery_app.py`, `tasks.py`, legacy `snmp_scanner.py` (the demo seed `seed_db.py` and
+  `docker-compose.demo.yml` are git-ignored, local only).
 - `frontend/` — React 18 + Vite + TypeScript SPA served by nginx; entry
   `index.html` → `src/main.tsx` (lazy-loaded pages); owning doc: `docs/README.md`.
   Feature modules in `src/features/`: `dashboard/` (ScanHero, AttentionCard,

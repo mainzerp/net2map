@@ -27,8 +27,8 @@ The project consists of a FastAPI backend (scan, persistence, API) and a React/V
 
 ## Screenshots
 
-Captured with the demo data from `backend/seed_db.py` (demo stack, see
-`docs/OPERATIONS.md`, section "Demo stack").
+Captured with generated demo data from a local demo stack (not part of the
+repository; see `docs/OPERATIONS.md`, section "Demo stack").
 
 **Dashboard** (light and dark)
 

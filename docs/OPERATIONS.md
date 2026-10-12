@@ -4,7 +4,7 @@ Agent-facing guide for running, configuring, updating and troubleshooting the Ne
 Docker stack. Product overview and quickstart live in the root `README.md` (German);
 backup/restore commands live in `BACKUP.md`; the API is described in `docs/API.md`.
 
-Sources: `docker-compose.yml`, `docker-compose.demo.yml`, `docker-compose.local.yml` (git-ignored),
+Sources: `docker-compose.yml`, `docker-compose.demo.yml` and `docker-compose.local.yml` (both git-ignored, local only),
 `.env.example`, `backend/config.py`, `backend/Dockerfile`, `backend/entrypoint.sh`,
 `frontend/Dockerfile`, `frontend/nginx.conf`, `backend/celery_app.py`,
 `.github/workflows/ci.yml`, `scripts/backup.sh`, `scripts/restore.sh`.
@@ -309,6 +309,10 @@ commands, cron, retention). Points not covered there:
   `GET /api/v1/audit-logs` (admin).
 
 ## Demo stack
+
+Local only: `docker-compose.demo.yml` and `backend/seed_db.py` are git-ignored and
+not part of the repository; they exist on the maintainer's machine to produce the
+README screenshots.
 
 `docker-compose.demo.yml` runs a second, isolated stack (own containers, volumes and
 network via project name) next to the main one:

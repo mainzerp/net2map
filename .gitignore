@@ -52,3 +52,7 @@ backup_*.sql
 # Machine-specific compose overrides (e.g. host port conflicts)
 docker-compose.local.yml
 docker-compose.override.yml
+
+# Local demo stack and its seed data (screenshots; not part of the product)
+docker-compose.demo.yml
+backend/seed_db.py
