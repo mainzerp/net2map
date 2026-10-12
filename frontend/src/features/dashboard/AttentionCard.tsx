@@ -133,7 +133,7 @@ export function AttentionCard({ nodes, lastRun = null, className = "" }: Attenti
               icon={CircleX}
               chip="Failed"
               title="Last scan failed"
-              meta={formatTimestamp(lastRun.finished_at ?? lastRun.started_at)}
+              meta={formatTimestamp(lastRun.created_at)}
               onClick={() => navigate("/settings/scan")}
             />
           )}

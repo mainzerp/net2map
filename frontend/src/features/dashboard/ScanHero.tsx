@@ -89,7 +89,7 @@ export function ScanHero({
           ) : lastRun ? (
             <>
               <span className="text-muted">
-                Last scan <span className="text-primary tabular-nums">{formatTimestamp(lastRun.finished_at ?? lastRun.started_at)}</span>
+                Last scan <span className="text-primary tabular-nums">{formatTimestamp(lastRun.created_at)}</span>
               </span>
               <LastRunBadge status={lastRun.status} />
             </>

@@ -280,7 +280,7 @@ export default function DashboardPage() {
     { key: "racks", value: stats.rackCount, label: plural(stats.rackCount, "rack", "racks"), to: "/racks" },
     {
       key: "last-scan",
-      value: lastRun ? formatTimestamp(lastRun.finished_at ?? lastRun.started_at) : "never",
+      value: lastRun ? formatTimestamp(lastRun.created_at) : "never",
       label: "Last scan",
     },
   ];

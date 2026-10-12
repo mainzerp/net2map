@@ -310,8 +310,7 @@ export interface SnmpProfile {
 export interface ScanRun {
   id: string;
   status: string;
-  started_at: string;
-  finished_at: string | null;
+  created_at: string | null;
   total: number;
   scanned: number;
   new_devices: number;

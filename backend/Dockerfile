@@ -8,6 +8,10 @@ RUN apt-get update && apt-get install -y iputils-ping gosu libpq5 && rm -rf /var
 
 WORKDIR /app
 
+# Celery keeps the working directory on sys.path only while loading the app;
+# lazy imports inside tasks (e.g. routers.topology) need /app on the path.
+ENV PYTHONPATH=/app
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

@@ -71,6 +71,18 @@ def test_oldest_run_in_window_diffs_against_real_predecessor(client, auth_header
     assert middle_row["removed_devices"] == []
 
 
+def test_runs_without_timestamp_sort_after_dated_runs(client, auth_headers, db):
+    """Legacy runs stored created_at=NULL; they must not displace the latest dated run."""
+    legacy = _make_run(db, ["10.3.0.1"])
+    legacy.created_at = None
+    db.commit()
+    dated = _make_run(db, ["10.3.0.1"], age_minutes=5)
+
+    r = client.get("/api/scan-runs?limit=1", headers=auth_headers)
+    assert r.status_code == 200
+    assert [x["id"] for x in r.json()] == [dated.id]
+
+
 def test_run_without_predecessor_has_empty_diff(client, auth_headers, db):
     """The very first run must report an empty diff instead of everything being 'new'."""
     _make_run(db, ["10.2.0.1", "10.2.0.2"], ["10.2.0.1|1|10.2.0.2|1"])

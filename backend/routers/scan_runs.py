@@ -20,7 +20,7 @@ def list_scan_runs(limit: int = 20, db: Session = Depends(get_db)):
     runs = (
         db.query(ScanRun)
         .options(selectinload(ScanRun.switch_metrics))
-        .order_by(ScanRun.created_at.desc())
+        .order_by(ScanRun.created_at.desc().nulls_last(), ScanRun.id.desc())
         .limit(clamped + 1)
         .all()
     )
