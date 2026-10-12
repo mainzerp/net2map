@@ -1,5 +1,41 @@
 # Version History
 
+## v3.2.1 -- Scan-Zeitstempel, Celery-Importe, Demodaten und Screenshots
+
+**Type:** PATCH
+
+Veroeffentlicht am 2026-10-12 als Tag `v3.2.1` (Images unter
+`ghcr.io/mainzerp/net2map/backend` und `/frontend`). Commits `bf3e5dd`,
+`b144a30`, `12c96f3`. Migration 023 laeuft beim Start des Backends automatisch.
+Nach dem Update die Images neu bauen bzw. ziehen (`docker compose up --build -d`),
+damit der Celery-Worker die korrigierte Image-Umgebung erhaelt.
+
+### Fixes
+
+- Celery-Worker: Scans endeten nach `scan.end` mit `No module named 'routers'`,
+  weil Celery das Arbeitsverzeichnis nur beim Laden der App im Importpfad haelt.
+  `backend/Dockerfile` setzt jetzt `PYTHONPATH=/app` (`bf3e5dd`).
+- Migration 023: fehlende `now()`-Standardwerte fuer `created_at`/`updated_at`
+  in `credentials`, `racks`, `scan_runs`, `snmp_profiles`, `switch_classes` und
+  `switch_models`. Bisher speicherte jeder Scan-Lauf `created_at = NULL`;
+  bestehende NULL-Werte bleiben erhalten (echte Zeit unbekannt) (`bf3e5dd`).
+- `GET /api/v1/scan-runs` sortiert Laeufe ohne Zeitstempel ans Ende (Tie-Break
+  ueber `id`), damit der neueste datierte Lauf zuerst kommt (`bf3e5dd`).
+- Dashboard: "Last scan" zeigte immer "-", weil das Frontend `finished_at`/
+  `started_at` las; es liest jetzt das von der API gelieferte `created_at`
+  (`bf3e5dd`).
+
+### Demo und Dokumentation
+
+- `backend/seed_db.py` befuellt alle Seiten (Endpunkte mit Port-Historie,
+  Scan-Historie mit Metriken, Dry-Run, Latenzverlauf, Audit-Log, Logs,
+  Demo-Benutzer, Discovery-/DNS-Einstellungen); neuer Modus
+  `--simulate-latency` fuer den Latenzmonitor des Demo-Stacks. Der Demo-Stack
+  laeuft ohne `celery-beat` (`b144a30`).
+- README: Screenshots (`docs/screenshots/`), vollstaendige Vendor- und
+  Feature-Liste, `.env`-Schritt im Schnellstart, `SECRET_TOKEN` ist immer
+  Pflicht. Korrekturen in `docs/API.md` und `docs/OPERATIONS.md` (`12c96f3`).
+
 ## v3.2.0 -- Netzwerk-Latenzmonitor
 
 **Type:** MINOR

@@ -18,7 +18,7 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
-- Demo data, screenshots, scan/worker fixes (uncommitted) · priority: P2 · area: full-stack
+- Demo data, screenshots, scan/worker fixes (released v3.2.1, bf3e5dd) · priority: P2 · area: full-stack
   Done: `seed_db.py` fills all pages + `--simulate-latency`; demo celery-beat
   scaled to 0; 14 screenshots in `docs/screenshots/` embedded in README; docs
   audit fixes (vendors, features, .env step, SECRET_TOKEN, router count, local
