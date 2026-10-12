@@ -13,16 +13,16 @@ work is done; only the user moves them to `Done`.
   coverage with `--cov-fail-under=10`).
   On a host Python 3.13 the 7 `test_snmp_driver.py` cases fail (pysnmp needs
   `asyncore`); run the suite in a clean container of the locally built image instead
-  (`docker compose build backend` first, so the image holds the checkout, not the
-  pulled release):
-  `docker run --rm --entrypoint sh -e DATABASE_URL=sqlite:///./test.db -e SECRET_TOKEN=test-token ghcr.io/mainzerp/net2map/backend:latest -c "cd /app && python -m pytest tests/ -q -o addopts=''"`.
+  (`docker compose -f docker-compose.yml -f docker-compose.local.yml build backend` first):
+  `docker run --rm --entrypoint sh -e DATABASE_URL=sqlite:///./test.db -e SECRET_TOKEN=test-token net2map-backend -c "cd /app && python -m pytest tests/ -q -o addopts=''"`.
   Do not run tests inside the live `net2map-backend` container: its compose env
   (Redis, JWT) breaks test assumptions.
 - Backend code changes must also rebuild the workers: compose services are
-  `backend`, `celery-worker`, `celery-beat` (`docker compose up -d --build backend
-  celery-worker celery-beat`); the worker otherwise keeps running old code.
+  `backend`, `celery-worker`, `celery-beat`, `latency-monitor`
+  (`docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build backend
+  celery-worker celery-beat latency-monitor`); the workers otherwise keep running old code.
 - Frontend: `cd frontend && npm run typecheck` and `npm test` (vitest, run mode).
-- Full stack smoke: `docker compose up --build -d` -- UI at http://localhost:3000.
+- Full stack smoke: `docker compose -f docker-compose.yml -f docker-compose.local.yml up --build -d` -- UI at http://localhost:3000.
 
 CI (`.github/workflows/ci.yml`) runs security scans, lint, backend tests and frontend
 typecheck/tests on push/PR to `main` and release tags. Image build/publication

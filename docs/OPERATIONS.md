@@ -4,7 +4,7 @@ Agent-facing guide for running, configuring, updating and troubleshooting the Ne
 Docker stack. Product overview and quickstart live in the root `README.md` (German);
 backup/restore commands live in `BACKUP.md`; the API is described in `docs/API.md`.
 
-Sources: `docker-compose.yml`, `docker-compose.demo.yml` and `docker-compose.local.yml` (both git-ignored, local only),
+Sources: `docker-compose.yml`, `docker-compose.local.yml`, `docker-compose.demo.yml` (git-ignored, local only),
 `.env.example`, `backend/config.py`, `backend/Dockerfile`, `backend/entrypoint.sh`,
 `frontend/Dockerfile`, `frontend/nginx.conf`, `backend/celery_app.py`,
 `.github/workflows/ci.yml`, `scripts/backup.sh`, `scripts/restore.sh`.
@@ -16,8 +16,8 @@ port.
 
 | Service | Container | Image / build | Port | Role |
 |---|---|---|---|---|
-| `frontend` | `net2map-frontend` | `ghcr.io/mainzerp/net2map/frontend`, build `./frontend` (node:24 build, nginx:alpine runtime) | host `3000` -> `80` | Serves the SPA; proxies `/api/`, `/ws/` and the OpenAPI paths (`/docs`, `/redoc`, `/openapi.json`) to `backend:8000`. |
-| `backend` | `net2map-backend` | `ghcr.io/mainzerp/net2map/backend`, build `./backend` (python:3.12-slim) | `8000` (internal only) | FastAPI via uvicorn. Runs Alembic migrations at start. |
+| `frontend` | `net2map-frontend` | `ghcr.io/mainzerp/net2map/frontend` (local: build `./frontend`, node:24 build, nginx:alpine runtime) | host `${NET2MAP_PORT:-3000}` -> `80` | Serves the SPA; proxies `/api/`, `/ws/` and the OpenAPI paths (`/docs`, `/redoc`, `/openapi.json`) to `backend:8000`. |
+| `backend` | `net2map-backend` | `ghcr.io/mainzerp/net2map/backend` (local: build `./backend`, python:3.12-slim) | `8000` (internal only) | FastAPI via uvicorn. Runs Alembic migrations at start. |
 | `celery-worker` | `net2map-celery` | same as `backend` | none | Runs scan jobs (`celery -A celery_app worker --concurrency=4`). |
 | `celery-beat` | `net2map-celery-beat` | same as `backend` | none | Schedules `tasks.scheduler_tick` every 5 s and `tasks.purge_old_audit_logs` every 6 h. Schedule file `/data/celerybeat-schedule`. |
 | `latency-monitor` | `net2map-latency-monitor` | same as `backend` | none | `python -m latency.monitor`: pings monitored devices every `latency_interval_sec`, publishes state to Redis, writes per-minute rollups to `latency_samples`. Skips migrations, starts after the backend is healthy. |
@@ -95,7 +95,8 @@ without it they are per process.
 | `UVICORN_FORWARDED_ALLOW_IPS` | `*` | `backend/Dockerfile` CMD; compose `${UVICORN_FORWARDED_ALLOW_IPS:-*}` (backend) | no | no | Trusted proxies for `X-Forwarded-For` (rate limiting). Restrict to the proxy CIDR, e.g. `172.16.0.0/12`. |
 | `RUN_MIGRATIONS` | `true` | `backend/entrypoint.sh` | no | no | Compose sets `false` for celery-worker, celery-beat and latency-monitor so only the backend runs Alembic. |
 | `VITE_API_URL` | empty | frontend build arg | no | no | Baked into the bundle at build time. Empty = same-origin (nginx proxy). Set for a remote backend, then rebuild. |
-| `NET2MAP_VERSION` | `latest` | `docker-compose.yml` image tags | yes | no | GHCR image tag for backend, workers and frontend: a release tag (e.g. `v3.2.1`) pins a version; `latest` is the newest release. |
+| `NET2MAP_VERSION` | `latest` | `docker-compose.yml` image tags | yes | no | GHCR image tag for backend, workers and frontend: a release tag (e.g. `v3.2.1`) pins a version; `latest` is the newest release. Ignored by the local build. |
+| `NET2MAP_PORT` | `3000` | `docker-compose.yml` frontend port | yes | no | Host port of the UI. |
 
 ## First-time setup
 
@@ -107,8 +108,8 @@ without it they are per process.
      otherwise the stack runs in legacy single-token mode.
    - `ENCRYPTION_KEY` (Fernet key, see above).
    - `CORS_ORIGIN` = the URL users open (e.g. `https://net2map.example.com`).
-3. `docker compose up -d` (pulls the release images from GHCR; `--build` builds the
-   checkout instead, see "Images" below).
+3. `docker compose up -d` (pulls the release images from GHCR; to build the checkout
+   use `docker compose -f docker-compose.yml -f docker-compose.local.yml up --build -d`, see "Images" below).
 4. Watch startup: `docker compose logs -f backend`. Expect
    `[entrypoint] Running Alembic migrations...` followed by uvicorn startup.
    Migrations run automatically on every backend start (`alembic upgrade head`).
@@ -129,8 +130,8 @@ without it they are per process.
    `main`).
 4. Pull and restart: `docker compose pull && docker compose up -d` (with
    `NET2MAP_VERSION` pinned in `.env`, set it to the new tag first). For a local
-   build: `docker compose up --build -d`; if stale assets appear:
-   `docker compose build --no-cache && docker compose up -d`.
+   build: `docker compose -f docker-compose.yml -f docker-compose.local.yml up --build -d`; if stale assets appear, add `build --no-cache`
+   with the same two files first.
 5. Migrations: the backend entrypoint runs `alembic upgrade head` before uvicorn
    starts. Check `docker compose logs backend` for migration errors; a failing
    migration stops the container (`set -e`).
@@ -144,18 +145,22 @@ without it they are per process.
 
 ### Images
 
-`docker-compose.yml` sets both `image:` and `build:` for the five application
-services. The backend image (`backend/Dockerfile`) serves `backend`,
+Two variants; the backend image (`backend/Dockerfile`) serves `backend`,
 `celery-worker`, `celery-beat` and `latency-monitor` (only the command differs):
 
-- `ghcr.io/mainzerp/net2map/backend:${NET2MAP_VERSION:-latest}`
-- `ghcr.io/mainzerp/net2map/frontend:${NET2MAP_VERSION:-latest}`
+- **Prebuilt (default):** `docker-compose.yml` uses
+  `ghcr.io/mainzerp/net2map/backend:${NET2MAP_VERSION:-latest}` and
+  `ghcr.io/mainzerp/net2map/frontend:${NET2MAP_VERSION:-latest}` (public packages, no
+  login). `docker compose up -d` pulls missing images, `docker compose pull` fetches
+  updates.
+- **Local build:** `docker-compose.local.yml` adds `build:` and the local image names
+  `net2map-backend` / `net2map-frontend`:
+  `docker compose -f docker-compose.yml -f docker-compose.local.yml up --build -d`. Pass both files to every command; the local images never
+  replace the pulled ones.
 
-`docker compose up -d` pulls these (public packages, no login) when they are not
-present locally; `docker compose pull` fetches updates. `docker compose up --build -d`
-builds the checkout and tags it with the same names, so a later `pull` restores the
-released images. CI (`.github/workflows/ci.yml`, job `docker-push`) pushes `<tag>`
-and `latest` for every `v*` git tag; `main` pushes nothing.
+CI (`.github/workflows/ci.yml`) builds with the local override; job `docker-push`
+retags the result as `<tag>` and `latest` on GHCR for every `v*` git tag; `main`
+pushes nothing.
 
 ### Upgrading from NetMap (v2.x) to Net2Map (v3.0.0)
 
@@ -214,7 +219,9 @@ therefore "old code + database restored from the pre-update backup".
 3. Start only the database: `docker compose up -d postgres`.
 4. Restore the pre-update dump: `./scripts/restore.sh backups/net2map_<timestamp>.sql.gz`
    (details in `BACKUP.md`). All data written after the backup is lost.
-5. Start everything: `docker compose up --build -d` and verify `/health` as above.
+5. Start everything: `docker compose up -d` (pinned to the previous tag via
+   `NET2MAP_VERSION`, or `docker compose -f docker-compose.yml -f docker-compose.local.yml up --build -d` on the old checkout) and verify
+   `/health` as above.
    On start the old code runs `alembic upgrade head`, which is a no-op on the
    restored schema.
 
@@ -324,8 +331,8 @@ docker compose -p net2map-demo -f docker-compose.yml -f docker-compose.demo.yml 
 ```
 
 - UI on `http://localhost:3200`.
-- It uses the same images as the main stack (pulled from GHCR, or the local build
-  after `docker compose up --build`); the demo override never builds.
+- It uses the GHCR images; to demo the checkout, add `-f docker-compose.local.yml`
+  before `-f docker-compose.demo.yml` and `--build` to `up`.
 - It uses the same `.env` values as the main stack.
 - Seeding is manual (`exec backend python seed_db.py` above). `seed_db.py` is
   excluded from the image by `backend/.dockerignore`, so it can never run in
@@ -366,9 +373,7 @@ docker compose -p net2map-demo -f docker-compose.yml -f docker-compose.demo.yml 
   browser cache after recreating the stack: a fresh Redis restarts `topo_version`,
   so a cached `/api/topology` ETag can match and serve stale data.
 
-`docker-compose.local.yml` is a per-machine, git-ignored override (not in the
-repository) that moves the main frontend to host port `3100` when port 3000 is taken:
-`docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`.
+If host port 3000 is taken, set `NET2MAP_PORT` (e.g. `3100`) in `.env`.
 
 ## Local development without Docker
 

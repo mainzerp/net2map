@@ -293,8 +293,9 @@ Rules of thumb:
 - `workflows/` — n8n export folder (`n8n_mzrsvr_patric_m/`), currently empty; purpose
   unconfirmed — leave untouched.
 - `.github/workflows/ci.yml` — CI: ruff + backend pytest + frontend vitest; on `v*`
-  tags pushes images `<tag>` and `latest` to `ghcr.io/mainzerp/net2map/{backend,frontend}`,
-  which `docker-compose.yml` pulls by default (`NET2MAP_VERSION`, default `latest`).
+  tags pushes images `<tag>` and `latest` to `ghcr.io/mainzerp/net2map/{backend,frontend}`.
+  `docker-compose.yml` runs those prebuilt images (`NET2MAP_VERSION`, default
+  `latest`); `docker-compose.local.yml` is the override that builds the checkout.
 - Root files: `README.md` (product overview/quickstart), `VERSION.md`
   (version carrier), `BACKUP.md` (backup/restore manual). The roadmap lives in
   `brain/roadmap.md` (the legacy `todo.md` was removed). The one-shot
@@ -386,8 +387,8 @@ Release checklist (all required):
       `ruff check backend/`;
       `cd backend && python -m pytest tests/ -v`;
       `cd frontend && npm run typecheck && npm test`;
-      and for release smoke: `docker compose up --build -d` (UI at
-      http://localhost:3000).
+      and for release smoke:
+      `docker compose -f docker-compose.yml -f docker-compose.local.yml up --build -d` (UI at http://localhost:3000).
 - [ ] Docs closeout done for the change (see Docs Discipline above).
 
 **Conventional Commits:** `<type>(<scope>): <short summary>`.

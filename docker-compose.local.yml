@@ -1,0 +1,35 @@
+# Local build override: builds the images from this checkout instead of pulling
+# the GHCR release images. Local image names (net2map-backend, net2map-frontend)
+# differ from the GHCR names, so a local build and pulled releases never replace
+# each other.
+#
+# Usage (pass both files to every command: up, ps, logs, down):
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up --build -d
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml build --no-cache   # stale assets
+services:
+  backend:
+    image: net2map-backend
+    build: ./backend
+
+  # Same image as the backend (only the command differs); built once per service,
+  # the layer cache makes the repeats instant.
+  celery-worker:
+    image: net2map-backend
+    build: ./backend
+
+  celery-beat:
+    image: net2map-backend
+    build: ./backend
+
+  latency-monitor:
+    image: net2map-backend
+    build: ./backend
+
+  frontend:
+    image: net2map-frontend
+    build:
+      context: ./frontend
+      args:
+        # Inside Docker the nginx proxy rewrites /api → backend:8000
+        # so we leave VITE_API_URL empty (relative path)
+        VITE_API_URL: ""

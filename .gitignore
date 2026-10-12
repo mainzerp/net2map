@@ -49,8 +49,7 @@ todo.md
 backups/
 backup_*.sql
 
-# Machine-specific compose overrides (e.g. host port conflicts)
-docker-compose.local.yml
+# Machine-specific compose overrides
 docker-compose.override.yml
 
 # Local demo stack and its seed data (screenshots; not part of the product)

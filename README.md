@@ -89,16 +89,18 @@ docker compose pull && docker compose up -d
 ```
 
 To run your local checkout instead (development, unreleased changes), build the
-images from source:
+images from source with the local override `docker-compose.local.yml`:
 
 ```bash
-docker compose up --build -d
+docker compose -f docker-compose.yml -f docker-compose.local.yml up --build -d
 ```
 
-> **Note:** The local build is tagged with the same image names, so a later
-> `docker compose pull` replaces it with the released images again. If old assets
-> show up after a build, force a full rebuild without cache:
-> `docker compose build --no-cache && docker compose up -d`.
+> **Note:** Pass both `-f` files to every later command (`ps`, `logs`, `down`). The
+> local images are named `net2map-backend` / `net2map-frontend`, so they never
+> replace the pulled release images. If old assets show up after a build, rebuild
+> without cache: `docker compose -f docker-compose.yml -f docker-compose.local.yml build --no-cache`.
+
+The UI listens on host port 3000; set `NET2MAP_PORT` in `.env` to use another port.
 
 The UI is then available at:
 

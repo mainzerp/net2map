@@ -306,3 +306,13 @@
   decision): they only serve to produce README screenshots and are not part of the
   product. The files stay on the maintainer's machine; `docs/OPERATIONS.md` keeps
   the procedure, `backend/.dockerignore` still excludes `seed_db.py`.
+
+## Two compose variants: prebuilt and local build (2026-10-12)
+
+- **Revises "GHCR images in the default compose file"** (user decision, same day):
+  `docker-compose.yml` uses only the prebuilt GHCR images; the tracked override
+  `docker-compose.local.yml` adds `build:` with local image names
+  (`net2map-backend` / `net2map-frontend`), so local builds and pulled releases never
+  replace each other. CI builds with the override and retags for GHCR.
+- The former git-ignored per-machine port override is replaced by `NET2MAP_PORT`
+  (default 3000) in `docker-compose.yml`.
