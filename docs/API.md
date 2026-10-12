@@ -252,7 +252,7 @@ back on update mean "unchanged" and are never stored.
 ## Routers
 
 Infrastructure routes are listed first, then the API routers in `main.py` mount
-order. 19 router modules total (`health` and `ws` are unversioned).
+order. 20 router modules total (`health` and `ws` are unversioned).
 
 ### health (`routers/health.py`) -- unversioned
 
@@ -366,7 +366,7 @@ Scan history with diffs against the previous run.
 
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
-| GET | `/scan-runs?limit=20` | any | Latest runs (limit clamped 1..200) with `new_devices`, `removed_devices`, `new_links`, `removed_links` diffed against the predecessor, plus per-switch metrics. | `ScanRunOut[]` |
+| GET | `/scan-runs?limit=20` | any | Latest runs, newest `created_at` first (runs without a timestamp, stored before migration 023, sort last; limit clamped 1..200) with `new_devices`, `removed_devices`, `new_links`, `removed_links` diffed against the predecessor, plus per-switch metrics. | `ScanRunOut[]` |
 | GET | `/scan-runs/{run_id}/dry-run-preview` | any | Stored dry-run preview for a run (`404 DRY_RUN_NOT_FOUND`). | JSON list (items shaped like `DryRunPreviewItem`) |
 
 ### topology (`routers/topology.py`)

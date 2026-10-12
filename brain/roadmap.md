@@ -18,6 +18,20 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
+- Demo data, screenshots, scan/worker fixes (uncommitted) · priority: P2 · area: full-stack
+  Done: `seed_db.py` fills all pages + `--simulate-latency`; demo celery-beat
+  scaled to 0; 14 screenshots in `docs/screenshots/` embedded in README; docs
+  audit fixes (vendors, features, .env step, SECRET_TOKEN, router count, local
+  override). Bug fixes: `ENV PYTHONPATH=/app` (Celery `No module named 'routers'`,
+  2004x/24 h on the live worker), migration 023 (timestamp defaults; all live
+  `scan_runs.created_at` were NULL), `/scan-runs` sorts NULLs last, dashboard reads
+  `created_at` (was `finished_at`/`started_at`, so "Last scan" showed "-").
+  Passed: ruff, backend pytest (757 passed, snmp_driver deselected), typecheck,
+  216 frontend tests; demo stack on :3200 with migration 023 on PostgreSQL.
+  User to verify: README screenshots on GitHub; rebuild live stack
+  (`docker compose up --build -d`), then celery log free of `No module named
+  'routers'` and dashboard "Last scan" shows a time after the next scan.
+
 - Network latency monitor (released v3.2.0, 935d5bd) · priority: P2 · area: full-stack
   Done: `latency-monitor` service (iputils ping every 10 s, Redis lock), migration
   022 (`devices.latency_monitored`, `latency_samples` minute rollups), API

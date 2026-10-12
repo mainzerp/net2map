@@ -267,3 +267,19 @@
   per-device view and the topology layer are the primary signals.
 - **Frontend polls** the summary at the probe interval; no WebSocket stream for
   10 s granularity data.
+
+## Demo data and documentation screenshots (2026-10-12)
+
+- **`seed_db.py` fills every UI page** (endpoints, scan history, latency history,
+  audit, logs, users, settings) so the demo stack is the single source for README
+  screenshots in `docs/screenshots/`. It stays out of the production image.
+- **Demo latency comes from a simulator** (`seed_db.py --simulate-latency`, the real
+  `LatencyMonitor` loop with a fake probe) instead of ICMP: the seeded IPs are fake,
+  real probes would mark everything down.
+- **No celery-beat in the demo** (`scale: 0`): the interval-0 settings only apply
+  after the seed, and a beat started before it scans the fake IPs and marks all
+  devices offline.
+- **Missing timestamp defaults fixed in migration 023** instead of setting values in
+  code: the ORM declares `server_default=now()`, the migrations never created it, so
+  every scan run stored `created_at = NULL`. Old NULL rows stay NULL (real time
+  unknown); `/scan-runs` sorts them last.

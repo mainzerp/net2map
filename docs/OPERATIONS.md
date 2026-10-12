@@ -4,7 +4,7 @@ Agent-facing guide for running, configuring, updating and troubleshooting the Ne
 Docker stack. Product overview and quickstart live in the root `README.md` (German);
 backup/restore commands live in `BACKUP.md`; the API is described in `docs/API.md`.
 
-Sources: `docker-compose.yml`, `docker-compose.demo.yml`, `docker-compose.local.yml`,
+Sources: `docker-compose.yml`, `docker-compose.demo.yml`, `docker-compose.local.yml` (git-ignored),
 `docker-compose.ghcr.yml`, `.env.example`, `backend/config.py`, `backend/Dockerfile`, `backend/entrypoint.sh`,
 `frontend/Dockerfile`, `frontend/nginx.conf`, `backend/celery_app.py`,
 `.github/workflows/ci.yml`, `scripts/backup.sh`, `scripts/restore.sh`.
@@ -327,10 +327,44 @@ docker compose -p net2map-demo -f docker-compose.yml -f docker-compose.demo.yml 
 - Seeding is manual (`exec backend python seed_db.py` above). `seed_db.py` is
   excluded from the image by `backend/.dockerignore`, so it can never run in
   production; `docker-compose.demo.yml` bind-mounts `./backend/seed_db.py` read-only
-  into the demo backend.
+  into the demo backend and the demo latency monitor.
+- The seed is deterministic and idempotent: each run wipes and recreates the demo
+  tables. It fills every UI page:
+  - 5 racks (placed on the map), 6 switch models, 30 devices (10 FS TOR, 15 Aruba CX,
+    5 UniFi APs) with ports, firmware, interface names, VLANs and RSTP state, 30
+    credentials, 2 SNMP profiles, 5 switch classes, 60 LLDP link entries.
+    `aruba-rack-e-acc2` and `ap-rack-b-01` are offline (dashboard attention card).
+  - About 230 endpoints with realistic OUIs on access and AP wireless ports, including
+    moved endpoints (older port associations), inactive and ignored endpoints.
+  - 21 scan runs over the last ~3 days with per-switch metrics (one run with SNMP
+    timeouts during a rack D maintenance window, one dry run with a stored preview).
+  - Latency history in `latency_samples` (24 h per minute, days 2-7 every 15 minutes);
+    `ap-rack-c-01` is degraded and `aruba-rack-d-acc3` has packet loss in the last hour.
+  - About 40 audit log entries, about 95 structured log lines in Redis
+    (`net2map:logs`), and live latency state, heartbeat and baselines in Redis.
+  - App settings: discovery ranges `192.168.1-5.0/24` and `192.168.10.0/24`, DNS
+    servers `10.10.40.10` and `10.10.40.11`.
+- Demo users (password `demo-password`): `operator` (operator), `viewer` (viewer),
+  `noc-admin` (admin). The `admin` user from migration 006 is left untouched and keeps
+  its `DEFAULT_ADMIN_PASSWORD`.
+- Scheduled scans are disabled: `docker-compose.demo.yml` scales `celery-beat` to 0
+  (otherwise a beat started before the seed dispatches scans against the fake IPs
+  and marks every device offline), and the seed also sets `discovery_interval_sec`,
+  `link_update_interval_sec` and `mac_update_interval_sec` to `0`. Do not start
+  manual scans in the demo for the same reason.
+- The demo `latency-monitor` runs `python seed_db.py --simulate-latency` instead of
+  the ICMP monitor: the real monitor loop with a simulated probe. Every
+  `latency_interval_sec` it publishes state to Redis and upserts the current-minute
+  `latency_samples` rows. Before the first seed it simply finds no targets and keeps
+  polling. Baselines refresh every 10 minutes; to see them right after seeding, run
+  `docker restart net2map-demo-latency-monitor`.
+- Screenshots in `docs/screenshots/` are taken from this stack (1600x1000 viewport,
+  login `noc-admin`, map nodes at their seeded positions with "fit view"). Clear the
+  browser cache after recreating the stack: a fresh Redis restarts `topo_version`,
+  so a cached `/api/topology` ETag can match and serve stale data.
 
-`docker-compose.local.yml` is a separate override that moves the main frontend to
-host port `3100` when port 3000 is taken:
+`docker-compose.local.yml` is a per-machine, git-ignored override (not in the
+repository) that moves the main frontend to host port `3100` when port 3000 is taken:
 `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`.
 
 ## Local development without Docker
@@ -358,11 +392,4 @@ host port `3100` when port 3000 is taken:
 | API returns `503 AUTH_UNAVAILABLE` | `REDIS_URL` configured but Redis unreachable; token revocation checks fail closed. | Check the `redis` container and its healthcheck. |
 | Scan progress does not update live | WebSocket ticket needs Redis; nginx must pass `/ws/`. | Check Redis; check browser console for WS close codes `1008` (auth) / `1011` (auth service down). |
 | SNMP secrets unreadable after restore or key change | `ENCRYPTION_KEY` differs from the key used to encrypt. | Restore the original key from the `.env` backup, or re-enter credentials. |
-
-## Known discrepancies
-
-Found while writing this guide; not fixed here (code and other docs are owned
-elsewhere).
-
-- `README.md` (Production Deployment) says to set `JWT_SECRET` or `SECRET_TOKEN`;
-  compose actually requires `SECRET_TOKEN` in every case.
+| Celery log shows `No module named 'routers'` after `scan.end` (v3.2.0 and earlier) | Celery keeps `/app` on `sys.path` only while loading the app; lazy imports in tasks failed. | Fixed by `ENV PYTHONPATH=/app` in `backend/Dockerfile`; rebuild the images. |

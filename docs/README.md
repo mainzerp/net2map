@@ -30,8 +30,11 @@ owns and the reading order. It does not own any topic itself.
 | `docs/API.md` | API reference: versioning, auth/RBAC, WebSocket ticket flow, error format, endpoint tables per router, central schemas (English) |
 | `docs/OPERATIONS.md` | Ops/deployment: containers and ports, env var reference, setup, update/rollback, health/metrics, logs, demo stack, troubleshooting (English; backup commands stay in `BACKUP.md`) |
 
-## Subfolder
+## Subfolders
 
+- `docs/screenshots/` — UI screenshots embedded in `README.md`, taken from the seeded
+  demo stack (procedure in `docs/OPERATIONS.md`, "Demo stack"). Retake them when the
+  UI changes visibly.
 - `docs/SubAgent/` — AI-agent working notes: `*_ANALYSIS.md` / `*_PLAN.md` pairs
   produced during past feature work (auto-refresh bug, code review, endpoint table,
   TS migration, ruff fixes, ...). They are session artifacts: read for background,

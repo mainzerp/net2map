@@ -7,15 +7,55 @@ Das Projekt besteht aus einem FastAPI-Backend (Scan, Persistenz, API) und einem 
 
 ## Features
 
-- SNMP-Scan für Geräte via SNMPv2c und SNMPv3
-- Automatische Vendor-Erkennung (Aruba CX, FS.com, Generic)
+- SNMP-Scan für Geräte via SNMPv2c und SNMPv3, getrennte Intervalle für Discovery, LLDP-Links und MAC-Tabellen; Discovery-IP-Bereiche und DNS-Resolver (PTR) konfigurierbar
+- Automatische Vendor-Erkennung mit eigenen Scannern (Aruba CX, Cisco, FS.com, OPNsense, UniFi, Generic)
 - Firmware-Versionserfassung pro Gerät (ENTITY-MIB-OID mit Vendor-Parsing aus sysDescr als Fallback)
-- Interaktive Topologie-Karte (React Flow) über LLDP-Links inkl. Port-/Speed-Infos, Auto-Layout, Gerätesuche und Minimap
+- Interaktive Topologie-Karte (React Flow) über LLDP-Links inkl. Port-/Speed-Infos, Auto-Layout, Gerätesuche, Minimap und optionalem Hintergrundbild; Ebenen "STP" (Root-Bridge, Root-Pfade, blockierte Ports), "VLAN" und "Latenz"
+- Endpunkt-Tracking unter `/devices`: MAC, IP, Hostname und Switch-Port je Endgerät, inkl. Port-Historie und Ignorieren
+- Netzwerkgeräte-Übersicht unter `/network` mit Rack, Klasse, Modell, Firmware und Status
 - Rack-Elevation unter `/racks`: echte U-Positionen (U1 unten), Drag-and-Drop mit Vorschau, einstellbare Gerätehöhe (`u_height`)
-- Dashboard mit Status-Karten, Deep-Links und Live-Scan-Anzeige
+- Dashboard mit Status-Karten, "Attention needed"-Liste, Deep-Links und Live-Scan-Anzeige
+- Inspector-Seitenleiste für Switches, Endpunkte und Racks (verlinkbar über `?inspect=`) und Befehlspalette (`Ctrl/Cmd+K` oder `/`)
+- Scan-Historie mit Änderungen je Lauf, Laufzeit pro Switch und Dry-Run-Vorschau
+- Benutzer und Rollen (admin, operator, viewer), Audit-Log, Log-Ansicht unter `/logs`
+- CSV/JSON-Import/-Export sowie Export/Import der Gesamtkonfiguration
 - Dark-/Light-Theme (Tailwind-Design-System, Umschalter in der Sidebar)
-- Manuelle Metadaten-Anpassung pro Gerät (z. B. Vendor/Modell)
+- Manuelle Metadaten-Anpassung pro Gerät (z. B. Vendor/Modell), Switch-Klassen und Hardware-Modelle mit Port-Layout
 - Netzwerk-Latenzmonitor: eigener Dienst pingt die Geräte fortlaufend (Standard alle 10 s), zeigt Latenz, Jitter, Paketverlust und Abweichung von der 24-h-Baseline im Dashboard, im Inspector (mit Verlauf 1 h / 24 h / 7 d) und als Topologie-Ebene "Latenz"
+
+## Screenshots
+
+Aufgenommen mit den Demodaten aus `backend/seed_db.py` (Demo-Stack, siehe
+`docs/OPERATIONS.md`, Abschnitt "Demo stack").
+
+**Dashboard** (hell und dunkel)
+
+![Dashboard](docs/screenshots/dashboard.png)
+![Dashboard im Dark-Theme](docs/screenshots/dashboard-dark.png)
+
+**Topologie-Karte** mit den Ebenen VLAN, STP und Latenz
+
+![Topologie-Karte](docs/screenshots/topology.png)
+![Topologie-Ebene VLAN](docs/screenshots/topology-vlan.png)
+![Topologie-Ebene STP](docs/screenshots/topology-stp.png)
+![Topologie-Ebene Latenz](docs/screenshots/topology-latency.png)
+![Topologie-Karte im Dark-Theme](docs/screenshots/topology-dark.png)
+
+**Inspector und Befehlspalette**
+
+![Inspector eines Switches](docs/screenshots/inspector.png)
+![Befehlspalette](docs/screenshots/command-palette.png)
+
+**Netzwerkgeräte, Endpunkte und Racks**
+
+![Netzwerkgeräte](docs/screenshots/network.png)
+![Endpunkte](docs/screenshots/devices.png)
+![Rack-Elevation](docs/screenshots/racks.png)
+
+**Scan-Einstellungen und Logs**
+
+![Scan-Einstellungen](docs/screenshots/settings-scan.png)
+![Log-Ansicht](docs/screenshots/logs.png)
 
 ## Architektur
 
@@ -30,6 +70,7 @@ Weitere Dokumentation (Englisch): `docs/API.md` (API-Referenz), `docs/OPERATIONS
 Voraussetzung: Docker + Docker Compose
 
 ```bash
+cp .env.example .env   # POSTGRES_PASSWORD, SECRET_TOKEN, DEFAULT_ADMIN_PASSWORD setzen (Pflicht)
 docker compose up --build -d
 ```
 
@@ -201,7 +242,7 @@ docker buildx build --build-arg VITE_API_URL=http://your-backend:8000 -t net2map
 Before deploying Net2Map to production, ensure the following requirements are met:
 
 1. **TLS/HTTPS**: Net2Map does not include built-in TLS. You MUST place a TLS-terminating reverse proxy in front of the application. See the TLS / HTTPS Setup section below.
-2. **Authentication**: Set `JWT_SECRET` (recommended) or `SECRET_TOKEN` to enable authentication. Without either, all endpoints are accessible without credentials.
+2. **Authentication**: Compose always requires `SECRET_TOKEN`; additionally set `JWT_SECRET` (recommended) to enable user accounts and roles. With `JWT_SECRET` set, the static `SECRET_TOKEN` is no longer accepted for API calls.
 3. **Encryption at Rest**: Set `ENCRYPTION_KEY` to encrypt SNMP passwords in the database. Without it, passwords are stored in plaintext.
 4. **Strong Passwords**: Use strong, unique values for `POSTGRES_PASSWORD`, `DEFAULT_ADMIN_PASSWORD`, and all secrets. Never use the example values in production.
 5. **CORS**: Set `CORS_ORIGIN` to your actual domain (e.g. `https://net2map.example.com`). Do not use `*` in production.
