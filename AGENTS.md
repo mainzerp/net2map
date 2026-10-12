@@ -294,7 +294,7 @@ Rules of thumb:
 - `.github/workflows/ci.yml` — CI: ruff + backend pytest + frontend vitest; on `v*`
   tags pushes images to `ghcr.io/<github.repository>` (`ghcr.io/mainzerp/net2map`
   after the repo rename).
-- Root files: `README.md` (product overview/quickstart, German), `VERSION.md`
+- Root files: `README.md` (product overview/quickstart), `VERSION.md`
   (version carrier), `BACKUP.md` (backup/restore manual). The roadmap lives in
   `brain/roadmap.md` (the legacy `todo.md` was removed). The one-shot
   SQLite-to-PostgreSQL copy lives in `scripts/migrate_sqlite_to_pg.py`.
@@ -352,9 +352,9 @@ happens.
 - Delete stale notes instead of explaining history.
 - Trim obvious statements, repeated rules, misplaced detail, and warnings for risks that no
   longer exist.
-- Language: code, comments, agent-facing docs (AGENTS.md, brain, docs/README.md) in
-  English; user-facing docs (`README.md`, `BACKUP.md`, `VERSION.md`) stay German to match
-  their existing audience.
+- Language: all docs are English — user-facing (`README.md`, `BACKUP.md`, `VERSION.md`,
+  `docs/`), agent-facing (AGENTS.md, brain, docs/README.md), and release notes.
+  `docs/SubAgent/` notes are historical and stay as written.
 
 ## Release & Git
 

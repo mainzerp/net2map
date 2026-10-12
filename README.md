@@ -1,122 +1,122 @@
 # Net2Map
 
-Net2Map ist eine Web-Anwendung zur Erkennung und Visualisierung von Switch-Topologien via SNMP.
-Bis v2.x hiess das Projekt NetMap; Update-Anleitung von v2.x auf v3.0.0 in
+Net2Map is a web application for discovering and visualizing switch topologies via SNMP.
+Up to v2.x the project was called NetMap; upgrade instructions from v2.x to v3.0.0 are in
 `docs/OPERATIONS.md` ("Upgrading from NetMap (v2.x) to Net2Map (v3.0.0)").
-Das Projekt besteht aus einem FastAPI-Backend (Scan, Persistenz, API) und einem React/Vite-Frontend (Map, Rack-Ansicht, Settings).
+The project consists of a FastAPI backend (scan, persistence, API) and a React/Vite frontend (map, rack view, settings).
 
 ## Features
 
-- SNMP-Scan für Geräte via SNMPv2c und SNMPv3, getrennte Intervalle für Discovery, LLDP-Links und MAC-Tabellen; Discovery-IP-Bereiche und DNS-Resolver (PTR) konfigurierbar
-- Automatische Vendor-Erkennung mit eigenen Scannern (Aruba CX, Cisco, FS.com, OPNsense, UniFi, Generic)
-- Firmware-Versionserfassung pro Gerät (ENTITY-MIB-OID mit Vendor-Parsing aus sysDescr als Fallback)
-- Interaktive Topologie-Karte (React Flow) über LLDP-Links inkl. Port-/Speed-Infos, Auto-Layout, Gerätesuche, Minimap und optionalem Hintergrundbild; Ebenen "STP" (Root-Bridge, Root-Pfade, blockierte Ports), "VLAN" und "Latenz"
-- Endpunkt-Tracking unter `/devices`: MAC, IP, Hostname und Switch-Port je Endgerät, inkl. Port-Historie und Ignorieren
-- Netzwerkgeräte-Übersicht unter `/network` mit Rack, Klasse, Modell, Firmware und Status
-- Rack-Elevation unter `/racks`: echte U-Positionen (U1 unten), Drag-and-Drop mit Vorschau, einstellbare Gerätehöhe (`u_height`)
-- Dashboard mit Status-Karten, "Attention needed"-Liste, Deep-Links und Live-Scan-Anzeige
-- Inspector-Seitenleiste für Switches, Endpunkte und Racks (verlinkbar über `?inspect=`) und Befehlspalette (`Ctrl/Cmd+K` oder `/`)
-- Scan-Historie mit Änderungen je Lauf, Laufzeit pro Switch und Dry-Run-Vorschau
-- Benutzer und Rollen (admin, operator, viewer), Audit-Log, Log-Ansicht unter `/logs`
-- CSV/JSON-Import/-Export sowie Export/Import der Gesamtkonfiguration
-- Dark-/Light-Theme (Tailwind-Design-System, Umschalter in der Sidebar)
-- Manuelle Metadaten-Anpassung pro Gerät (z. B. Vendor/Modell), Switch-Klassen und Hardware-Modelle mit Port-Layout
-- Netzwerk-Latenzmonitor: eigener Dienst pingt die Geräte fortlaufend (Standard alle 10 s), zeigt Latenz, Jitter, Paketverlust und Abweichung von der 24-h-Baseline im Dashboard, im Inspector (mit Verlauf 1 h / 24 h / 7 d) und als Topologie-Ebene "Latenz"
+- SNMP scan of devices via SNMPv2c and SNMPv3, separate intervals for discovery, LLDP links and MAC tables; discovery IP ranges and DNS resolvers (PTR) configurable
+- Automatic vendor detection with dedicated scanners (Aruba CX, Cisco, FS.com, OPNsense, UniFi, Generic)
+- Firmware version capture per device (ENTITY-MIB OID, with vendor parsing from sysDescr as fallback)
+- Interactive topology map (React Flow) based on LLDP links, including port/speed info, auto-layout, device search, minimap and optional background image; layers "STP" (root bridge, root paths, blocked ports), "VLAN" and "Latency"
+- Endpoint tracking under `/devices`: MAC, IP, hostname and switch port per end device, including port history and ignoring
+- Network device overview under `/network` with rack, class, model, firmware and status
+- Rack elevation under `/racks`: real U positions (U1 at the bottom), drag and drop with preview, adjustable device height (`u_height`)
+- Dashboard with status cards, "Attention needed" list, deep links and live scan display
+- Inspector sidebar for switches, endpoints and racks (linkable via `?inspect=`) and command palette (`Ctrl/Cmd+K` or `/`)
+- Scan history with changes per run, duration per switch and dry-run preview
+- Users and roles (admin, operator, viewer), audit log, log view under `/logs`
+- CSV/JSON import/export as well as export/import of the complete configuration
+- Dark/light theme (Tailwind design system, toggle in the sidebar)
+- Manual metadata adjustment per device (e.g. vendor/model), switch classes and hardware models with port layout
+- Network latency monitor: a dedicated service pings the devices continuously (every 10 s by default) and shows latency, jitter, packet loss and deviation from the 24 h baseline in the dashboard, in the inspector (with history 1 h / 24 h / 7 d) and as the topology layer "Latency"
 
 ## Screenshots
 
-Aufgenommen mit den Demodaten aus `backend/seed_db.py` (Demo-Stack, siehe
-`docs/OPERATIONS.md`, Abschnitt "Demo stack").
+Captured with the demo data from `backend/seed_db.py` (demo stack, see
+`docs/OPERATIONS.md`, section "Demo stack").
 
-**Dashboard** (hell und dunkel)
+**Dashboard** (light and dark)
 
 ![Dashboard](docs/screenshots/dashboard.png)
-![Dashboard im Dark-Theme](docs/screenshots/dashboard-dark.png)
+![Dashboard in dark theme](docs/screenshots/dashboard-dark.png)
 
-**Topologie-Karte** mit den Ebenen VLAN, STP und Latenz
+**Topology map** with the layers VLAN, STP and Latency
 
-![Topologie-Karte](docs/screenshots/topology.png)
-![Topologie-Ebene VLAN](docs/screenshots/topology-vlan.png)
-![Topologie-Ebene STP](docs/screenshots/topology-stp.png)
-![Topologie-Ebene Latenz](docs/screenshots/topology-latency.png)
-![Topologie-Karte im Dark-Theme](docs/screenshots/topology-dark.png)
+![Topology map](docs/screenshots/topology.png)
+![Topology layer VLAN](docs/screenshots/topology-vlan.png)
+![Topology layer STP](docs/screenshots/topology-stp.png)
+![Topology layer Latency](docs/screenshots/topology-latency.png)
+![Topology map in dark theme](docs/screenshots/topology-dark.png)
 
-**Inspector und Befehlspalette**
+**Inspector and command palette**
 
-![Inspector eines Switches](docs/screenshots/inspector.png)
-![Befehlspalette](docs/screenshots/command-palette.png)
+![Inspector of a switch](docs/screenshots/inspector.png)
+![Command palette](docs/screenshots/command-palette.png)
 
-**Netzwerkgeräte, Endpunkte und Racks**
+**Network devices, endpoints and racks**
 
-![Netzwerkgeräte](docs/screenshots/network.png)
-![Endpunkte](docs/screenshots/devices.png)
-![Rack-Elevation](docs/screenshots/racks.png)
+![Network devices](docs/screenshots/network.png)
+![Endpoints](docs/screenshots/devices.png)
+![Rack elevation](docs/screenshots/racks.png)
 
-**Scan-Einstellungen und Logs**
+**Scan settings and logs**
 
-![Scan-Einstellungen](docs/screenshots/settings-scan.png)
-![Log-Ansicht](docs/screenshots/logs.png)
+![Scan settings](docs/screenshots/settings-scan.png)
+![Log view](docs/screenshots/logs.png)
 
-## Architektur
+## Architecture
 
 - `backend/` – FastAPI + SQLAlchemy + SNMP Scanner
-- `frontend/` – React + Vite + TypeScript (Tailwind v4, TanStack Query, React Flow), ausgeliefert über Nginx im Docker-Setup
-- `docker-compose.yml` – Startet Frontend und Backend gemeinsam (plus PostgreSQL, Redis, Celery-Worker/-Beat und den Latenzmonitor `latency-monitor`)
+- `frontend/` – React + Vite + TypeScript (Tailwind v4, TanStack Query, React Flow), served via Nginx in the Docker setup
+- `docker-compose.yml` – Starts frontend and backend together (plus PostgreSQL, Redis, Celery worker/beat and the latency monitor `latency-monitor`)
 
-Weitere Dokumentation (Englisch): `docs/API.md` (API-Referenz), `docs/OPERATIONS.md` (Betrieb, Deployment, Umgebungsvariablen); Uebersicht in `docs/README.md`.
+Further documentation: `docs/API.md` (API reference), `docs/OPERATIONS.md` (operations, deployment, environment variables); overview in `docs/README.md`.
 
-## Schnellstart mit Docker
+## Quickstart with Docker
 
-Voraussetzung: Docker + Docker Compose
+Prerequisite: Docker + Docker Compose
 
 ```bash
-cp .env.example .env   # POSTGRES_PASSWORD, SECRET_TOKEN, DEFAULT_ADMIN_PASSWORD setzen (Pflicht)
+cp .env.example .env   # set POSTGRES_PASSWORD, SECRET_TOKEN, DEFAULT_ADMIN_PASSWORD (required)
 docker compose up --build -d
 ```
 
-> **Hinweis:** Verwende immer `--build`, damit Frontend-Abhaengigkeiten aus
-> `package-lock.json` korrekt installiert werden und Aenderungen am Code in
-> die Container uebernommen werden.
+> **Note:** Always use `--build` so that frontend dependencies from
+> `package-lock.json` are installed correctly and code changes are
+> picked up by the containers.
 >
-> Falls trotzdem alte Versionen auftauchen, erzwinge einen vollstaendigen
-> Neuaufbau ohne Cache:
+> If old versions still show up, force a full
+> rebuild without cache:
 > ```bash
 > docker compose build --no-cache && docker compose up -d
 > ```
 
-Danach ist die UI erreichbar unter:
+The UI is then available at:
 
 - http://localhost:3000
-- API-Dokumentation (OpenAPI/Swagger UI): http://localhost:3000/docs (abschaltbar
-  mit `OPENAPI_ENABLED=false`; API-Aufrufe erfordern weiterhin ein Token)
+- API documentation (OpenAPI/Swagger UI): http://localhost:3000/docs (can be disabled
+  with `OPENAPI_ENABLED=false`; API calls still require a token)
 
-Optionale Einstellungen (z. B. `LOG_LEVEL`, `JWT_EXPIRY_HOURS`,
-`AUDIT_RETENTION_DAYS`, `UVICORN_WORKERS`) stehen kommentiert in `.env.example`
-und werden von Compose an die Container weitergereicht.
+Optional settings (e.g. `LOG_LEVEL`, `JWT_EXPIRY_HOURS`,
+`AUDIT_RETENTION_DAYS`, `UVICORN_WORKERS`) are listed as comments in `.env.example`
+and are passed through to the containers by Compose.
 
-Vorgebaute Images aus der GitHub Container Registry (fuer `v*`-Tags) statt
-lokalem Build:
+Prebuilt images from the GitHub Container Registry (for `v*` tags) instead of
+a local build:
 
 ```bash
 NET2MAP_VERSION=v1.2.3 docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
 ```
 
-PostgreSQL speichert die Datenbank persistent im Docker-Volume `net2map_pgdata`.
-Das Volume `net2map_data` enthaelt die unter `/data` abgelegten Dateien.
+PostgreSQL stores the database persistently in the Docker volume `net2map_pgdata`.
+The volume `net2map_data` contains the files stored under `/data`.
 
-Stoppen:
+Stop:
 
 ```bash
 docker compose down
 ```
 
-Mit Löschen des DB-Volumes:
+Including deletion of the DB volume:
 
 ```bash
 docker compose down -v
 ```
 
-## Lokale Entwicklung (ohne Docker)
+## Local Development (without Docker)
 
 ### Backend
 
@@ -133,8 +133,8 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 ### Frontend
 
-Voraussetzung: Node.js 24 (wie im Docker-Build und in CI); alternativ Node.js
-22 ab Version 22.12. Das Frontend-Manifest legt diese unterstuetzten Versionen fest.
+Prerequisite: Node.js 24 (as in the Docker build and in CI); alternatively Node.js
+22 from version 22.12. The frontend manifest defines these supported versions.
 
 ```bash
 cd frontend
@@ -142,46 +142,46 @@ npm install
 npm run dev
 ```
 
-Vite läuft standardmäßig unter http://localhost:5173.
+Vite runs at http://localhost:5173 by default.
 
-Optional kann die Backend-URL über `VITE_API_URL` gesetzt werden.
+Optionally, the backend URL can be set via `VITE_API_URL`.
 
-## Typischer Ablauf
+## Typical Workflow
 
-1. In den Settings SNMP-Credentials/Profile anlegen
-2. Scan starten
-3. Geräte, Links und Racks in der Map prüfen
-4. Bei Bedarf Vendor/Modell pro Gerät manuell korrigieren
+1. Create SNMP credentials/profiles in the settings
+2. Start a scan
+3. Check devices, links and racks in the map
+4. If needed, manually correct vendor/model per device
 
-## API-Versionierung
+## API Versioning
 
-- Kanonischer Präfix der Backend-API ist `/api/v1` (z. B. `GET /api/v1/devices`).
-  Die OpenAPI-Dokumentation (`/docs`, im Docker-Setup http://localhost:3000/docs)
-  listet ausschließlich die `/api/v1`-Pfade.
-- Der unversionierte Präfix `/api/...` bleibt als **veralteter Alias** erhalten und
-  liefert identische Antworten. Jede Antwort darüber enthält zusätzlich
-  `Deprecation: true` und `Link: </api/v1/...>; rel="successor-version"` (gleicher
-  Restpfad inklusive Query-String). Neue Clients sollten nur `/api/v1` verwenden.
-- Unversioniert bleiben `GET /health`, `GET /metrics` und der WebSocket
-  `/ws/scan-progress`. `GET /health` prueft nur Datenbank und Redis (Container-
-  Healthcheck); `GET /health?deep=1` prueft zusaetzlich die Celery-Worker.
-- Das Frontend arbeitet intern mit logischen `/api/...`-Pfaden und bildet sie zentral
-  in `frontend/src/api.ts` auf `/api/v1/...` ab.
+- The canonical prefix of the backend API is `/api/v1` (e.g. `GET /api/v1/devices`).
+  The OpenAPI documentation (`/docs`, in the Docker setup http://localhost:3000/docs)
+  lists only the `/api/v1` paths.
+- The unversioned prefix `/api/...` remains as a **deprecated alias** and
+  returns identical responses. Every response through it additionally contains
+  `Deprecation: true` and `Link: </api/v1/...>; rel="successor-version"` (same
+  remaining path including query string). New clients should use only `/api/v1`.
+- `GET /health`, `GET /metrics` and the WebSocket
+  `/ws/scan-progress` remain unversioned. `GET /health` checks only the database and Redis (container
+  healthcheck); `GET /health?deep=1` additionally checks the Celery workers.
+- The frontend internally works with logical `/api/...` paths and maps them centrally
+  to `/api/v1/...` in `frontend/src/api.ts`.
 
-## Scan-Settings und Metriken
+## Scan Settings and Metrics
 
-- Die Anzahl paralleler SNMP-Abfragen ist in der UI unter `Settings -> Scan` konfigurierbar.
-- Backend-API für Scan-Worker: `GET/PUT /api/v1/scan-settings` mit `max_workers`, `snmp_timeout`, `snmp_retries` und `snmp_bulk_size` (Zeilen pro SNMP-Anfrage, 5-100, Standard 25).
-- Link- und MAC-Scans lesen Interface-Namen und -Aliase aus einem Cache und walken nur Status und Speed; die Namen werden höchstens einmal pro Discovery-Intervall (oder bei unbekanntem ifIndex) neu gelesen.
-- VLAN- und STP-Daten haben eigene Intervalle (`Settings -> Scan`, Standard 1800 s bzw. 300 s). Sie werden in MAC-Scans aktualisiert, sobald ihr Intervall abgelaufen ist; `0` bedeutet nur bei manuellen Full-Scans.
-- DNS-Resolver für PTR-Lookups sind in der UI unter `Settings -> DNS` konfigurierbar.
-- Backend-API für DNS-Server: `GET/PUT /api/v1/dns-settings` mit `servers` (IP-Liste).
+- The number of parallel SNMP queries is configurable in the UI under `Settings -> Scan`.
+- Backend API for scan workers: `GET/PUT /api/v1/scan-settings` with `max_workers`, `snmp_timeout`, `snmp_retries` and `snmp_bulk_size` (rows per SNMP request, 5-100, default 25).
+- Link and MAC scans read interface names and aliases from a cache and walk only status and speed; the names are re-read at most once per discovery interval (or for an unknown ifIndex).
+- VLAN and STP data have their own intervals (`Settings -> Scan`, default 1800 s and 300 s respectively). They are updated in MAC scans as soon as their interval has expired; `0` means only during manual full scans.
+- DNS resolvers for PTR lookups are configurable in the UI under `Settings -> DNS`.
+- Backend API for DNS servers: `GET/PUT /api/v1/dns-settings` with `servers` (IP list).
 
-Das Scan-Ergebnis (`POST /api/v1/scan`) enthält zusätzliche Laufzeitdaten:
+The scan result (`POST /api/v1/scan`) contains additional runtime data:
 
-- `max_workers`: effektiv verwendete Worker-Anzahl
-- `total_duration_ms`: Gesamtdauer für den Scanlauf
-- `switch_metrics[]`: Dauer und Status pro Switch (`ip`, `label`, `duration_ms`, `success`, `error`)
+- `max_workers`: effective number of workers used
+- `total_duration_ms`: total duration of the scan run
+- `switch_metrics[]`: duration and status per switch (`ip`, `label`, `duration_ms`, `success`, `error`)
 
 ## Tech Stack
 
@@ -197,45 +197,45 @@ To point the frontend at a different backend URL, rebuild the image:
 docker buildx build --build-arg VITE_API_URL=http://your-backend:8000 -t net2map-frontend .
 ```
 
-## Sicherheit
+## Security
 
-- **Authentifizierung:** `JWT_SECRET` aktiviert Benutzerkonten und Rollen. Der
-  statische `SECRET_TOKEN` ist ein alternativer Modus ohne JWT. Ohne beide Werte
-  sind die API-Endpunkte ohne Anmeldung erreichbar.
-- **Sitzungswiderruf:** JWT-Sperren benoetigen Redis. Bei konfiguriertem, aber
-  nicht erreichbarem Redis schlagen JWT-Pruefungen mit `503 AUTH_UNAVAILABLE`
-  fehl. Ohne Redis bleiben Login und normale JWT-Zugriffe moeglich; Logout,
-  Sitzungswiderruf sowie sicherheitsrelevante Benutzer-Aenderungen und Loeschungen
-  melden `503`, statt einen erfolgreichen Widerruf vorzutaeuschen.
-  Fehlgeschlagene Benutzer-Aenderungen werden nicht gespeichert. Die UI meldet
-  lokal trotzdem ab und weist auf einen fehlgeschlagenen Server-Widerruf hin.
-- **WebSockets:** Bestehende Scan-Verbindungen pruefen ihre urspruenglichen
-  Zugangsdaten fuenf Sekunden nach der letzten erfolgreichen Pruefung erneut,
-  auch ohne eingehende Nachrichten. Ablauf oder Widerruf schliesst die Verbindung mit Code `1008`;
-  ein ausgefallener Auth-Dienst mit `1011`. Einmal-Tickets werden nur beim
-  Verbindungsaufbau verbraucht, danach wird die zugehoerige Sitzung geprueft.
-  Redis-Verbindungen haben je zwei Sekunden Verbindungs- und Antwortzeitlimit ohne
-  automatische Wiederholung. Socket-Authentifizierung laeuft ausserhalb des
-  Event-Loops mit insgesamt fuenf Sekunden Zeitlimit; die Pruefdauer kommt zum
-  Intervall hinzu.
-- **Redis-Persistenz:** Compose verwendet `net2map_redisdata` und AOF mit
-  `appendfsync everysec`. Bei einem Absturz kann etwa eine Sekunde an Schreibvorgaengen
-  verloren gehen. Nach Verlust oder Wiederherstellung veralteter Redis-Daten
-  `JWT_SECRET` wechseln, damit zuvor gesperrte Tokens nicht erneut gueltig werden.
-- **Proxy-Vertrauen:** Nginx ersetzt eingehendes `X-Forwarded-For` durch die
-  direkte Gegenstelle. Hinter einem weiteren Reverse Proxy gilt daher dessen IP
-  fuer das Rate-Limit. Echte Client-IPs nur mit explizit konfigurierten,
-  vertrauenswuerdigen Proxy-Adressen uebernehmen; den Backend-Port nicht oeffentlich
-  freigeben.
-- **HTTPS:** TLS ueber einen Reverse Proxy vor dem Frontend bereitstellen;
-  die mitgelieferten Container bieten selbst kein HTTPS.
-- **SNMP-Zugangsdaten:** API-Antworten maskieren Communities und SNMPv3-Passwoerter.
-  `ENCRYPTION_KEY` verschluesselt diese Werte in der Datenbank. Einen Schluessel
-  erzeugt `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
-- **SNMP-Protokoll:** Fuer neue Profile SNMPv3 mit Authentifizierung und
-  Verschluesselung (`authPriv`, SHA-256/AES) verwenden. V2c und V3 ohne
-  Verschluesselung bleiben fuer explizit konfigurierte Altgeraete verfuegbar;
-  Community-Strings in V2c werden im Netzwerk unverschluesselt uebertragen.
+- **Authentication:** `JWT_SECRET` enables user accounts and roles. The
+  static `SECRET_TOKEN` is an alternative mode without JWT. Without either value,
+  the API endpoints are reachable without login.
+- **Session revocation:** JWT revocations require Redis. If Redis is configured but
+  unreachable, JWT checks fail with `503 AUTH_UNAVAILABLE`.
+  Without Redis, login and normal JWT access remain possible; logout,
+  session revocation as well as security-relevant user changes and deletions
+  report `503` instead of pretending a successful revocation.
+  Failed user changes are not saved. The UI still logs out
+  locally and indicates that the server-side revocation failed.
+- **WebSockets:** Existing scan connections re-check their original
+  credentials five seconds after the last successful check,
+  even without incoming messages. Expiry or revocation closes the connection with code `1008`;
+  an unavailable auth service with `1011`. One-time tickets are consumed only when
+  the connection is established; after that, the associated session is checked.
+  Redis connections each have a two-second connect and response timeout without
+  automatic retry. Socket authentication runs outside the
+  event loop with a total timeout of five seconds; the check duration is added to the
+  interval.
+- **Redis persistence:** Compose uses `net2map_redisdata` and AOF with
+  `appendfsync everysec`. In a crash, about one second of writes
+  can be lost. After losing Redis data or restoring stale Redis data,
+  rotate `JWT_SECRET` so that previously revoked tokens do not become valid again.
+- **Proxy trust:** Nginx replaces incoming `X-Forwarded-For` with the
+  direct peer. Behind an additional reverse proxy, that proxy's IP therefore
+  applies to the rate limit. Only adopt real client IPs with explicitly configured,
+  trusted proxy addresses; do not expose the backend port
+  publicly.
+- **HTTPS:** Provide TLS via a reverse proxy in front of the frontend;
+  the bundled containers do not offer HTTPS themselves.
+- **SNMP credentials:** API responses mask communities and SNMPv3 passwords.
+  `ENCRYPTION_KEY` encrypts these values in the database. A key
+  is generated by `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+- **SNMP protocol:** For new profiles, use SNMPv3 with authentication and
+  encryption (`authPriv`, SHA-256/AES). V2c and V3 without
+  encryption remain available for explicitly configured legacy devices;
+  community strings in V2c are transmitted unencrypted over the network.
 
 ## Production Deployment
 
@@ -326,24 +326,24 @@ npm audit fix          # optional -- apply security patches
 
 Commit the updated `package-lock.json` together with any `package.json` changes.
 
-### Sicherheitspruefungen und Build-Sperre
+### Security Checks and Build Gate
 
-Der GitHub-Workflow `.github/workflows/ci.yml` prueft bei Pushes auf `main`,
-bei `v*`-Tags und bei Pull Requests gegen `main`:
+The GitHub workflow `.github/workflows/ci.yml` runs checks on pushes to `main`,
+on `v*` tags and on pull requests against `main`:
 
-- `pip-audit`: alle aufgeloesten Backend-Abhaengigkeiten, ohne Advisory-Ausnahmen.
-- `npm audit`: alle Schweregrade, einschliesslich Entwicklungsabhaengigkeiten.
-- Bandit: Python-Produktionscode ab Schweregrad `medium`, alle Konfidenzstufen;
-  Testdateien sind ausgenommen. Die bewusst unterstuetzten SNMP-Altprotokolle
-  tragen ausschliesslich begruendete Ausnahmen fuer ihre jeweilige Regel.
+- `pip-audit`: all resolved backend dependencies, without advisory exceptions.
+- `npm audit`: all severity levels, including development dependencies.
+- Bandit: Python production code from severity `medium`, all confidence levels;
+  test files are excluded. The deliberately supported legacy SNMP protocols
+  carry only justified exceptions for their respective rule.
 
-Ein Fund oder ein Scan-Fehler laesst `security-scan` scheitern. Beide Docker-Jobs
-(`docker-build` und `docker-push`) benoetigen dessen erfolgreichen Abschluss;
-fehlgeschlagene, abgebrochene oder uebersprungene Scans verhindern Build und Push.
-Image-Pushes bleiben auf `v*`-Tags beschraenkt. Die Job-Berechtigungen sind auf
-Lesen reduziert; nur der Publish-Job erhaelt Schreibzugriff auf Packages.
+A finding or a scan error makes `security-scan` fail. Both Docker jobs
+(`docker-build` and `docker-push`) require its successful completion;
+failed, cancelled or skipped scans prevent build and push.
+Image pushes remain restricted to `v*` tags. Job permissions are reduced to
+read; only the publish job gets write access to packages.
 
-Die gleichen Pruefungen lokal ausfuehren:
+Run the same checks locally:
 
 ```bash
 # Python backend

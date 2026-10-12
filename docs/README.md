@@ -6,7 +6,7 @@ owns and the reading order. It does not own any topic itself.
 
 ## Reading order
 
-1. `README.md` — product overview, architecture, quickstart (German).
+1. `README.md` — product overview, architecture, quickstart.
 2. `BACKUP.md` — database backup/restore manual.
 3. `VERSION.md` — release history; single source of truth for the version.
 4. `brain/BRAIN.md` — project brain: mission, goals, decisions, roadmap.
@@ -44,5 +44,5 @@ owns and the reading order. It does not own any topic itself.
 
 - Doc naming: `UPPERCASE.md` for root-level manuals, `docs/<topic>/` for grouped
   material. Doc map updates are part of docs closeout (see `AGENTS.md`).
-- User-facing docs (`README.md`, `BACKUP.md`, `VERSION.md`) are German; agent-facing
-  docs are English; code and comments are always English.
+- All docs are English (user-facing, agent-facing and release notes); code and
+  comments are always English.

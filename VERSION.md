@@ -1,396 +1,396 @@
 # Version History
 
-## v3.2.1 -- Scan-Zeitstempel, Celery-Importe, Demodaten und Screenshots
+## v3.2.1 -- Scan timestamps, Celery imports, demo data and screenshots
 
 **Type:** PATCH
 
-Veroeffentlicht am 2026-10-12 als Tag `v3.2.1` (Images unter
-`ghcr.io/mainzerp/net2map/backend` und `/frontend`). Commits `bf3e5dd`,
-`b144a30`, `12c96f3`. Migration 023 laeuft beim Start des Backends automatisch.
-Nach dem Update die Images neu bauen bzw. ziehen (`docker compose up --build -d`),
-damit der Celery-Worker die korrigierte Image-Umgebung erhaelt.
+Released on 2026-10-12 as tag `v3.2.1` (images under
+`ghcr.io/mainzerp/net2map/backend` and `/frontend`). Commits `bf3e5dd`,
+`b144a30`, `12c96f3`. Migration 023 runs automatically when the backend starts.
+After the update, rebuild or pull the images (`docker compose up --build -d`)
+so that the Celery worker gets the corrected image environment.
 
 ### Fixes
 
-- Celery-Worker: Scans endeten nach `scan.end` mit `No module named 'routers'`,
-  weil Celery das Arbeitsverzeichnis nur beim Laden der App im Importpfad haelt.
-  `backend/Dockerfile` setzt jetzt `PYTHONPATH=/app` (`bf3e5dd`).
-- Migration 023: fehlende `now()`-Standardwerte fuer `created_at`/`updated_at`
-  in `credentials`, `racks`, `scan_runs`, `snmp_profiles`, `switch_classes` und
-  `switch_models`. Bisher speicherte jeder Scan-Lauf `created_at = NULL`;
-  bestehende NULL-Werte bleiben erhalten (echte Zeit unbekannt) (`bf3e5dd`).
-- `GET /api/v1/scan-runs` sortiert Laeufe ohne Zeitstempel ans Ende (Tie-Break
-  ueber `id`), damit der neueste datierte Lauf zuerst kommt (`bf3e5dd`).
-- Dashboard: "Last scan" zeigte immer "-", weil das Frontend `finished_at`/
-  `started_at` las; es liest jetzt das von der API gelieferte `created_at`
+- Celery worker: scans ended after `scan.end` with `No module named 'routers'`,
+  because Celery keeps the working directory in the import path only while loading
+  the app. `backend/Dockerfile` now sets `PYTHONPATH=/app` (`bf3e5dd`).
+- Migration 023: missing `now()` defaults for `created_at`/`updated_at`
+  in `credentials`, `racks`, `scan_runs`, `snmp_profiles`, `switch_classes` and
+  `switch_models`. Until now every scan run stored `created_at = NULL`;
+  existing NULL values are kept (real time unknown) (`bf3e5dd`).
+- `GET /api/v1/scan-runs` sorts runs without a timestamp to the end (tie-break
+  via `id`), so that the newest dated run comes first (`bf3e5dd`).
+- Dashboard: "Last scan" always showed "-", because the frontend read `finished_at`/
+  `started_at`; it now reads the `created_at` returned by the API
   (`bf3e5dd`).
 
-### Demo und Dokumentation
+### Demo and documentation
 
-- `backend/seed_db.py` befuellt alle Seiten (Endpunkte mit Port-Historie,
-  Scan-Historie mit Metriken, Dry-Run, Latenzverlauf, Audit-Log, Logs,
-  Demo-Benutzer, Discovery-/DNS-Einstellungen); neuer Modus
-  `--simulate-latency` fuer den Latenzmonitor des Demo-Stacks. Der Demo-Stack
-  laeuft ohne `celery-beat` (`b144a30`).
-- README: Screenshots (`docs/screenshots/`), vollstaendige Vendor- und
-  Feature-Liste, `.env`-Schritt im Schnellstart, `SECRET_TOKEN` ist immer
-  Pflicht. Korrekturen in `docs/API.md` und `docs/OPERATIONS.md` (`12c96f3`).
+- `backend/seed_db.py` populates all pages (endpoints with port history,
+  scan history with metrics, dry run, latency history, audit log, logs,
+  demo users, discovery/DNS settings); new mode
+  `--simulate-latency` for the latency monitor of the demo stack. The demo stack
+  runs without `celery-beat` (`b144a30`).
+- README: screenshots (`docs/screenshots/`), complete vendor and
+  feature list, `.env` step in the quick start, `SECRET_TOKEN` is always
+  required. Corrections in `docs/API.md` and `docs/OPERATIONS.md` (`12c96f3`).
 
-## v3.2.0 -- Netzwerk-Latenzmonitor
-
-**Type:** MINOR
-
-Veroeffentlicht am 2026-10-08 als Tag `v3.2.0` (Images unter
-`ghcr.io/mainzerp/net2map/backend` und `/frontend`). Commit `935d5bd`.
-Migration 022 laeuft beim Start des Backends
-automatisch. Neuer Compose-Dienst `latency-monitor` (Backend-Image): nach dem
-Update `docker compose up -d` ausfuehren, damit er startet.
-
-### Features
-
-- Latenzmonitor als eigener Dienst (`python -m latency.monitor`): pingt alle
-  aktiven, nicht ignorierten Geraete (max. 200) fortlaufend, Standard alle 10 s
-  mit 3 Pings. Ermittelt Latenz (Median der letzten 6 Messungen), Jitter,
-  Paketverlust und eine Baseline (Median der Minutenwerte der letzten 24 h).
-  Status pro Geraet: ok, erhoeht (deutlich ueber Baseline), Verlust (> 5 %),
-  down (100 % Verlust), unbekannt.
-- Speicherung als Minutenwerte in der neuen Tabelle `latency_samples`
-  (Migration 022), automatische Bereinigung nach `latency_retention_days`
-  (Standard 30 Tage). Aktueller Zustand liegt in Redis.
-- Neue API: `GET /api/v1/latency/summary` (Netzwerk-Kennzahlen und Geraeteliste)
-  und `GET /api/v1/latency/history?range=1h|24h|7d&device_id=` (Verlauf).
-- Neue Einstellungen `latency_enabled`, `latency_interval_sec` (5-300 s),
-  `latency_pings` (1-10), `latency_mode` (`all` oder `selected`),
-  `latency_retention_days` (1-365), mit Validierung in `PUT /api/v1/settings/{key}`.
-- Geraete-Feld `latency_monitored` (Migration 022): Auswahl der Geraete fuer den
-  Modus `selected`, aenderbar ueber `PATCH /api/v1/topology/devices/{id}/meta`.
-- Dashboard-Latenzkarte mit Netzwerk-Median, P95, Verlust und den auffaelligsten
-  Geraeten.
-- Inspector-Abschnitt "Latenz" mit Verlaufsdiagramm (1 h / 24 h / 7 d) und
-  Ueberwachungs-Schalter pro Geraet.
-- Topologie-Ebene "Latenz": Verbindungen nach dem schlechtesten Status ihrer
-  Endgeraete eingefaerbt, Beschriftung mit der hoechsten RTT.
-- Latenz-Einstellungen unter Einstellungen > Scan.
-- Neuer Endpunkt `PUT /api/v1/settings` speichert mehrere Einstellungen in einem
-  Aufruf (alles oder nichts, ein Rate-Limit-Slot).
-- Laeuft der Monitor nicht, meldet die API alle Geraete als unbekannt statt
-  veraltete Messwerte zu zeigen.
-
-## v3.1.0 -- Weniger SNMP-Last pro Scan
+## v3.2.0 -- Network latency monitor
 
 **Type:** MINOR
 
-Veroeffentlicht am 2026-10-06 als Tag `v3.1.0` (Images unter
-`ghcr.io/mainzerp/net2map/backend` und `/frontend`). Commit `cab1a9c`.
-Migration 021 laeuft beim Start des Backends automatisch.
+Released on 2026-10-08 as tag `v3.2.0` (images under
+`ghcr.io/mainzerp/net2map/backend` and `/frontend`). Commit `935d5bd`.
+Migration 022 runs automatically when the backend
+starts. New compose service `latency-monitor` (backend image): after the
+update, run `docker compose up -d` so that it starts.
 
 ### Features
 
-- Interface-Namen-Cache: Link- und MAC-Scans walken nur noch Status und Speed
-  der Interfaces. Namen und Aliase kommen aus einem Cache pro Geraet (Migration
-  021, `devices.if_names`) und werden hoechstens einmal pro Discovery-Intervall
-  neu gelesen, sofort bei einem unbekannten ifIndex sowie bei jedem manuellen
-  Full-/Ports-Scan.
-- Einstellbare GETBULK-Groesse ("Bulk Size" in den Scan-Einstellungen,
-  `snmp_bulk_size` in `/api/v1/scan-settings`, 5-100, Standard 25). Groessere
-  Werte bedeuten weniger SNMP-Anfragen pro Walk.
-- Eigene Intervalle fuer VLAN- und STP-Daten (Scan-Einstellungen, Standard
-  1800 s bzw. 300 s; Keys `vlan_update_interval_sec`, `stp_update_interval_sec`).
-  Bisher wurden PVID, getaggte VLANs, VLAN-Namen und Spanning Tree bei jedem
-  Link- und MAC-Scan gewalkt. Jetzt aktualisieren MAC-Scans sie nur, wenn das
-  jeweilige Intervall abgelaufen ist (Zeitstempel `devices.vlan_at` / `stp_at`,
-  Migration 021); dazwischen bleiben die gespeicherten Werte an den Ports
-  erhalten. Link-Scans walken VLAN/STP nicht mehr. `0` = nur manuelle Full-Scans.
+- Latency monitor as a separate service (`python -m latency.monitor`): pings all
+  active, non-ignored devices (max. 200) continuously, by default every 10 s
+  with 3 pings. Determines latency (median of the last 6 measurements), jitter,
+  packet loss and a baseline (median of the per-minute values of the last 24 h).
+  Status per device: ok, degraded (well above baseline), loss (> 5 %),
+  down (100 % loss), unknown.
+- Stored as per-minute values in the new table `latency_samples`
+  (migration 022), automatic cleanup after `latency_retention_days`
+  (default 30 days). The current state is kept in Redis.
+- New API: `GET /api/v1/latency/summary` (network metrics and device list)
+  and `GET /api/v1/latency/history?range=1h|24h|7d&device_id=` (history).
+- New settings `latency_enabled`, `latency_interval_sec` (5-300 s),
+  `latency_pings` (1-10), `latency_mode` (`all` or `selected`),
+  `latency_retention_days` (1-365), with validation in `PUT /api/v1/settings/{key}`.
+- Device field `latency_monitored` (migration 022): selection of the devices for
+  the `selected` mode, changeable via `PATCH /api/v1/topology/devices/{id}/meta`.
+- Dashboard latency card with network median, P95, loss and the most conspicuous
+  devices.
+- Inspector section "Latency" with history chart (1 h / 24 h / 7 d) and
+  monitoring toggle per device.
+- Topology layer "Latency": links colored by the worst status of their
+  end devices, labeled with the highest RTT.
+- Latency settings under Settings > Scan.
+- New endpoint `PUT /api/v1/settings` saves several settings in one
+  call (all or nothing, one rate-limit slot).
+- If the monitor is not running, the API reports all devices as unknown instead
+  of showing stale measurements.
+
+## v3.1.0 -- Less SNMP load per scan
+
+**Type:** MINOR
+
+Released on 2026-10-06 as tag `v3.1.0` (images under
+`ghcr.io/mainzerp/net2map/backend` and `/frontend`). Commit `cab1a9c`.
+Migration 021 runs automatically when the backend starts.
+
+### Features
+
+- Interface name cache: link and MAC scans now only walk status and speed
+  of the interfaces. Names and aliases come from a cache per device (migration
+  021, `devices.if_names`) and are re-read at most once per discovery interval,
+  immediately on an unknown ifIndex, and on every manual
+  full/ports scan.
+- Configurable GETBULK size ("Bulk Size" in the scan settings,
+  `snmp_bulk_size` in `/api/v1/scan-settings`, 5-100, default 25). Larger
+  values mean fewer SNMP requests per walk.
+- Separate intervals for VLAN and STP data (scan settings, default
+  1800 s and 300 s; keys `vlan_update_interval_sec`, `stp_update_interval_sec`).
+  Previously PVID, tagged VLANs, VLAN names and spanning tree were walked on every
+  link and MAC scan. Now MAC scans only update them when the
+  respective interval has expired (timestamps `devices.vlan_at` / `stp_at`,
+  migration 021); in between, the stored values on the ports are
+  kept. Link scans no longer walk VLAN/STP. `0` = manual full scans only.
 
 ### Fixes
 
-- Ohne gespeicherte Einstellung fielen Link- und MAC-Intervall im Scheduler und
-  im Einstellungsformular auf 30 s zurueck; jetzt gelten wie beim Seeding 60 s
-  bzw. 300 s.
+- Without a stored setting, the link and MAC intervals in the scheduler and
+  in the settings form fell back to 30 s; now 60 s and 300 s apply,
+  as with seeding.
 
-## v3.0.0 -- Umbenennung in Net2Map
+## v3.0.0 -- Renamed to Net2Map
 
 **Type:** MAJOR
 
-Veroeffentlicht am 2026-10-06 als Tag `v3.0.0` (Images unter
-`ghcr.io/mainzerp/net2map/backend` und `/frontend`; Repo jetzt `mainzerp/net2map`).
-Commit `be184f9`. Das Produkt heisst jetzt Net2Map (vorher NetMap). Der
-Name "NetMap" ist mehrfach belegt, auch von Tools mit gleichem Zweck. Das Update
-erfordert manuelle Schritte: Anleitung in `docs/OPERATIONS.md`, Abschnitt
+Released on 2026-10-06 as tag `v3.0.0` (images under
+`ghcr.io/mainzerp/net2map/backend` and `/frontend`; repo now `mainzerp/net2map`).
+Commit `be184f9`. The product is now called Net2Map (previously NetMap). The
+name "NetMap" is used several times, including by tools with the same purpose. The update
+requires manual steps: instructions in `docs/OPERATIONS.md`, section
 "Upgrading from NetMap (v2.x) to Net2Map (v3.0.0)".
 
-### Aenderungen (breaking)
+### Changes (breaking)
 
-- Sichtbarer Name ueberall Net2Map: Browser-Titel, Login, Sidebar, OpenAPI-Titel
-  ("Net2Map API"), README und Doku.
-- Compose-Projektname fest auf `net2map` (unabhaengig vom Ordnernamen). Container
-  `net2map-*`, Netzwerk `net2map`, Volumes `net2map_pgdata`, `net2map_redisdata`,
-  `net2map_data`, lokale Images `net2map-backend` / `net2map-frontend`.
-- PostgreSQL-Datenbank und -Rolle heissen `net2map`; Backup-Dateien
-  `backups/net2map_*.sql.gz`; Skripte zielen auf `net2map-postgres`.
-- Redis-Prefix `net2map:`, Celery-App `net2map`, Prometheus-Metriken `net2map_*`
-  (vorher `netmap_*`).
-- `NETMAP_VERSION` heisst jetzt `NET2MAP_VERSION`; Images kuenftig unter
-  `ghcr.io/mainzerp/net2map/{backend,frontend}` (nach Umbenennung des Repos).
+- Visible name is Net2Map everywhere: browser title, login, sidebar, OpenAPI title
+  ("Net2Map API"), README and docs.
+- Compose project name fixed to `net2map` (independent of the folder name). Containers
+  `net2map-*`, network `net2map`, volumes `net2map_pgdata`, `net2map_redisdata`,
+  `net2map_data`, local images `net2map-backend` / `net2map-frontend`.
+- PostgreSQL database and role are named `net2map`; backup files
+  `backups/net2map_*.sql.gz`; scripts target `net2map-postgres`.
+- Redis prefix `net2map:`, Celery app `net2map`, Prometheus metrics `net2map_*`
+  (previously `netmap_*`).
+- `NETMAP_VERSION` is now called `NET2MAP_VERSION`; images from now on under
+  `ghcr.io/mainzerp/net2map/{backend,frontend}` (after the repo is renamed).
 
 ### Fixes
 
-- source-map-js 1.2.1 -> 1.2.2 (Build-Abhaengigkeit von Vite/Tailwind,
-  GHSA-68fv-2mgg-jv7q); der Security-Scan in CI ist wieder gruen.
+- source-map-js 1.2.1 -> 1.2.2 (build dependency of Vite/Tailwind,
+  GHSA-68fv-2mgg-jv7q); the security scan in CI is green again.
 
 ### Migration
 
-- Das Backend benennt beim Start vorhandene `netmap:*`-Redis-Keys einmalig in
-  `net2map:*` um (ohne bestehende Keys zu ueberschreiben).
-- Das Frontend uebernimmt gespeicherte Browser-Einstellungen (Theme, Kartenebenen,
-  Zoom, Rack-Reihenfolge, Befehlspalette, Sidebar) einmalig von den alten Keys.
-- Datenbank, Kartenhintergrund und Redis-Daten werden laut Anleitung von den alten
-  Volumes uebernommen; die alten Volumes bleiben fuer ein Rollback erhalten.
+- On startup the backend renames existing `netmap:*` Redis keys once to
+  `net2map:*` (without overwriting existing keys).
+- The frontend takes over stored browser settings (theme, map layers,
+  zoom, rack order, command palette, sidebar) once from the old keys.
+- Database, map background and Redis data are taken over from the old
+  volumes as described in the instructions; the old volumes are kept for a rollback.
 
-## v2.2.0 -- Neues Erscheinungsbild "Cartography"
+## v2.2.0 -- New "Cartography" look
 
 **Type:** MINOR
 
-Veroeffentlicht am 2026-10-06 als Tag `v2.2.0` (Images unter
-`ghcr.io/mainzerp/netmap/backend` und `/frontend`). Enthaelt auch v2.1.2.
+Released on 2026-10-06 as tag `v2.2.0` (images under
+`ghcr.io/mainzerp/netmap/backend` and `/frontend`). Also includes v2.1.2.
 
 ### Features
 
-- Neue Farbpalette nach dem Vorbild von Billio: warmes Papier, Tinten-Navy und
-  Terrakotta als einziger Akzent. Hell ist jetzt Standard; das dunkle Theme
-  "Nachtkarte" ist daraus abgeleitet. Gespeicherte Theme-Wahl bleibt erhalten.
-- Systemschrift statt Google Fonts; Icons ueber lucide-react; Sidebar in
-  Tinten-Navy mit Terrakotta-Markierung des aktiven Eintrags.
-- Dashboard neu aufgebaut: Statussatz als Ueberschrift, kompakte Scan-Leiste
-  mit Abbrechen, Aufmerksamkeitsliste als Hauptbereich, kompakte Verteilungen.
-- Neue Seite `/styleguide` zur Pruefung aller Farben und UI-Bausteine.
-- Befehlspalette mit Strg/Cmd+K oder `/`: sucht Switches, Endpunkte (auch MAC
-  ohne Trennzeichen), Racks und Ports, springt zu Seiten, startet Scans und
-  wechselt das Theme. Zuletzt geoeffnete Ziele erscheinen bei leerer Suche.
-- Gemeinsames Detail-Panel (Inspector) rechts fuer Switches, Endpunkte und
-  Racks, per URL verlinkbar (`?inspect=device:<id>`), schliesst mit Zurueck oder
-  Escape. Zeilen in den Geraete- und Endpunkt-Tabellen oeffnen es per Klick/Enter.
+- New color palette modeled on Billio: warm paper, ink navy and
+  terracotta as the only accent. Light is now the default; the dark theme
+  "night map" is derived from it. A stored theme choice is kept.
+- System font instead of Google Fonts; icons via lucide-react; sidebar in
+  ink navy with a terracotta marker on the active entry.
+- Dashboard rebuilt: status sentence as heading, compact scan bar
+  with cancel, attention list as the main area, compact distributions.
+- New page `/styleguide` for checking all colors and UI building blocks.
+- Command palette with Ctrl/Cmd+K or `/`: searches switches, endpoints (also MAC
+  without separators), racks and ports, jumps to pages, starts scans and
+  switches the theme. Recently opened targets appear when the search is empty.
+- Shared detail panel (inspector) on the right for switches, endpoints and
+  racks, linkable via URL (`?inspect=device:<id>`), closes with Back or
+  Escape. Rows in the device and endpoint tables open it via click/Enter.
 
-- Netzwerkkarte im Kartografie-Stil: Kabel als Tintenstriche, Strichstaerke nach
-  Geschwindigkeit, ausgefallene Links gestrichelt, optionale Fluss-Animation
-  ("Flow"), Papier-Raster als Hintergrund.
-- Semantischer Zoom: weit entfernt nur Namen, nah zusaetzlich Port-Leiste und IP.
-- Scan-Anzeige auf der Karte (Fortschrittslinie, dezente Ringe, kurz markierte
-  Geraete). "Show on map" und die Kartensuche zoomen jetzt zum Geraet.
-- Hersteller-Abzeichen statt ASCII-Kuerzeln ([AX], [FS], [UF]).
-- Rack-Ansicht als technische Zeichnung: Schienen mit Lochraster und
-  U-Nummern, Blindplatten, Geraetefronten mit Rack-Ohren und Status-LED.
-  Ports als stilisierte Kacheln: gefuellt in Geschwindigkeitsfarbe wenn aktiv,
-  hohl wenn inaktiv, Punkt fuer angeschlossene Endgeraete, Uplinks rechts
-  abgesetzt; Legende unter dem Rack. Optionaler "Activity"-Schalter.
-- Geraetename und Typenbezeichnung stehen rechts neben dem Rack auf Hoehe des
-  Geraets, verbunden ueber eine Hinweislinie; Hover hebt Front und Beschriftung
-  gemeinsam hervor, Klick oeffnet die Details.
-- Logische Karten-Ebenen ueber den Schalter "Layer" (`Off | STP | VLAN`):
-  STP zeigt Root-Bridge, Pfade zur Root (mit Richtungspfeil) und blockierte
-  Links; VLAN hebt fuer eine gewaehlte VLAN die tragenden Links und Geraete
-  hervor (tagged/untagged unterscheidbar), der Rest wird blass. Legende auf der
-  Karte; Inspector zeigt STP-Zusammenfassung sowie VLAN- und STP-Spalten.
-  Jede VLAN-ID hat eine feste eigene Farbe (aus der ID berechnet).
-- Scanner lesen Spanning Tree (BRIDGE-MIB, RSTP-MIB `dot1dStpVersion`) und
-  VLAN-Namen (`dot1qVlanStaticName`), best effort; Migration 019. Cisco
-  PVST: nur die Standard-Instanz (VLAN 1).
-- Ruhige Animationen mit `motion` 13.4.4: Inspector, Befehlspalette, Dialoge,
-  Toasts, Seitenwechsel, Dashboard-Aufbau und Mobil-Menue. Bei reduzierter
-  Bewegung nur kurze Einblendungen.
-- "Auto-Layout" erscheint nur noch, wenn kein Hintergrundbild (Grundriss) fuer
-  die Karte hinterlegt ist, damit die manuelle Anordnung nicht verloren geht.
-- SNMP-Engine-ID: Jeder erfolgreiche Scan liest `snmpEngineID.0` und speichert
-  sie (hex) mit Zeitstempel an der Credential, die funktioniert hat (fuer v2c
-  und v3, sofern der Agent sie liefert). Aendert sie sich, erscheint eine
-  Warnung im Log und ein Audit-Eintrag (`engine_id_changed`), da das Geraet
-  ersetzt oder zurueckgesetzt worden sein kann. Optional laesst sich fuer
-  v3-Credentials eine Engine-ID manuell festlegen (5-32 Oktette hex, `0x` und
-  `:` erlaubt); ohne Angabe gilt die automatische Discovery. Die Discovery
-  laeuft auch mit Override; er legt nur die Engine-ID fest, an die die
-  Schluessel gebunden werden. Passt der
-  Override nicht, warnt der Scan mit dem Hinweis, ihn zu entfernen. Anzeige
-  und Eingabe in Settings > Credentials; Migration 018.
+- Network map in cartography style: cables as ink strokes, stroke width by
+  speed, failed links dashed, optional flow animation
+  ("Flow"), paper grid as background.
+- Semantic zoom: far away only names, close up additionally port strip and IP.
+- Scan display on the map (progress line, subtle rings, briefly highlighted
+  devices). "Show on map" and the map search now zoom to the device.
+- Vendor badges instead of ASCII abbreviations ([AX], [FS], [UF]).
+- Rack view as a technical drawing: rails with hole grid and
+  U numbers, blanking panels, device fronts with rack ears and status LED.
+  Ports as stylized tiles: filled in speed color when active,
+  hollow when inactive, dot for connected end devices, uplinks set off
+  on the right; legend below the rack. Optional "Activity" toggle.
+- Device name and model designation are shown to the right of the rack at the
+  height of the device, connected by a leader line; hover highlights front and label
+  together, click opens the details.
+- Logical map layers via the "Layer" toggle (`Off | STP | VLAN`):
+  STP shows the root bridge, paths to the root (with direction arrow) and blocked
+  links; VLAN highlights the carrying links and devices for a selected VLAN
+  (tagged/untagged distinguishable), the rest is faded. Legend on the
+  map; inspector shows STP summary as well as VLAN and STP columns.
+  Each VLAN ID has its own fixed color (computed from the ID).
+- Scanners read spanning tree (BRIDGE-MIB, RSTP-MIB `dot1dStpVersion`) and
+  VLAN names (`dot1qVlanStaticName`), best effort; migration 019. Cisco
+  PVST: only the default instance (VLAN 1).
+- Calm animations with `motion` 13.4.4: inspector, command palette, dialogs,
+  toasts, page transitions, dashboard build-up and mobile menu. With reduced
+  motion only short fade-ins.
+- "Auto-Layout" now only appears when no background image (floor plan) is
+  set for the map, so that the manual arrangement is not lost.
+- SNMP engine ID: every successful scan reads `snmpEngineID.0` and stores
+  it (hex) with a timestamp on the credential that worked (for v2c
+  and v3, provided the agent returns it). If it changes, a
+  warning appears in the log and an audit entry (`engine_id_changed`), since the device
+  may have been replaced or reset. Optionally, an engine ID can be set manually for
+  v3 credentials (5-32 octets hex, `0x` and
+  `:` allowed); without it, automatic discovery applies. Discovery
+  also runs with an override; the override only sets the engine ID to which the
+  keys are bound. If the
+  override does not match, the scan warns with a hint to remove it. Display
+  and input in Settings > Credentials; migration 018.
 
-### Aenderungen
+### Changes
 
-- Toasts, Fehleransicht und Einstellungen verwenden Theme-Farben statt fester
-  Hex-Werte. Der Standard-Kartenhintergrund folgt dem Theme ("Follow theme").
-- Die Switch-Detailansicht der Karte (SwitchDetailSlideIn) wurde durch den
-  Inspector ersetzt.
-- Einheitliche Rundungen und Overlay-Abdunklung; im dunklen Theme ist der
-  Hover-Zustand des Hauptbuttons heller und kontrastreicher. Links werden nicht
-  mehr nach Kabelanzahl dicker (Anzahl steht im Label); 10M-Links sind bernsteinfarben.
-- Port-Hervorhebungen im Rack-Panel der Karte nutzen Ringe statt Leuchteffekte.
-- Neue Abhaengigkeit `motion` (ca. +31 kB gzip beim Start).
-- API-Versionierung: Alle Backend-Endpunkte liegen jetzt kanonisch unter
-  `/api/v1/...` (nur diese erscheinen in OpenAPI). Der bisherige Praefix
-  `/api/...` bleibt als veralteter Alias erhalten; Antworten darueber tragen
-  `Deprecation: true` und `Link: </api/v1/...>; rel="successor-version"`.
-  `/health`, `/metrics` und `/ws/scan-progress` bleiben unversioniert.
-- Das Frontend sendet alle Requests zentral ueber `/api/v1` (Abbildung in
-  `src/api.ts`, Helfer `apiUrl()`), auch das Kartenhintergrundbild.
-- Auth-Ausnahmen (Login, Refresh, Kartenhintergrund) gelten fuer beide
-  Praefixe; Prometheus-Metriken fassen `/api/x` und `/api/v1/x` in einer Serie
-  (`/api/v1/x`) zusammen.
-- Datenbank-Fencing fuer die Scan-Sperre: Jede Sperrvergabe erhaelt ein
-  steigendes Fencing-Token; die Datenbank (`lease_fences`, Migration 020)
-  verwirft Schreibvorgaenge eines Scans, dessen Sperre inzwischen neu vergeben
-  wurde. Metrik `netmap_stale_lease_rejections_total`.
-- Herstellererkennung per sysObjectID beachtet OID-Grenzen (`1.3.6.1.4.1.9999`
-  ist kein Cisco mehr); der laengste Praefix gewinnt.
-- Review-Funde behoben: IP-Pruefung beim Credential-Update, Schutz vor
-  CSV-Formel-Injection im Export, Logout antwortet bei ungueltigem Token mit 401,
-  SNMP-Walks bis 10000 Zeilen mit Warnung bei Abschneiden, Credential-Profile
-  einmal pro Scan, `last_seen` fuer nur per Ping erreichbare Geraete,
-  Scheduler-Dispatch und Rate-Limits ueber Redis statt pro Worker.
-- Frontend: ETag-Cache als LRU, Logs-Seite mit Seitenumbruch (100 pro Seite),
-  `VITE_API_TOKEN` entfernt, Login alternativ mit Zugangs-Token.
-- Betrieb: `/docs`, `/redoc` und `/openapi.json` ueber Port 3000 erreichbar
-  (`OPENAPI_ENABLED`); `/health` haengt nicht mehr von Celery ab
-  (`/health?deep=1` prueft die Worker); weitere Einstellungen ueber Compose
-  setzbar; Aufbewahrung der Audit-Logs liest die Einstellung aus der Datenbank;
-  `docker-compose.ghcr.yml` fuer die veroeffentlichten Images; Demo-Seeding
-  repariert. Neue Doku `docs/API.md` und `docs/OPERATIONS.md`.
-- Aufgeraeumt: `bundle_debug.js`, `todo.md` und `fix_encoding.py` entfernt,
-  `migrate_sqlite_to_pg.py` liegt jetzt unter `scripts/`; Versionsangaben in
-  `frontend/package.json` und der OpenAPI-Beschreibung auf 2.2.0.
+- Toasts, error view and settings use theme colors instead of fixed
+  hex values. The default map background follows the theme ("Follow theme").
+- The switch detail view of the map (SwitchDetailSlideIn) was replaced by the
+  inspector.
+- Uniform corner radii and overlay dimming; in the dark theme the
+  hover state of the primary button is lighter and higher in contrast. Links no longer
+  get thicker with the cable count (count is shown in the label); 10M links are amber.
+- Port highlights in the rack panel of the map use rings instead of glow effects.
+- New dependency `motion` (approx. +31 kB gzip at startup).
+- API versioning: all backend endpoints now live canonically under
+  `/api/v1/...` (only these appear in OpenAPI). The previous prefix
+  `/api/...` is kept as a deprecated alias; responses through it carry
+  `Deprecation: true` and `Link: </api/v1/...>; rel="successor-version"`.
+  `/health`, `/metrics` and `/ws/scan-progress` remain unversioned.
+- The frontend sends all requests centrally via `/api/v1` (mapping in
+  `src/api.ts`, helper `apiUrl()`), including the map background image.
+- Auth exceptions (login, refresh, map background) apply to both
+  prefixes; Prometheus metrics combine `/api/x` and `/api/v1/x` into one series
+  (`/api/v1/x`).
+- Database fencing for the scan lock: every lock grant receives an
+  increasing fencing token; the database (`lease_fences`, migration 020)
+  rejects writes of a scan whose lock has since been granted
+  again. Metric `netmap_stale_lease_rejections_total`.
+- Vendor detection via sysObjectID respects OID boundaries (`1.3.6.1.4.1.9999`
+  is no longer Cisco); the longest prefix wins.
+- Review findings fixed: IP validation on credential update, protection against
+  CSV formula injection in the export, logout responds with 401 on an invalid token,
+  SNMP walks up to 10000 rows with a warning on truncation, credential profiles
+  once per scan, `last_seen` for devices reachable only via ping,
+  scheduler dispatch and rate limits via Redis instead of per worker.
+- Frontend: ETag cache as LRU, logs page with pagination (100 per page),
+  `VITE_API_TOKEN` removed, login alternatively with an access token.
+- Operations: `/docs`, `/redoc` and `/openapi.json` reachable via port 3000
+  (`OPENAPI_ENABLED`); `/health` no longer depends on Celery
+  (`/health?deep=1` checks the workers); more settings configurable via
+  Compose; audit log retention reads the setting from the database;
+  `docker-compose.ghcr.yml` for the published images; demo seeding
+  repaired. New docs `docs/API.md` and `docs/OPERATIONS.md`.
+- Cleanup: `bundle_debug.js`, `todo.md` and `fix_encoding.py` removed,
+  `migrate_sqlite_to_pg.py` now lives under `scripts/`; version numbers in
+  `frontend/package.json` and the OpenAPI description set to 2.2.0.
 
-## v2.1.2 -- Sitzungs-Sicherheit, Scan-Stabilitaet und UI-Polish
-
-**Type:** PATCH
-
-Commit `a5cbaa4`; ohne eigenen Tag, veroeffentlicht zusammen mit v2.2.0.
-
-### Fixes
-
-- JWT-Pruefungen akzeptieren bei ausgefallenem Redis keine moeglicherweise
-  widerrufenen Tokens mehr. Fehlgeschlagene Sitzungswiderrufe liefern einen
-  Fehler; Benutzer-Aenderungen und Loeschungen werden dann nicht gespeichert.
-- WebSocket-Authentifizierung funktioniert auch beim echten Handshake;
-  Einmal-Tickets werden atomar eingeloest und erneut auf Token-Gueltigkeit geprueft.
-- Die Authentifizierung verwendet den serverseitig erkannten Pfad statt einer
-  aus dem Host-Header rekonstruierten URL. FastAPI/Starlette wurden auf
-  0.138.1/1.7.0 aktualisiert; Frontend-Abhaengigkeiten erhalten kompatible Updates.
-- Redis speichert Token-Sperren im eigenen Volume mit AOF. Nginx verwirft
-  nicht vertrauenswuerdige Forwarding-Header und liefert Security-Header auch
-  fuer das SPA-Dokument und statische Dateien aus.
-- Logout loescht die lokale Sitzung sofort. Laufende Requests und Token-Refreshes
-  koennen Daten oder Zugangsdaten der vorherigen Sitzung nicht zurueckschreiben.
-  Der React-Query-Cache wird bei einem Sitzungswechsel geleert.
-- Scan-Sperren werden auch bei langen Einzelabfragen erneuert. Ignorierte
-  Geraete bleiben bei Voll- und Discovery-Scans ausgeschlossen. Abbruch verhindert
-  weitere wartende Ping-Abfragen und Credential-Versuche; abgebrochene Dry-Runs
-  behalten ihren Abbruchstatus.
-- Ausgeschoepfte Scan-Retries und fehlgeschlagene Queue-Uebergaben erhalten
-  einen Fehlerstatus statt dauerhaft als laufend oder wartend zu erscheinen.
-- Rack-Teilupdates pruefen Kollisionen mit unveraenderten Geraeten;
-  Verkleinern eines Racks darf keine belegten Hoeheneinheiten abschneiden.
-- Mobile Ansichten, Sidebar, Login, Dialoge und Karten-Werkzeugleiste erhalten
-  verbesserte Platzaufteilung, Beschriftungen und Tastaturbedienung.
-- Der veraltete SNMP-Treiber wurde auf PySNMP 7.1.30 mit pyasn1 0.6.4 und
-  pyasn1-modules 0.4.2 migriert. Die bekannten ASN.1-Sicherheitsmeldungen sind
-  beseitigt; GET/BULK, Credential-Fallbacks und V2c/V3 bleiben erhalten.
-- React Router 7.18.4, Vite 8.3.2 und Vitest 4.1.11 ersetzen die verwundbaren
-  Frontend-Abhaengigkeiten. Der Frontend-Build verwendet jetzt Node.js 24;
-  lokale Entwicklung benoetigt Node.js 22.12 oder eine unterstuetzte neuere Version.
-- GitHub prueft Python- und Node-Abhaengigkeiten sowie den Python-Code auf
-  Sicherheitsprobleme. Jeder gemeldete Dependency-Fund oder Scan-Fehler sperrt
-  Docker-Build und Image-Push; Bandit sperrt ab Schweregrad `medium`.
-- Bestehende WebSocket-Verbindungen werden auch bei Leerlauf oder dauerhaftem
-  Nachrichtenverkehr fuenf Sekunden nach der letzten erfolgreichen Pruefung
-  erneut auf Ablauf und Widerruf geprueft; die Pruefdauer kommt zum Intervall hinzu.
-- Bei verlorener Scan-Sperre werden laufende Targets abgebrochen und Transaktionen
-  vor Commit sowie nach dem Flush erneut geprueft. Abgebrochene Finalizer werden
-  vor dem Schliessen ihrer DB-Session abgewartet; Ping-Prozesse werden beendet.
-- Ein konfigurierter Redis-Ausfall aktiviert keine lokale Ersatzsperre mehr.
-  Verbindungs- und Antwortzeiten fuer Redis sind begrenzt.
-
-## v2.1.1 -- Offline-Erkennung bei Totalausfall
+## v2.1.2 -- Session security, scan stability and UI polish
 
 **Type:** PATCH
 
+Commit `a5cbaa4`; no separate tag, released together with v2.2.0.
+
 ### Fixes
 
-- Geraete, die waehrend eines Scans weder auf Ping noch auf SNMP antworten,
-  werden jetzt als `offline` markiert. Bisher blieb `ping_status` bei einem
-  Totalausfall ewig auf `online` stehen, weil das Geraet nicht mehr im
-  Update-Set des Scans auftauchte (`last_ping` wurde ebenfalls nicht
-  aktualisiert)
+- JWT checks no longer accept possibly revoked tokens when Redis is
+  down. Failed session revocations return an
+  error; user changes and deletions are then not saved.
+- WebSocket authentication also works during the real handshake;
+  one-time tickets are redeemed atomically and checked again for token validity.
+- Authentication uses the path detected on the server side instead of a
+  URL reconstructed from the Host header. FastAPI/Starlette were updated to
+  0.138.1/1.7.0; frontend dependencies receive compatible updates.
+- Redis stores token revocations in its own volume with AOF. Nginx discards
+  untrusted forwarding headers and also serves security headers
+  for the SPA document and static files.
+- Logout clears the local session immediately. Running requests and token refreshes
+  cannot write back data or credentials of the previous session.
+  The React Query cache is cleared on a session change.
+- Scan locks are also renewed during long individual queries. Ignored
+  devices stay excluded from full and discovery scans. Cancellation prevents
+  further pending ping queries and credential attempts; cancelled dry runs
+  keep their cancelled status.
+- Exhausted scan retries and failed queue handoffs receive
+  an error status instead of permanently appearing as running or waiting.
+- Partial rack updates check collisions with unchanged devices;
+  shrinking a rack must not cut off occupied rack units.
+- Mobile views, sidebar, login, dialogs and the map toolbar receive
+  improved space allocation, labels and keyboard operation.
+- The outdated SNMP driver was migrated to PySNMP 7.1.30 with pyasn1 0.6.4 and
+  pyasn1-modules 0.4.2. The known ASN.1 security advisories are
+  resolved; GET/BULK, credential fallbacks and V2c/V3 are kept.
+- React Router 7.18.4, Vite 8.3.2 and Vitest 4.1.11 replace the vulnerable
+  frontend dependencies. The frontend build now uses Node.js 24;
+  local development requires Node.js 22.12 or a supported newer version.
+- GitHub checks Python and Node dependencies as well as the Python code for
+  security issues. Every reported dependency finding or scan error blocks
+  Docker build and image push; Bandit blocks from severity `medium`.
+- Existing WebSocket connections are checked again for expiry and revocation
+  five seconds after the last successful check, also when idle or under
+  constant message traffic; the check duration is added to the interval.
+- When the scan lock is lost, running targets are cancelled and transactions
+  are checked again before commit and after flush. Cancelled finalizers are
+  awaited before their DB session is closed; ping processes are terminated.
+- A configured Redis outage no longer activates a local fallback lock.
+  Connection and response timeouts for Redis are limited.
 
-## v2.1.0 -- Firmware-Spalte & Code-Review-Haertung
+## v2.1.1 -- Offline detection on total failure
 
-**Type:** MINOR (neue Alembic-Migration 017, keine Breaking Changes)
+**Type:** PATCH
+
+### Fixes
+
+- Devices that respond neither to ping nor to SNMP during a scan
+  are now marked as `offline`. Previously `ping_status` stayed at `online`
+  forever on a total failure, because the device no longer appeared in the
+  update set of the scan (`last_ping` was not
+  updated either)
+
+## v2.1.0 -- Firmware column & code review hardening
+
+**Type:** MINOR (new Alembic migration 017, no breaking changes)
 
 ### Changes
 
 #### Features
 
-- Firmware-Version wird beim SNMP-Scan erfasst (entPhysicalSoftwareRev mit
-  entPhysicalFirmwareRev- und sysDescr-Parsing als Fallback) und als sortierbare,
-  durchsuchbare Spalte in der Geraetetabelle auf `/network` angezeigt
-- Migration 017: Backfill von `devices.firmware` NULLs plus Server-Default
+- Firmware version is captured during the SNMP scan (entPhysicalSoftwareRev with
+  entPhysicalFirmwareRev and sysDescr parsing as fallback) and shown as a sortable,
+  searchable column in the device table on `/network`
+- Migration 017: backfill of `devices.firmware` NULLs plus server default
 
 #### Fixes
 
 ##### Backend
 
-- Token-Sperrungen (Logout, Revoke-all) laufen jetzt bis ueber das
-  Refresh-Fenster hinaus -- widerrufene Tokens koennen nicht mehr erneuert werden
-- Rollenwechsel, Deaktivierung, Passwort-Aenderung und Loeschen sperren alle
-  Sessions des betroffenen Users sofort
-- WebSocket-Authentifizierung verhaelt sich wie die HTTP-Auth (kein
-  Legacy-Token, sobald JWT konfiguriert ist)
-- Scan-Lock wird waehrend des Scans und der DB-Finalisierung erneuert;
-  Scan-Fortschritt wird live broadcastet statt erst am Ende
-- `/api/config/export` erfordert admin/operator; Import loest `profile_label`
-  und `device_ip` auf und meldet FK-Fehler als 400 statt 500
-- SNMP-Communities werden verschluesselt gespeichert wie die v3-Passwoerter
-- Rate-Limiting sieht die echte Client-IP hinter nginx (Proxy-Headers);
-  `CORS_ORIGIN` per Env konfigurierbar
-- `DeviceOut` serialisiert abgelaufene ORM-Objekte und NULL-Felder robust
+- Token revocations (logout, revoke-all) now last beyond the
+  refresh window -- revoked tokens can no longer be renewed
+- Role change, deactivation, password change and deletion revoke all
+  sessions of the affected user immediately
+- WebSocket authentication behaves like HTTP auth (no
+  legacy token once JWT is configured)
+- Scan lock is renewed during the scan and the DB finalization;
+  scan progress is broadcast live instead of only at the end
+- `/api/config/export` requires admin/operator; import resolves `profile_label`
+  and `device_ip` and reports FK errors as 400 instead of 500
+- SNMP communities are stored encrypted like the v3 passwords
+- Rate limiting sees the real client IP behind nginx (proxy headers);
+  `CORS_ORIGIN` configurable via env
+- `DeviceOut` serializes expired ORM objects and NULL fields robustly
 
 ##### Frontend
 
-- Job-Polling behandelt `queued` als aktiven Status
-- Tabellen-Pagination bleibt bei Refetches erhalten
-- Settings-Formulare ueberschreiben ungespeicherte Eingaben nicht mehr
-- Karten-Hintergrund synchronisiert sich mit den Settings und nutzt Caching
-- IPv6-sichere `ip:port`-Schluessel; Drag-Positionen ueberstehen Refetches
-- Rack-Platzierungen werden auf die Rack-Hoehe begrenzt
-- Dev-Proxy leitet `/ws` weiter; CSP auf `'self'` verschaerft
+- Job polling treats `queued` as an active status
+- Table pagination is kept across refetches
+- Settings forms no longer overwrite unsaved input
+- Map background syncs with the settings and uses caching
+- IPv6-safe `ip:port` keys; drag positions survive refetches
+- Rack placements are limited to the rack height
+- Dev proxy forwards `/ws`; CSP tightened to `'self'`
 
-## v2.0.0 -- Frontend-Rework & Rack-Elevation
+## v2.0.0 -- Frontend rework & rack elevation
 
-**Type:** MAJOR (Breaking: neuer API-Endpunkt `/api/racks/{id}/layout`, neue DB-Spalten via Migration 015, UI komplett neu aufgebaut)
+**Type:** MAJOR (Breaking: new API endpoint `/api/racks/{id}/layout`, new DB columns via migration 015, UI completely rebuilt)
 
 ### Changes
 
 #### Features
 
-- Tailwind-Design-System mit Token-Theme: Dark-Theme als Standard, Light-Theme per Umschalter in der Sidebar
-- Neue App-Shell: einklappbare Sidebar, mobiler Drawer, Settings jetzt unter `/settings/:tab` als Sub-Routen
-- Dashboard ueberarbeitet: Scan-Hero, Stat-Cards mit Deep-Links, Attention-Card, Verteilungs- und Rack-Uebersicht
-- Topology-Map auf React Flow (@xyflow/react) + dagre: Auto-Layout fuer unpositionierte Knoten, Geraetesuche, Minimap, Zoom-Controls, 30s-Live-Refresh mit "aktualisiert vor Xs", aggregierte Link-Badges, einklappbare Rack-Gruppen, persistierte Rack-Positionen
-- Echte Rack-Ansicht unter `/racks`: U-Positionen (U1 unten), Drag-and-Drop mit Ghost-Vorschau, Tray fuer nicht zugeordnete Geraete, `u_height`-Stepper, Read-only fuer Viewer; Tastenkuerzel `7`
-- Inline-Endpoint-Liste pro Port im Port-Detail-Modal
-- DeviceTable/EndpointTable auf gemeinsamer DataTable mit URL-synchronisierten Filtern (`?q=`, `?status=down`); Logs-Seite mit React-Query-Polling
-- UI-Primitives (`src/components/ui/`) und TanStack-Query-Hooks (`src/hooks/api/`) als gemeinsame Basis
+- Tailwind design system with token theme: dark theme as default, light theme via toggle in the sidebar
+- New app shell: collapsible sidebar, mobile drawer, settings now under `/settings/:tab` as sub-routes
+- Dashboard reworked: scan hero, stat cards with deep links, attention card, distribution and rack overview
+- Topology map on React Flow (@xyflow/react) + dagre: auto-layout for unpositioned nodes, device search, minimap, zoom controls, 30s live refresh with "updated Xs ago", aggregated link badges, collapsible rack groups, persisted rack positions
+- Real rack view under `/racks`: U positions (U1 at the bottom), drag and drop with ghost preview, tray for unassigned devices, `u_height` stepper, read-only for viewers; keyboard shortcut `7`
+- Inline endpoint list per port in the port detail modal
+- DeviceTable/EndpointTable on a shared DataTable with URL-synchronized filters (`?q=`, `?status=down`); logs page with React Query polling
+- UI primitives (`src/components/ui/`) and TanStack Query hooks (`src/hooks/api/`) as a shared base
 
 #### Backend
 
-- Alembic-Migration 015 (`rack_units`): `Rack.height_u` (6..60, Default 42), `Device.rack_u_position`, `Device.u_height`
-- Neuer Endpunkt `PATCH /api/racks/{id}/layout`: Bulk-Update des U-Layouts; Fehler 409 `U_OVERLAP` / `U_POSITION_OUT_OF_RANGE`, 422 `DEVICE_NOT_IN_RACK`; Rollen admin/operator
-- `DeviceMetaUpdate` akzeptiert `rack_u_position` und `u_height`
-- Neue Tests `backend/tests/test_rack_layout.py` (9 Tests)
+- Alembic migration 015 (`rack_units`): `Rack.height_u` (6..60, default 42), `Device.rack_u_position`, `Device.u_height`
+- New endpoint `PATCH /api/racks/{id}/layout`: bulk update of the U layout; errors 409 `U_OVERLAP` / `U_POSITION_OUT_OF_RANGE`, 422 `DEVICE_NOT_IN_RACK`; roles admin/operator
+- `DeviceMetaUpdate` accepts `rack_u_position` and `u_height`
+- New tests `backend/tests/test_rack_layout.py` (9 tests)
 
 #### Fixes
 
-- Pan auf der Karte funktioniert auch ohne Hintergrundbild
-- Fehlerbehandlung auf der Endpoints-Seite
-- `alert()` durch Toast-Benachrichtigungen ersetzt
+- Panning on the map also works without a background image
+- Error handling on the endpoints page
+- `alert()` replaced by toast notifications
 
-_Hinweis: Commit-Referenzen werden beim Taggen des Releases ergaenzt._
+_Note: commit references will be added when the release is tagged._
 
 ## v1.16.0 -- Endpoint Table Separation
 

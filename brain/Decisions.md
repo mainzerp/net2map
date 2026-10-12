@@ -7,8 +7,8 @@
   owner, no double bookkeeping. (2026-10-06: `todo.md` removed in the repo cleanup.)
 - **Doc map.** `docs/README.md` created as the doc map. `docs/SubAgent/` keeps AI-agent
   ANALYSIS/PLAN working notes (session artifacts, not maintained user docs).
-  `README.md` and `BACKUP.md` stay German because they are user-facing; agent-facing
-  docs (brain, docs/README.md) are English; code and comments are always English.
+  Code and comments are always English. (2026-10-12: user-facing docs switched from
+  German to English as well, see "All documentation in English".)
 - **Verification commands** (must pass before a task is declared done):
   `ruff check backend/`, `cd backend && python -m pytest tests/ -v`,
   `cd frontend && npm run typecheck`, `cd frontend && npm test`.
@@ -283,3 +283,10 @@
   code: the ORM declares `server_default=now()`, the migrations never created it, so
   every scan run stored `created_at = NULL`. Old NULL rows stay NULL (real time
   unknown); `/scan-runs` sorts them last.
+
+## All documentation in English (2026-10-12)
+
+- **User-facing docs switched from German to English** (`README.md`, `VERSION.md`;
+  `BACKUP.md` and `docs/` already were): one language for every doc, matching the
+  code and the English UI. Release notes are English from now on; the history in
+  `VERSION.md` was translated in place.
