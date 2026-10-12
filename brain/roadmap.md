@@ -18,6 +18,15 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
+- Prebuilt images by default + local build override (released v3.3.0, 9ae8698) · priority: P2 · area: ci
+  Done: `docker-compose.yml` runs GHCR images (`NET2MAP_VERSION`, default `latest`),
+  `docker-compose.local.yml` builds the checkout under local image names, CI pushes
+  `<tag>` + `latest`, `NET2MAP_PORT`, `docker-compose.ghcr.yml` removed, demo files
+  git-ignored, all docs English. Passed: compose dry runs (prebuilt pulls 5 images,
+  local builds 5), real local build, CI YAML parse.
+  User to verify: after CI, `docker compose pull && docker compose up -d` on a fresh
+  checkout starts v3.3.0 without building; the local command still builds.
+
 - Demo data, screenshots, scan/worker fixes (released v3.2.1, bf3e5dd) · priority: P2 · area: full-stack
   Done: `seed_db.py` fills all pages + `--simulate-latency`; demo celery-beat
   scaled to 0; 14 screenshots in `docs/screenshots/` embedded in README; docs

@@ -1,5 +1,39 @@
 # Version History
 
+## v3.3.0 -- Prebuilt images by default, local build override
+
+**Type:** MINOR
+
+Released on 2026-10-12 as tag `v3.3.0` (images under
+`ghcr.io/mainzerp/net2map/backend` and `/frontend`, now also tagged `latest`).
+Commits `9ae8698`, `1f7e04e`, `96670e7`, `603e21f`, `e15e0f9`. No migration.
+Existing installations: `git pull`, then either `docker compose pull && docker
+compose up -d` (release images) or the local build command below. If you used
+`docker-compose.ghcr.yml`, drop the extra `-f` file; `NET2MAP_VERSION` keeps working.
+
+### Changes
+
+- `docker-compose.yml` runs the prebuilt GHCR images
+  `ghcr.io/mainzerp/net2map/{backend,frontend}:${NET2MAP_VERSION:-latest}` (public,
+  no login): `docker compose up -d` needs no build (`9ae8698`, `1f7e04e`).
+- New override `docker-compose.local.yml` builds the checkout:
+  `docker compose -f docker-compose.yml -f docker-compose.local.yml up --build -d`.
+  Local images are named `net2map-backend` / `net2map-frontend` and never replace
+  the pulled release images (`9ae8698`).
+- CI pushes `<tag>` and `latest` for every `v*` tag (`1f7e04e`, `9ae8698`).
+- New variable `NET2MAP_PORT` (default 3000) sets the UI host port (`9ae8698`).
+
+### Removed
+
+- `docker-compose.ghcr.yml`; its function is now the default (`96670e7`).
+- `docker-compose.demo.yml` and `backend/seed_db.py` are no longer part of the
+  repository; they only produced the README screenshots (`603e21f`).
+
+### Documentation
+
+- All documentation, including the release history, is now English; README notes
+  that the project is developed with AI assistance (`e15e0f9`, `1f7e04e`).
+
 ## v3.2.1 -- Scan timestamps, Celery imports, demo data and screenshots
 
 **Type:** PATCH
