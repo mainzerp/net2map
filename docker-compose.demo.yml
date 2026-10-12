@@ -7,6 +7,11 @@
 #   docker compose -p net2map-demo -f docker-compose.yml -f docker-compose.demo.yml exec backend python seed_db.py
 #   docker compose -p net2map-demo -f docker-compose.yml -f docker-compose.demo.yml down -v   # tear down incl. data
 #
+# Scheduled scans are off (celery-beat scaled to 0, seed sets the intervals to
+# 0; all seeded IPs are fake). The demo
+# latency-monitor runs the simulator from seed_db.py instead of ICMP probes; it
+# idles until the seed has created devices. Demo logins: see docs/OPERATIONS.md.
+#
 # Frontend: http://localhost:3200  (main instance stays on :3000)
 services:
   postgres:
@@ -30,10 +35,19 @@ services:
   celery-beat:
     image: net2map-backend
     container_name: net2map-demo-celery-beat
+    # No scheduled scans in the demo: every seeded IP is fake, and a beat started
+    # before the seed would dispatch scans that mark all devices offline.
+    # Manual scans still run through celery-worker.
+    scale: 0
 
   latency-monitor:
     image: net2map-backend
     container_name: net2map-demo-latency-monitor
+    # Simulated latency for the seeded (fake) devices instead of ICMP probes;
+    # replaces the base command (a scalar, so the override wins on merge).
+    command: python seed_db.py --simulate-latency
+    volumes:
+      - ./backend/seed_db.py:/app/seed_db.py:ro
 
   frontend:
     image: net2map-frontend
