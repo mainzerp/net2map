@@ -53,7 +53,10 @@ class TestDetectVendorOidBoundaries:
 
     def test_longer_enterprise_numbers_do_not_match(self):
         for prefix in VENDOR_OIDS:
-            assert detect_vendor("", prefix + "7.1") == "generic"
+            # A nested prefix (232.165 under 232) falls back to its parent root.
+            parents = [p for p in VENDOR_OIDS if p != prefix and oid_has_prefix(prefix, p)]
+            expected = VENDOR_OIDS[max(parents, key=len)] if parents else "generic"
+            assert detect_vendor("", prefix + "7.1") == expected
 
     def test_leading_dot_and_whitespace_normalized(self):
         assert detect_vendor("", " .1.3.6.1.4.1.9.1.1208 ") == "cisco"
@@ -65,6 +68,9 @@ class TestDetectVendorOidBoundaries:
             "fs": "1.3.6.1.4.1.52642.2.1.45.1",
             "unifi": "1.3.6.1.4.1.41112.1.6",
             "cisco": "1.3.6.1.4.1.9.1.1208",
+            "eaton": "1.3.6.1.4.1.534.1",
+            "hpe_ups": "1.3.6.1.4.1.232.165.3",
+            "hpe_ilo": "1.3.6.1.4.1.232.9.4.11",
         }
         assert set(representative) == set(VENDOR_OIDS.values())
         for vendor, oid in representative.items():
@@ -72,6 +78,38 @@ class TestDetectVendorOidBoundaries:
 
     def test_oid_takes_precedence_over_keywords(self):
         assert detect_vendor("Cisco IOS Software", "1.3.6.1.4.1.47196.1") == "aruba_cx"
+
+
+class TestDetectUpsAndServerVendors:
+    def test_eaton_enterprise_oid(self):
+        assert detect_vendor("Network Management Card", "1.3.6.1.4.1.534.6.6.7") == "eaton"
+
+    def test_mge_enterprise_oid_is_eaton(self):
+        assert detect_vendor("Network Management Card", "1.3.6.1.4.1.705.1") == "eaton"
+
+    def test_hpe_ups_branch_wins_over_server_root(self):
+        assert detect_vendor("UPS Network Module", "1.3.6.1.4.1.232.165.3") == "hpe_ups"
+
+    def test_hpe_server_management_oid(self):
+        assert detect_vendor("Integrated Lights-Out 5 2.72", "1.3.6.1.4.1.232.9.4.11") == "hpe_ilo"
+
+    def test_hp_root_11_still_not_mapped(self):
+        """HPE/Aruba switches live under .11: never classified as a server or UPS."""
+        assert detect_vendor("HP J9772A 2530-48G-PoE+", "1.3.6.1.4.1.11.2.3.7.11.153") == "generic"
+
+    def test_enterprise_2320_is_not_hpe(self):
+        assert detect_vendor("", "1.3.6.1.4.1.2320.1") == "generic"
+
+    def test_eaton_keyword(self):
+        assert detect_vendor("Eaton 5PX 1500 Network-M2", "") == "eaton"
+
+    def test_ilo_keywords(self):
+        assert detect_vendor("Integrated Lights-Out 6 1.55", "") == "hpe_ilo"
+        assert detect_vendor("HPE iLO 5", "") == "hpe_ilo"
+        assert detect_vendor("ProLiant DL380 Gen10", "") == "hpe_ilo"
+
+    def test_ilo_keyword_word_boundary(self):
+        assert detect_vendor("Philosophy appliance", "") == "generic"
 
 
 class TestOidHasPrefix:

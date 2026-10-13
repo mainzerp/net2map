@@ -174,6 +174,7 @@ def bulk_update_device_meta(body: BulkDeviceMetaUpdate, request: Request, db: Se
         updates["ignored"] = body.ignored
     if body.clear_rack:
         updates["rack_id"] = None
+        updates["rack_u_position"] = None
     elif body.rack_id is not None:
         if not db.query(RackModel).filter(RackModel.id == body.rack_id).first():
             api_error(404, "RACK_NOT_FOUND", "Rack not found")
@@ -248,6 +249,9 @@ def update_device_meta(
         device.model = payload["model"]
     if "rack_id" in payload:
         device.rack_id = payload["rack_id"]
+        if payload["rack_id"] is None:
+            # A device outside any rack has no elevation slot either.
+            device.rack_u_position = None
     if "class_id" in payload:
         device.class_id = payload["class_id"]
     if "model_id" in payload:
@@ -268,6 +272,8 @@ def update_device_meta(
         device.u_height = payload["u_height"]
     if "latency_monitored" in payload and payload["latency_monitored"] is not None:
         device.latency_monitored = payload["latency_monitored"]
+    if "device_type" in payload and payload["device_type"] is not None:
+        device.device_type = payload["device_type"]
 
     db.commit()
     db.refresh(device)

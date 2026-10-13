@@ -80,7 +80,7 @@ function SnmpProfilesTabContent({ newEntryTrigger }: SnmpProfilesTabContentProps
       }
     },
     onSuccess: () => {
-      invalidate(queryKeys.snmpProfiles);
+      invalidate(queryKeys.snmpProfiles, queryKeys.credentials);
       resetForm();
     },
     onError: (ex) => setErr(extractErrorMessage(ex)),
@@ -89,7 +89,7 @@ function SnmpProfilesTabContent({ newEntryTrigger }: SnmpProfilesTabContentProps
   const deleteMutation = useMutation({
     mutationFn: (id: number) => api.del(`/api/snmp-profiles/${id}`),
     onSuccess: () => {
-      invalidate(queryKeys.snmpProfiles);
+      invalidate(queryKeys.snmpProfiles, queryKeys.credentials);
       setDeleteTarget(null);
     },
     onError: (ex) => setErr(extractErrorMessage(ex)),

@@ -221,6 +221,33 @@ monitor in `latency_mode=selected`). Plus:
   root bridge), `is_root`. `null` when no STP data was collected. The raw
   `stp_*` device columns are input-only and excluded from the output.
 - `vlan_names: {vlan_id_string: name}`: always an object (empty when unknown).
+- `device_type`: `switch|firewall|ups|server` (default `switch`). Derived during a
+  scan from the detected vendor scanner (OPNsense `firewall`; Eaton / HPE UPS
+  `ups`; HPE iLO `server`; a generic device answering RFC 1628
+  `upsIdentManufacturer` `ups`). A generic switch fallback never overwrites a
+  stored type, so a manual correction via the meta PATCH survives; with
+  `vendor_override` set, only a still-default `switch` is upgraded by a confident
+  detection.
+- `health: object | null`: normalized SNMP health snapshot, collected on every
+  non-discovery scan of a UPS or server (a failed collection keeps the previous
+  snapshot). Every key is always present (`null` when not reported):
+  - UPS: `{kind: "ups", status, manufacturer, model, software, battery_status
+    (unknown|normal|low|depleted), seconds_on_battery, runtime_minutes,
+    charge_percent, battery_temperature_c, output_source (other|none|normal|bypass|
+    battery|booster|reducer|parallel_capacity|parallel_redundant|high_efficiency|
+    maintenance_bypass|energy_saver), load_percent (max over output lines),
+    input_voltage (first input line), alarms_present}`. Source: RFC 1628 UPS-MIB;
+    Eaton XUPS-MIB / HPE CPQPOWER-MIB fill missing runtime, charge, load, source
+    and ident values.
+  - Server: `{kind: "server", status, overall, thermal, power_supply, fans,
+    storage (each ok|degraded|failed|unknown), temperature_max_c,
+    temperature_sensors, product_name, serial_number, ilo_firmware}` from the HPE
+    CPQHLTH / CPQIDA / CPQSINFO / CPQSM2 MIBs.
+  - `status`: `ok|warning|critical|unknown`. UPS: critical when the battery is
+    depleted, no output source, or alarms with charge <= 20%; warning on battery,
+    battery low, bypass or any alarm. Server: critical when any subsystem failed,
+    warning when any is degraded.
+- `health_updated_at`: naive UTC timestamp of the snapshot, or null.
 
 ### PortOut
 
@@ -252,7 +279,7 @@ back on update mean "unchanged" and are never stored.
 ## Routers
 
 Infrastructure routes are listed first, then the API routers in `main.py` mount
-order. 20 router modules total (`health` and `ws` are unversioned).
+order. 21 router modules total (`health` and `ws` are unversioned).
 
 ### health (`routers/health.py`) -- unversioned
 
@@ -316,9 +343,27 @@ Physical racks and rack elevation layout.
 |---|---|---|---|---|
 | GET | `/racks` | any | List racks. | `RackOut[]` |
 | POST | `/racks` | op+ | Create (`height_u` 6..60, default 42). | `RackCreate` -> `RackOut` (201) |
-| PUT | `/racks/{rack_id}` | op+ | Update. | `RackUpdate` -> `RackOut` |
-| DELETE | `/racks/{rack_id}` | admin | Delete. | 204 |
-| PATCH | `/racks/{rack_id}/layout` | op+ | Set U positions/heights of devices in this rack. Omitted devices stay in place. Rejects duplicates and devices not in the rack (422), unknown devices (404), out-of-range placements and U overlaps (409 `U_POSITION_OUT_OF_RANGE`, `U_OVERLAP`). | `RackLayoutIn` `{entries: [{device_id, rack_u_position, u_height}]}` -> `{"updated": n}` |
+| PUT | `/racks/{rack_id}` | op+ | Update. A `height_u` that would exclude a placed device or a rack item -> 409 `U_POSITION_OUT_OF_RANGE`. | `RackUpdate` -> `RackOut` |
+| DELETE | `/racks/{rack_id}` | admin | Delete; detaches its devices and deletes its rack items. | 204 |
+| PATCH | `/racks/{rack_id}/layout` | op+ | Set U positions/heights of devices in this rack. Omitted devices stay in place. Rejects duplicates and devices not in the rack (422), unknown devices (404), out-of-range placements and U overlaps with other devices or rack items (409 `U_POSITION_OUT_OF_RANGE`, `U_OVERLAP`). | `RackLayoutIn` `{entries: [{device_id, rack_u_position, u_height}]}` -> `{"updated": n}` |
+
+### rack_items (`routers/rack_items.py`)
+
+Manually maintained rack placeholders (patch panels, blanks, cable managers,
+shelves) shown in the rack elevation. Placeholder only: no ports, no cabling,
+no IP, never scanned. `kind` is one of `patch_panel` (default), `blank`,
+`cable_manager`, `shelf`, `other`; `rack_u_position` is the 1-based bottom U
+(1..48) and `u_height` 1..60. Every placement must fit inside the rack
+(409 `U_POSITION_OUT_OF_RANGE`) and must not overlap placed devices or other
+items (409 `U_OVERLAP`). Writes bump the topology version and are audit-logged
+(`rack_item`).
+
+| Method | Path | Role | Description | Schema |
+|---|---|---|---|---|
+| GET | `/racks/{rack_id}/items` | any | List the rack's items, top to bottom. Unknown rack -> 404 `RACK_NOT_FOUND`. | `RackItemOut[]` |
+| POST | `/racks/{rack_id}/items` | op+ | Create an item. | `RackItemCreate` `{kind, label, rack_u_position, u_height, note}` -> `RackItemOut` (201) |
+| PATCH | `/rack-items/{item_id}` | op+ | Partial update; explicit null is ignored except for `note` (clears it). Unknown item -> 404 `RACK_ITEM_NOT_FOUND`. | `RackItemUpdate` -> `RackItemOut` |
+| DELETE | `/rack-items/{item_id}` | op+ | Delete an item. | 204 |
 
 ### switch_classes (`routers/switch_classes.py`)
 
@@ -381,7 +426,7 @@ version (invalidates the `GET /topology` ETag cache).
 | PATCH | `/topology/devices/{device_id}/position` | op+ | Persist drag-and-drop position. | `DevicePositionUpdate` `{map_x, map_y}` -> `DeviceOut` |
 | PATCH | `/topology/racks/{rack_id}/position` | op+ | Persist rack position on the map. | `RackPositionUpdate` -> `RackOut` |
 | PATCH | `/topology/devices/bulk-meta` | op+ | Bulk set `ignored`, `rack_id` / `clear_rack`, `class_id` (enforces `allow_outside_rack`). | `BulkDeviceMetaUpdate` -> `{"updated": n}` |
-| PATCH | `/topology/devices/{device_id}/meta` | op+ | Partial update of location, sys_name, vendor (sets `vendor_override`), model, rack/class/model ids, ignored, label, enabled, `rack_u_position` (null unplaces), `u_height`, `vendor_override`, `latency_monitored`. Audit-logged with the changed field names. | `DeviceMetaUpdate` -> `DeviceOut` |
+| PATCH | `/topology/devices/{device_id}/meta` | op+ | Partial update of location, sys_name, vendor (sets `vendor_override`), model, rack/class/model ids, ignored, label, enabled, `rack_u_position` (null unplaces), `u_height`, `vendor_override`, `latency_monitored`, `device_type` (`switch|firewall|ups|server`, other values 422). Audit-logged with the changed field names. | `DeviceMetaUpdate` -> `DeviceOut` |
 
 ### map_bg (`routers/map_bg.py`)
 

@@ -41,6 +41,7 @@ from pysnmp.proto.rfc1905 import EndOfMibView, NoSuchInstance, NoSuchObject
 # Vendor detection and pure parsing helpers live in pysnmp-free modules so
 # they stay unit-testable without pysnmp.
 from scanners.detection import detect_vendor
+from scanners.health import OID_UPS_IDENT_MANUFACTURER, collect_ups_health
 from scanners.parsing import _hex_to_mac, build_stp_info, parse_vlan_names, resolve_fdb_candidates
 
 log = logging.getLogger(__name__)
@@ -65,6 +66,9 @@ class Vendor(str, Enum):
     UNIFI = "unifi"
     OPNSENSE = "opnsense"
     CISCO = "cisco"
+    EATON = "eaton"
+    HPE_UPS = "hpe_ups"
+    HPE_ILO = "hpe_ilo"
     GENERIC = "generic"
 
 
@@ -228,6 +232,12 @@ class SwitchData:
     # collected in this scan; the caller then keeps the previously stored values.
     vlan_collected: bool = True
     stp_collected: bool = True
+    # Device kind from the vendor scanner ("switch" | "firewall" | "ups" |
+    # "server"); a generic device answering RFC 1628 UPS-MIB becomes "ups".
+    device_type: str = "switch"
+    # Normalized health snapshot (scanners.health) or None when the device
+    # reported none or health was not collected in this scan.
+    health: Optional[dict] = None
 
 
 # --- Credentials builder ------------------------------------------------------
@@ -738,6 +748,44 @@ async def _read_engine_id(ip: str, snmp_port: int, auth, snmp_timeout: int,
     return engine_id_to_hex(raw.get(OID_SNMP_ENGINE_ID))
 
 
+# --- Device type / health -----------------------------------------------------
+
+async def _probe_generic_ups(ip: str, snmp_port: int, auth, snmp_timeout: int,
+                             snmp_retries: int, engine: SnmpEngine) -> bool:
+    """Return True when a generic device answers RFC 1628 upsIdentManufacturer.
+
+    One GET, only issued for devices whose vendor resolved to "generic".
+    Never raises.
+    """
+    try:
+        values = await snmp_get(
+            ip, snmp_port, auth, OID_UPS_IDENT_MANUFACTURER,
+            timeout=snmp_timeout, retries=snmp_retries, engine=engine,
+        )
+    except Exception as exc:
+        log.debug("UPS-MIB probe failed for %s: %s", ip, exc)
+        return False
+    return bool((values.get(OID_UPS_IDENT_MANUFACTURER) or "").strip())
+
+
+async def _collect_health(sw: SwitchData, ip: str, snmp_port: int, auth, snmp_timeout: int,
+                          snmp_retries: int, engine: SnmpEngine) -> Optional[dict]:
+    """Collect the vendor scanner's health snapshot; None on any failure."""
+    async def _get(*oids: str):
+        return await snmp_get(ip, snmp_port, auth, *oids, timeout=snmp_timeout, retries=snmp_retries, engine=engine)
+
+    async def _walk(oid: str):
+        return await snmp_bulk_walk(ip, snmp_port, auth, oid, timeout=snmp_timeout, retries=snmp_retries, engine=engine)
+
+    try:
+        if sw.vendor == "generic" and sw.device_type == "ups":
+            return await collect_ups_health(_get, _walk)
+        return await get_scanner(sw.vendor).collect_health(_get, _walk)
+    except Exception as exc:
+        log.debug("Health collection failed for %s: %s", ip, exc)
+        return None
+
+
 # --- Spanning tree / VLAN names -----------------------------------------------
 
 async def _collect_stp_and_vlan_names(
@@ -955,6 +1003,11 @@ async def _scan_switch_inner(
     # -- 2. Vendor detection --------------------------------------------------
     sw.vendor = detect_vendor(sw.sys_descr, sys_oid)
     log.info("Detected vendor=%s for %s (%s)", sw.vendor, ip, sw.sys_name)
+    sw.device_type = get_scanner(sw.vendor).device_type()
+    if sw.vendor == "generic" and await _probe_generic_ups(
+        ip, snmp_port, auth, snmp_timeout, snmp_retries, engine,
+    ):
+        sw.device_type = "ups"
 
     # Fall back to parsing sysDescr when ENTITY-MIB is not implemented
     if not sw.firmware:
@@ -962,6 +1015,9 @@ async def _scan_switch_inner(
 
     if scan_mode == "discovery":
         return sw
+
+    # -- 2b. Health snapshot (UPS / server), best effort ------------------------
+    sw.health = await _collect_health(sw, ip, snmp_port, auth, snmp_timeout, snmp_retries, engine)
 
     # -- 3. Interface table ----------------------------------------------------
     # Status and speed change at runtime and are always walked. Names and
@@ -1075,20 +1131,28 @@ async def _scan_switch_inner(
         scanner = get_scanner(sw.vendor)
         fdb_strategy = scanner.fdb_strategy()
         fdb_oid = OID_QBRIDGE_FDB_PORT if fdb_strategy == "qbridge" else OID_DOT1D_TP_FDB_PORT
-        log.debug("FDB strategy for %s (vendor=%s): %s", ip, sw.vendor, fdb_strategy)
+        # Devices without a switching fabric (UPS, server management) have no
+        # FDB; only the ARP tables are walked for them.
+        wants_fdb = scanner.supports_fdb()
+        log.debug("FDB strategy for %s (vendor=%s): %s (fdb=%s)", ip, sw.vendor, fdb_strategy, wants_fdb)
+
+        async def _no_rows():
+            return []
 
         (arp_mac_rows, arp_ip_rows,
          base_port_rows, fdb_rows) = await asyncio.gather(
             snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_MAC, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
             snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_IP, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
-            snmp_bulk_walk(ip, snmp_port, auth, OID_DOT1D_BASE_PORT_IF_INDEX, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
-            snmp_bulk_walk(ip, snmp_port, auth, fdb_oid, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
+            snmp_bulk_walk(ip, snmp_port, auth, OID_DOT1D_BASE_PORT_IF_INDEX, timeout=snmp_timeout, retries=snmp_retries, engine=engine)
+            if wants_fdb else _no_rows(),
+            snmp_bulk_walk(ip, snmp_port, auth, fdb_oid, timeout=snmp_timeout, retries=snmp_retries, engine=engine)
+            if wants_fdb else _no_rows(),
         )
 
         # If the primary FDB walk returned nothing, retry with the alternate
         # OID -- some firmwares implement only one of dot1d / qbridge, and an
         # empty primary walk would otherwise silently lose all endpoints.
-        if not fdb_rows:
+        if not fdb_rows and wants_fdb:
             alt_oid = OID_DOT1D_TP_FDB_PORT if fdb_strategy == "qbridge" else OID_QBRIDGE_FDB_PORT
             log.info("Primary FDB walk (%s) empty for %s, trying alternate OID %s", fdb_strategy, ip, alt_oid)
             fdb_rows = await snmp_bulk_walk(

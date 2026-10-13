@@ -51,16 +51,25 @@ export function rangesOverlap(aPos: number, aHeight: number, bPos: number, bHeig
   return aPos <= bPos + bHeight - 1 && bPos <= aPos + aHeight - 1;
 }
 
+// A U range occupied by something other than a device (a rack item such as a
+// patch panel). Devices can never be dropped onto it.
+export interface UBlock {
+  pos: number;
+  uHeight: number;
+}
+
 // True when a device with the given extent can sit at pos: inside the rack and
-// not overlapping any other placement.
+// not overlapping any other placement or blocked range.
 export function placementValid(
   placements: Placement[],
   deviceId: number,
   pos: number,
   uHeight: number,
   heightU: number,
+  blocked: UBlock[] = [],
 ): boolean {
   if (!Number.isInteger(pos) || pos < 1 || pos + uHeight - 1 > heightU) return false;
+  if (blocked.some((b) => rangesOverlap(b.pos, b.uHeight, pos, uHeight))) return false;
   return !placements.some(
     (p) => p.deviceId !== deviceId && rangesOverlap(p.pos, p.uHeight, pos, uHeight),
   );
@@ -73,9 +82,47 @@ export function computeDropTarget(
   row: number,
   uHeight: number,
   heightU: number,
+  blocked: UBlock[] = [],
 ): DropTarget {
   const pos = posFromRow(heightU, row, uHeight);
-  return { pos, row, valid: placementValid(placements, deviceId, pos, uHeight, heightU) };
+  return { pos, row, valid: placementValid(placements, deviceId, pos, uHeight, heightU, blocked) };
+}
+
+// U ranges occupied by rack items, as blocked ranges for device placement.
+// Items that do not fit inside the rack are dropped like stale device rows.
+export function itemBlocks(
+  items: { id?: number; rack_u_position: number; u_height: number }[],
+  heightU: number,
+): (UBlock & { id?: number })[] {
+  return items
+    .map((i) => ({ id: i.id, pos: i.rack_u_position, uHeight: Math.max(1, i.u_height) }))
+    .filter((b) => b.pos >= 1 && b.pos + b.uHeight - 1 <= heightU);
+}
+
+// Validation message for placing a rack item at [pos, pos + uHeight - 1], or
+// null when the range is free. Mirrors the backend checks: inside the rack and
+// no overlap with placed devices or other items (excludeItemId = item being edited).
+export function itemPlacementError(
+  pos: number,
+  uHeight: number,
+  heightU: number,
+  placements: Placement[],
+  items: { id: number; rack_u_position: number; u_height: number }[],
+  excludeItemId: number | null = null,
+): string | null {
+  if (!Number.isInteger(pos) || !Number.isInteger(uHeight) || pos < 1 || uHeight < 1) {
+    return "U position and height must be positive whole numbers";
+  }
+  if (pos + uHeight - 1 > heightU) {
+    return `U${pos}-U${pos + uHeight - 1} does not fit in a ${heightU}U rack`;
+  }
+  if (placements.some((p) => rangesOverlap(p.pos, p.uHeight, pos, uHeight))) {
+    return "Overlaps a placed device";
+  }
+  if (items.some((i) => i.id !== excludeItemId && rangesOverlap(i.rack_u_position, i.u_height, pos, uHeight))) {
+    return "Overlaps another rack item";
+  }
+  return null;
 }
 
 // Full layout payload for PATCH /api/racks/{id}/layout.
@@ -103,9 +150,11 @@ export function placementsFromNodes(nodes: TopologyNode[], rackId: number, heigh
     .filter((p) => p.pos >= 1 && p.pos + p.uHeight - 1 <= h);
 }
 
-// Number of rack units occupied by placed devices.
-export function usedUnits(placements: Placement[]): number {
-  return placements.reduce((sum, p) => sum + p.uHeight, 0);
+// Number of rack units occupied by placed devices and blocked ranges.
+export function usedUnits(placements: Placement[], blocked: UBlock[] = []): number {
+  return (
+    placements.reduce((sum, p) => sum + p.uHeight, 0) + blocked.reduce((sum, b) => sum + b.uHeight, 0)
+  );
 }
 
 // Click-vs-drag threshold for faceplates and tray items: a press whose pointer

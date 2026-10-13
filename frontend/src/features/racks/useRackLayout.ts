@@ -1,7 +1,8 @@
 // ── Rack layout mutations + pointer-based drag-and-drop ─────────────────────
 // Placement moves inside a rack go to PATCH /api/racks/{id}/layout with the
 // full recomputed layout; rack membership changes (assign from the no-rack
-// tray, u_height edits) go to PATCH /api/topology/devices/{id}/meta.
+// tray, remove from the rack, u_height edits) go to
+// PATCH /api/topology/devices/{id}/meta.
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -17,6 +18,7 @@ import {
   placementsFromNodes,
   rackHeightU,
   type DropTarget,
+  type UBlock,
 } from "./rackLayout";
 
 interface LayoutContext {
@@ -119,6 +121,20 @@ export function useRackLayout(rackId: number) {
     onSettled,
   });
 
+  // Take a device out of the rack entirely (back to "No rack assigned"):
+  // explicit nulls clear both the rack membership and the U slot.
+  const removeMutation = useMutation({
+    mutationFn: async ({ device }: { device: TopologyNode }) => {
+      await api.patch(`/api/topology/devices/${device.id}/meta`, {
+        rack_id: null,
+        rack_u_position: null,
+      });
+    },
+    onMutate: ({ device }) => optimisticNodePatch(device.id, { rack_id: null, rack_u_position: null }),
+    onError: (ex, _vars, context) => onError(ex, context),
+    onSettled,
+  });
+
   // Change a device's U height.
   const heightMutation = useMutation({
     mutationFn: async ({ device, uHeight }: { device: TopologyNode; uHeight: number }) => {
@@ -147,12 +163,21 @@ export function useRackLayout(rackId: number) {
       heightMutation.mutate({ device, uHeight }),
     [heightMutation.mutate],
   );
+  const removeDevice = useCallback(
+    (device: TopologyNode) => removeMutation.mutate({ device }),
+    [removeMutation.mutate],
+  );
 
   return {
     moveDevice,
     assignDevice,
     setUHeight,
-    saving: moveMutation.isPending || assignMutation.isPending || heightMutation.isPending,
+    removeDevice,
+    saving:
+      moveMutation.isPending ||
+      assignMutation.isPending ||
+      heightMutation.isPending ||
+      removeMutation.isPending,
   };
 }
 
@@ -165,15 +190,23 @@ export interface RackDragState {
   pointer: { x: number; y: number };
   origin: { x: number; y: number }; // pointer position at pointerdown
   target: DropTarget | null; // null while the pointer is outside the rack body
+  // True while a placed device (source "rack") hovers the tray drop zone.
+  overTray: boolean;
 }
 
 interface UseRackDragOptions {
   rackId: number;
   heightU: number;
   nodes: TopologyNode[];
+  // U ranges occupied by rack items; drops onto them are invalid.
+  blocked?: UBlock[];
   bodyRef: RefObject<HTMLDivElement | null>;
+  // Tray area: releasing a placed device over it removes it from the rack.
+  trayRef?: RefObject<HTMLDivElement | null>;
   readOnly: boolean;
   onDrop: (device: TopologyNode, source: "rack" | "tray", pos: number, uHeight: number) => void;
+  // Called when a placed device is released over the tray (trayRef).
+  onRemove?: (device: TopologyNode) => void;
   // Called instead of a drop when the press moved less than the click
   // threshold (see isClickGesture), e.g. to open the inspector.
   onClick?: (device: TopologyNode, source: "rack" | "tray") => void;
@@ -182,7 +215,29 @@ interface UseRackDragOptions {
 // Pointer-event drag-and-drop: grab a faceplate or tray item, preview a ghost
 // snapped to the U grid (red when invalid), commit on release. A release
 // within CLICK_MOVE_THRESHOLD_PX of the press point is a click, not a drop.
-export function useRackDrag({ rackId, heightU, nodes, bodyRef, readOnly, onDrop, onClick }: UseRackDragOptions) {
+// A placed device released over the tray is removed from the rack; a release
+// anywhere else outside the rack cancels.
+const NO_BLOCKS: UBlock[] = [];
+
+function pointInside(el: HTMLElement | null | undefined, x: number, y: number): boolean {
+  if (!el) return false;
+  const rect = el.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return false;
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
+
+export function useRackDrag({
+  rackId,
+  heightU,
+  nodes,
+  blocked = NO_BLOCKS,
+  bodyRef,
+  trayRef,
+  readOnly,
+  onDrop,
+  onRemove,
+  onClick,
+}: UseRackDragOptions) {
   const [drag, setDrag] = useState<RackDragState | null>(null);
   const dragRef = useRef<RackDragState | null>(null);
   dragRef.current = drag;
@@ -198,6 +253,7 @@ export function useRackDrag({ rackId, heightU, nodes, bodyRef, readOnly, onDrop,
         pointer: { x: e.clientX, y: e.clientY },
         origin: { x: e.clientX, y: e.clientY },
         target: null,
+        overTray: false,
       });
     },
     [readOnly],
@@ -231,10 +287,17 @@ export function useRackDrag({ rackId, heightU, nodes, bodyRef, readOnly, onDrop,
             row,
             uHeight,
             heightU,
+            blocked,
           );
         }
       }
-      setDrag((d) => (d ? { ...d, pointer: { x: e.clientX, y: e.clientY }, target } : d));
+      // The rack body wins over the tray; only placed devices can be dropped
+      // onto the tray (tray items are already out of the elevation).
+      const overTray =
+        target == null &&
+        dragRef.current?.source === "rack" &&
+        pointInside(trayRef?.current, e.clientX, e.clientY);
+      setDrag((d) => (d ? { ...d, pointer: { x: e.clientX, y: e.clientY }, target, overTray } : d));
     }
 
     function onUp(e: PointerEvent) {
@@ -247,6 +310,8 @@ export function useRackDrag({ rackId, heightU, nodes, bodyRef, readOnly, onDrop,
       }
       if (current?.target?.valid) {
         onDrop(current.device, current.source, current.target.pos, current.uHeight);
+      } else if (current && e.type === "pointerup" && current.overTray) {
+        onRemove?.(current.device);
       }
       setDrag(null);
     }
@@ -259,7 +324,7 @@ export function useRackDrag({ rackId, heightU, nodes, bodyRef, readOnly, onDrop,
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
     };
-  }, [drag != null, nodes, rackId, heightU, bodyRef, onDrop, onClick]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [drag != null, nodes, blocked, rackId, heightU, bodyRef, trayRef, onDrop, onRemove, onClick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { drag, startDrag };
 }

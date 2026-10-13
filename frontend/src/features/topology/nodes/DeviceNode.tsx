@@ -1,9 +1,18 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { BatteryCharging, Server, type LucideIcon } from "lucide-react";
 import { StatusDot } from "../../../components/ui";
 import VendorBadge from "../../../components/map/VendorBadge";
 import { VENDOR_COLOR, speedColor } from "../../../theme/visual";
-import type { PortInfo } from "../../../types";
+import type { DeviceType, PortInfo } from "../../../types";
+import {
+  DEVICE_TYPE_LABEL,
+  HEALTH_STATUS_LABEL,
+  deviceTypeOf,
+  healthOf,
+  healthStatusBg,
+  isPowerOrServer,
+} from "../../../utils/deviceHealth";
 import { useScanPulse, useZoomTier } from "../zoomTier";
 import type { DeviceFlowNode } from "../flowTypes";
 import OverlayBadges from "./OverlayBadges";
@@ -19,6 +28,9 @@ const handleStyle: React.CSSProperties = { opacity: 0, pointerEvents: "none" };
 
 // Upper bound for the mini port strip; larger chassis show the first ports.
 export const PORT_STRIP_MAX = 52;
+
+// Type icon next to the vendor badge; switches and firewalls need none.
+const TYPE_ICON: Partial<Record<DeviceType, LucideIcon>> = { ups: BatteryCharging, server: Server };
 
 function pingToStatus(ping: string | undefined): "up" | "down" | "unknown" {
   if (ping === "online") return "up";
@@ -71,6 +83,10 @@ function DeviceNode({ data, selected }: NodeProps<DeviceFlowNode>) {
   const totalPorts = ports.length;
   const activePorts = ports.filter(p => p.oper_status === 1).length;
   const name = device.sys_name || device.ip;
+  const deviceType = deviceTypeOf(device);
+  const powerOrServer = isPowerOrServer(device);
+  const health = healthOf(device);
+  const TypeIcon = TYPE_ICON[deviceType];
 
   return (
     <div
@@ -90,6 +106,15 @@ function DeviceNode({ data, selected }: NodeProps<DeviceFlowNode>) {
       />
       <div className="flex items-center gap-2 min-w-0">
         <VendorBadge vendor={device.vendor} className="topo-detail" />
+        {TypeIcon && (
+          <TypeIcon
+            size={12}
+            strokeWidth={1.75}
+            className="shrink-0 text-muted"
+            aria-label={DEVICE_TYPE_LABEL[deviceType]}
+            data-testid="node-type-icon"
+          />
+        )}
         <span
           className={`topo-node-label text-[12px] font-semibold truncate ${selected ? "text-accent" : "text-primary"}`}
           title={name}
@@ -105,11 +130,24 @@ function DeviceNode({ data, selected }: NodeProps<DeviceFlowNode>) {
         {pingStatus === "online" && device.ping_rtt_ms != null && (
           <span className="shrink-0">{device.ping_rtt_ms}ms</span>
         )}
-        <span className="ml-auto shrink-0">
-          {activePorts}/{totalPorts}
-        </span>
+        {powerOrServer ? (
+          health && (
+            <span
+              className="ml-auto shrink-0 inline-flex items-center gap-1"
+              title={`Health: ${HEALTH_STATUS_LABEL[health.status] ?? health.status}`}
+              data-testid="node-health"
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${healthStatusBg(health.status)}`} />
+              {health.kind === "ups" && health.charge_percent != null ? `${health.charge_percent}%` : null}
+            </span>
+          )
+        ) : (
+          <span className="ml-auto shrink-0">
+            {activePorts}/{totalPorts}
+          </span>
+        )}
       </div>
-      {tier === "close" && <PortStrip ports={ports} />}
+      {tier === "close" && !powerOrServer && <PortStrip ports={ports} />}
     </div>
   );
 }

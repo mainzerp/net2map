@@ -53,7 +53,7 @@ function RacksTabContent({ newEntryTrigger }: RacksTabContentProps) {
   };
 
   const invalidateRacks = () => {
-    invalidate(queryKeys.racks, queryKeys.devices, queryKeys.topology);
+    invalidate(queryKeys.racks, queryKeys.devices, queryKeys.topology, queryKeys.stats);
   };
 
   const saveMutation = useMutation({

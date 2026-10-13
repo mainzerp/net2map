@@ -66,6 +66,27 @@ class Rack(Base):
     updated_at  = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     devices = relationship("Device", back_populates="rack")
+    items   = relationship("RackItem", back_populates="rack", cascade="all, delete-orphan")
+
+
+class RackItem(Base):
+    """Manually maintained placeholder in a rack elevation (patch panel, blank, ...).
+
+    Never scanned and without ports or cabling: it only occupies U space.
+    """
+    __tablename__ = "rack_items"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    rack_id         = Column(Integer, ForeignKey("racks.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind            = Column(String, nullable=False, default="patch_panel", server_default="patch_panel")
+    label           = Column(String, nullable=False, default="", server_default="")
+    rack_u_position = Column(Integer, nullable=False)   # 1-based bottom U
+    u_height        = Column(Integer, nullable=False, default=1, server_default="1")
+    note            = Column(Text, nullable=True)
+    created_at      = Column(DateTime, server_default=func.now())
+    updated_at      = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    rack = relationship("Rack", back_populates="items")
 
 
 class SwitchClass(Base):
@@ -220,6 +241,14 @@ class Device(Base):
     # spanning tree data; MAC scans re-walk them once their interval passed.
     vlan_at       = Column(DateTime, nullable=True)
     stp_at        = Column(DateTime, nullable=True)
+
+    # Device kind derived from the detected vendor scanner during a scan:
+    # "switch" | "firewall" | "ups" | "server". Editable via the meta PATCH.
+    device_type   = Column(String(16), nullable=False, default="switch", server_default="switch")
+    # Normalized health snapshot (see scanners.health), NULL when the device
+    # reports none; health_updated_at is the collection time (naive UTC).
+    health            = Column(JSONB, nullable=True)
+    health_updated_at = Column(DateTime, nullable=True)
 
     ports        = relationship("Port", back_populates="device", cascade="all, delete-orphan", lazy="selectin")
     rack         = relationship("Rack", back_populates="devices", lazy="joined")

@@ -111,6 +111,33 @@ def test_update_device_meta_does_not_sync_credential(client, auth_headers, db):
     assert not hasattr(cred, "rack_id") or not hasattr(cred, "class_id")
 
 
+def test_update_device_meta_rack_only_preserves_class(client, auth_headers, db):
+    """PATCH meta with only rack_id must not clear an existing class_id."""
+    old_rack = RackModel(label="KeepClassRackOld", room="Room K")
+    new_rack = RackModel(label="KeepClassRackNew", room="Room K")
+    db.add_all([old_rack, new_rack])
+    db.flush()
+
+    sc = SwitchClassModel(label="KeepClass", color="#00ff00", allow_outside_rack=False)
+    db.add(sc)
+    db.flush()
+
+    dev = Device(sys_name="keep-class-sw", ip="10.0.0.51", vendor="generic", rack_id=old_rack.id, class_id=sc.id)
+    db.add(dev)
+    db.commit()
+
+    r = client.patch(
+        f"/api/topology/devices/{dev.id}/meta",
+        json={"rack_id": new_rack.id},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+
+    db.refresh(dev)
+    assert dev.rack_id == new_rack.id
+    assert dev.class_id == sc.id
+
+
 def test_bulk_update_device_meta_does_not_sync_credentials(client, auth_headers, db):
     """PATCH /api/topology/devices/bulk-meta does NOT modify Credential."""
     rack = RackModel(label="BulkRack", room="Room C")
@@ -217,6 +244,91 @@ def test_bulk_meta_clear_rack_unassigns_devices(client, auth_headers, db):
 
     db.refresh(dev)
     assert dev.rack_id is None
+
+
+def test_bulk_meta_clear_rack_clears_u_position(client, auth_headers, db):
+    rack = RackModel(label="ClearRackPos", room="Room X")
+    db.add(rack)
+    db.flush()
+    dev = Device(sys_name="bm-sw-pos", ip="10.8.1.13", vendor="generic", rack_id=rack.id, rack_u_position=4)
+    db.add(dev)
+    db.commit()
+
+    r = client.patch(
+        "/api/topology/devices/bulk-meta",
+        json={"device_ids": [dev.id], "clear_rack": True},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+
+    db.refresh(dev)
+    assert dev.rack_id is None
+    assert dev.rack_u_position is None
+
+
+def test_update_device_meta_clear_rack_clears_u_position(client, auth_headers, db):
+    """Clearing rack_id alone must also drop the elevation slot."""
+    rack = RackModel(label="RemoveFromRack", room="Room R")
+    db.add(rack)
+    db.flush()
+    dev = Device(sys_name="rm-rack-sw", ip="10.8.1.20", vendor="generic", rack_id=rack.id, rack_u_position=7)
+    db.add(dev)
+    db.commit()
+
+    r = client.patch(
+        f"/api/topology/devices/{dev.id}/meta",
+        json={"rack_id": None},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    assert r.json()["rack_id"] is None
+
+    db.refresh(dev)
+    assert dev.rack_id is None
+    assert dev.rack_u_position is None
+
+
+def test_update_device_meta_explicit_null_rack_and_position(client, auth_headers, db):
+    """The rack elevation's remove action sends both fields as null."""
+    rack = RackModel(label="RemoveFromRackBoth", room="Room R")
+    db.add(rack)
+    db.flush()
+    dev = Device(sys_name="rm-rack-sw2", ip="10.8.1.21", vendor="generic", rack_id=rack.id, rack_u_position=3)
+    db.add(dev)
+    db.commit()
+
+    r = client.patch(
+        f"/api/topology/devices/{dev.id}/meta",
+        json={"rack_id": None, "rack_u_position": None},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+
+    db.refresh(dev)
+    assert dev.rack_id is None
+    assert dev.rack_u_position is None
+
+
+def test_update_device_meta_rack_change_sets_u_position(client, auth_headers, db):
+    """Assigning another rack with a position stores both (no implicit clear)."""
+    old_rack = RackModel(label="MoveRackOld", room="Room R")
+    new_rack = RackModel(label="MoveRackNew", room="Room R")
+    db.add_all([old_rack, new_rack])
+    db.flush()
+    dev = Device(sys_name="mv-rack-sw", ip="10.8.1.22", vendor="generic", rack_id=old_rack.id, rack_u_position=5)
+    db.add(dev)
+    db.commit()
+
+    r = client.patch(
+        f"/api/topology/devices/{dev.id}/meta",
+        json={"rack_id": new_rack.id, "rack_u_position": 9},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+
+    db.refresh(dev)
+    assert dev.rack_id == new_rack.id
+    assert dev.rack_u_position == 9
 
 
 def test_bulk_meta_strict_class_rejects_unracked_devices(client, auth_headers, db):

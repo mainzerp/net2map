@@ -5,6 +5,7 @@ export { useStats, type Stats } from "./useStats";
 export { useDevices } from "./useDevices";
 export { useEndpoints } from "./useEndpoints";
 export { useRacks } from "./useRacks";
+export { useRackItems, useCreateRackItem, useUpdateRackItem, useDeleteRackItem } from "./useRackItems";
 export { useLogs, type LogEntry, type LogsParams } from "./useLogs";
 export { useSnmpProfiles } from "./useSnmpProfiles";
 export { useCredentials } from "./useCredentials";

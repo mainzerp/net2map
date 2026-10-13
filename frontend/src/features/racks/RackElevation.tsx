@@ -10,18 +10,32 @@
 // index.css; all colors come from theme tokens or theme/visual.ts.
 
 import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { Plus, X } from "lucide-react";
 import { speedColor } from "../../theme/visual";
-import { Badge, StatusDot } from "../../components/ui";
+import { Badge, Button, StatusDot } from "../../components/ui";
 import VendorBadge from "../../components/map/VendorBadge";
-import type { PortInfo, RackInfo, TopologyNode } from "../../types";
+import { useRackItems } from "../../hooks/api";
+import type { PortInfo, RackInfo, RackItem, TopologyNode } from "../../types";
+import {
+  HEALTH_STATUS_LABEL,
+  clampPercent,
+  deviceTypeOf,
+  formatRuntime,
+  healthOf,
+  healthStatusBg,
+  isPowerOrServer,
+} from "../../utils/deviceHealth";
 import {
   U_PX,
   deviceUHeight,
+  itemBlocks,
   placementsFromNodes,
   rackHeightU,
+  rangesOverlap,
   rowFromTop,
   usedUnits,
 } from "./rackLayout";
+import RackItemDialog, { rackItemKindLabel } from "./RackItemDialog";
 import {
   activityTiming,
   layoutPortSockets,
@@ -257,6 +271,75 @@ const PortBlock = memo(function PortBlock({
   );
 });
 
+// ── Health strip (UPS / server without a meaningful port block) ─────────────
+// UPS: battery charge bar plus charge / runtime; server: condition dot plus
+// status and the hottest sensor. Falls back to a muted hint without data.
+export function HealthStrip({ device }: { device: TopologyNode }) {
+  const health = healthOf(device);
+  const kind = deviceTypeOf(device);
+  if (!health) {
+    return (
+      <div data-testid="health-strip" data-kind={kind} className="flex-1 min-w-0 flex items-center justify-end">
+        <span className="text-[9px] text-muted truncate">No health data</span>
+      </div>
+    );
+  }
+  const statusLabel = HEALTH_STATUS_LABEL[health.status] ?? HEALTH_STATUS_LABEL.unknown;
+  if (health.kind === "ups") {
+    const charge = health.charge_percent;
+    const runtime = formatRuntime(health.runtime_minutes);
+    const title = [
+      `UPS ${statusLabel}`,
+      charge != null ? `charge ${charge}%` : null,
+      runtime ? `runtime ${runtime}` : null,
+      health.load_percent != null ? `load ${health.load_percent}%` : null,
+    ].filter(Boolean).join(", ");
+    return (
+      <div
+        data-testid="health-strip"
+        data-kind="ups"
+        data-status={health.status}
+        title={title}
+        className="flex-1 min-w-0 flex items-center gap-1.5 justify-end"
+      >
+        <div
+          className="h-1.5 w-full max-w-24 rounded-full bg-panel-2 border border-line overflow-hidden"
+          role="img"
+          aria-label={charge != null ? `Battery charge ${charge}%` : "Battery charge unknown"}
+        >
+          <div
+            data-testid="health-charge-bar"
+            className={`h-full ${healthStatusBg(health.status)}`}
+            style={{ width: `${clampPercent(charge)}%` }}
+          />
+        </div>
+        <span className="text-[9px] font-mono tabular-nums text-muted shrink-0">
+          {charge != null ? `${charge}%` : "-"}
+          {runtime ? ` ${runtime}` : ""}
+        </span>
+      </div>
+    );
+  }
+  const temp = health.temperature_max_c != null ? `${health.temperature_max_c} C` : "";
+  return (
+    <div
+      data-testid="health-strip"
+      data-kind="server"
+      data-status={health.status}
+      title={`Server ${statusLabel}${temp ? `, max ${temp}` : ""}`}
+      className="flex-1 min-w-0 flex items-center gap-1.5 justify-end"
+    >
+      <span
+        data-testid="health-condition-dot"
+        className={`w-2 h-2 rounded-full shrink-0 ${healthStatusBg(health.status)}`}
+        aria-hidden="true"
+      />
+      <span className="text-[9px] text-muted truncate">{statusLabel}</span>
+      {temp && <span className="text-[9px] font-mono tabular-nums text-muted shrink-0">{temp}</span>}
+    </div>
+  );
+}
+
 // ── Rack ear with two screws ────────────────────────────────────────────────
 function RackEar({ side }: { side: "left" | "right" }) {
   return (
@@ -296,6 +379,10 @@ function RackRail({ side, rows }: { side: "left" | "right"; rows: number[] }) {
 }
 
 // ── U height stepper ─────────────────────────────────────────────────────────
+// Upper bound of the stepper: tall enough for tower UPS units and 4U+ servers
+// (the API accepts up to 60).
+export const MAX_DEVICE_U = 10;
+
 function UHeightControl({
   device,
   heightU,
@@ -308,7 +395,7 @@ function UHeightControl({
   onChange: (uHeight: number) => void;
 }) {
   const uHeight = deviceUHeight(device);
-  const max = Math.min(4, heightU);
+  const max = Math.min(MAX_DEVICE_U, heightU);
   const btn =
     "w-3.5 h-3.5 inline-flex items-center justify-center rounded-[3px] border border-line-strong bg-panel text-muted hover:text-primary hover:border-accent disabled:opacity-30 disabled:hover:text-muted disabled:hover:border-line-strong cursor-pointer disabled:cursor-default text-[10px] leading-none";
   return (
@@ -338,6 +425,40 @@ function UHeightControl({
 
 function deviceName(device: TopologyNode): string {
   return device.sys_name || device.hostname || device.ip;
+}
+
+// ── Remove-from-rack button ─────────────────────────────────────────────────
+// Non-drag alternative to dropping a device onto the tray. On faceplates it
+// only shows on hover/focus (reveal=true) to keep the plate uncluttered.
+function RemoveFromRackButton({
+  device,
+  reveal = false,
+  onRemove,
+}: {
+  device: TopologyNode;
+  reveal?: boolean;
+  onRemove: () => void;
+}) {
+  const name = deviceName(device);
+  return (
+    <button
+      type="button"
+      data-testid={`remove-from-rack-${device.id}`}
+      aria-label={`Remove ${name} from rack`}
+      title="Remove from rack"
+      onPointerDown={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        onRemove();
+      }}
+      className={`w-3.5 h-3.5 shrink-0 inline-flex items-center justify-center rounded-[3px] border border-line-strong bg-panel text-muted hover:text-danger hover:border-danger cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent ${
+        reveal ? "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100" : ""
+      }`}
+    >
+      <X size={10} strokeWidth={2} aria-hidden="true" />
+    </button>
+  );
 }
 
 // Height of the rack cap above the rails; the label column is offset by it so
@@ -420,6 +541,7 @@ function Faceplate({
   activity,
   highlighted,
   onHighlight,
+  onRemove,
 }: {
   device: TopologyNode;
   readOnly: boolean;
@@ -429,6 +551,8 @@ function Faceplate({
   onUHeight: (uHeight: number) => void;
   onOpen: () => void;
   activity: boolean;
+  // Remove the device from the rack; omitted (no button) in read-only mode.
+  onRemove?: () => void;
   // Shared hover/focus highlight with the device's label in the label column.
   highlighted: boolean;
   onHighlight: (on: boolean) => void;
@@ -468,7 +592,7 @@ function Faceplate({
           onOpen();
         }
       }}
-      className={`rack-plate flex items-stretch h-full w-full rounded-[2px] border overflow-hidden select-none transition-colors duration-[120ms] motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent ${border} ${
+      className={`rack-plate group flex items-stretch h-full w-full rounded-[2px] border overflow-hidden select-none transition-colors duration-[120ms] motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent ${border} ${
         readOnly ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"
       } ${dragging ? "opacity-40" : ""}`}
       style={{ touchAction: "none" }}
@@ -483,17 +607,174 @@ function Faceplate({
           title={ledTitle}
           className={`rack-status-led rack-status-led-${status}`}
         />
-        <PortBlock
-          deviceId={device.id}
-          ports={device.ports}
-          totalPorts={device.total_ports}
-          activity={activity}
-        />
+        {/* UPS / server: the health strip replaces an empty port block, and
+            also a management port block once a health snapshot exists. */}
+        {isPowerOrServer(device) && ((device.ports?.length ?? 0) === 0 || healthOf(device)) ? (
+          <HealthStrip device={device} />
+        ) : (
+          <PortBlock
+            deviceId={device.id}
+            ports={device.ports}
+            totalPorts={device.total_ports}
+            activity={activity}
+          />
+        )}
         <UHeightControl device={device} heightU={heightU} readOnly={readOnly} onChange={onUHeight} />
+        {!readOnly && onRemove && <RemoveFromRackButton device={device} reveal onRemove={onRemove} />}
       </div>
       <RackEar side="right" />
     </div>
   );
+}
+
+// ── Rack item faceplate (manual placeholder) ────────────────────────────────
+// Muted, dashed plate without status LED or live ports: a patch panel shows a
+// row of dimmed port-like squares per U (at most two rows), a cable manager a
+// row of slots, a shelf a tray lip; blank and other plates stay plain. Items
+// are not draggable; a click opens the item dialog.
+const PATCH_PANEL_PORTS = 24;
+const CABLE_MANAGER_SLOTS = 10;
+
+function RackItemFace({ item }: { item: RackItem }) {
+  if (item.kind === "patch_panel") {
+    const rows = Math.min(2, Math.max(1, item.u_height));
+    return (
+      <div data-testid="rack-item-ports" className="flex flex-col justify-center gap-px flex-1 min-w-0 overflow-hidden">
+        {Array.from({ length: rows }, (_, r) => (
+          <div key={r} className="flex gap-px justify-center">
+            {Array.from({ length: PATCH_PANEL_PORTS }, (_, i) => (
+              <span
+                key={i}
+                aria-hidden="true"
+                className="w-2 h-2 rounded-[1px] border border-line-strong bg-surface opacity-70"
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (item.kind === "cable_manager") {
+    return (
+      <div className="flex items-center justify-center gap-1 flex-1 min-w-0 overflow-hidden">
+        {Array.from({ length: CABLE_MANAGER_SLOTS }, (_, i) => (
+          <span key={i} aria-hidden="true" className="w-5 h-2 rounded-full border border-line-strong bg-surface opacity-70" />
+        ))}
+      </div>
+    );
+  }
+  if (item.kind === "shelf") {
+    return (
+      <div className="flex items-end flex-1 min-w-0 pb-0.5">
+        <span aria-hidden="true" className="h-1 w-full rounded-[1px] bg-line-strong opacity-70" />
+      </div>
+    );
+  }
+  return <div className="flex-1 min-w-0" />;
+}
+
+function RackItemPlate({
+  item,
+  readOnly,
+  highlighted,
+  onHighlight,
+  onOpen,
+}: {
+  item: RackItem;
+  readOnly: boolean;
+  highlighted: boolean;
+  onHighlight: (on: boolean) => void;
+  onOpen: () => void;
+}) {
+  const name = item.label || rackItemKindLabel(item.kind);
+  const action = readOnly ? "view details" : "edit";
+  return (
+    <div
+      data-testid={`rack-item-${item.id}`}
+      data-kind={item.kind}
+      role="button"
+      tabIndex={0}
+      aria-label={`${name} (${rackItemKindLabel(item.kind)}) - ${action}`}
+      title={item.note ? `${name} - ${item.note}` : name}
+      onClick={onOpen}
+      onMouseEnter={() => onHighlight(true)}
+      onMouseLeave={() => onHighlight(false)}
+      onFocus={() => onHighlight(true)}
+      onBlur={() => onHighlight(false)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && e.target === e.currentTarget) {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+      className={`flex items-stretch h-full w-full rounded-[2px] border border-dashed bg-panel-2 overflow-hidden select-none cursor-pointer transition-colors duration-[120ms] motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent ${
+        highlighted ? "border-accent" : "border-line-strong hover:border-accent"
+      }`}
+    >
+      <RackEar side="left" />
+      <div className="flex items-stretch gap-1.5 px-1.5 py-px flex-1 min-w-0">
+        <RackItemFace item={item} />
+      </div>
+      <RackEar side="right" />
+    </div>
+  );
+}
+
+// Annotation for a rack item in the label column, styled like a device label
+// but muted (kind instead of model, no vendor badge).
+function RackItemLabel({
+  item,
+  top,
+  highlighted,
+  onHighlight,
+  onOpen,
+}: {
+  item: RackItem;
+  top: number;
+  highlighted: boolean;
+  onHighlight: (on: boolean) => void;
+  onOpen: () => void;
+}) {
+  const kind = rackItemKindLabel(item.kind);
+  return (
+    <div
+      data-testid={`rack-item-label-${item.id}`}
+      className={`rack-label absolute inset-x-0 flex items-center ${highlighted ? "rack-label-highlight" : ""}`}
+      style={{ top, height: U_PX - 2 }}
+    >
+      <span className="rack-leader" aria-hidden="true" />
+      <button
+        type="button"
+        aria-label={`Open rack item ${item.label || kind}`}
+        title={item.note ? `${item.label || kind} - ${item.note}` : item.label || kind}
+        onClick={onOpen}
+        onMouseEnter={() => onHighlight(true)}
+        onMouseLeave={() => onHighlight(false)}
+        onFocus={() => onHighlight(true)}
+        onBlur={() => onHighlight(false)}
+        className="flex items-center gap-1.5 min-w-0 max-w-full h-full pl-1.5 pr-1 rounded-[3px] text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-1px] focus-visible:outline-accent"
+      >
+        {item.label && (
+          <span
+            className={`text-[12px] leading-4 truncate min-w-0 transition-colors duration-[120ms] motion-reduce:transition-none ${
+              highlighted ? "text-accent" : "text-primary"
+            }`}
+          >
+            {item.label}
+          </span>
+        )}
+        <span className="text-muted text-[11px] leading-4 font-mono truncate min-w-0 shrink-[2]">{kind}</span>
+      </button>
+    </div>
+  );
+}
+
+// Topmost free 1U slot (for the "Add item" default), or 1 when the rack is full.
+function topmostFreeU(heightU: number, occupied: { pos: number; uHeight: number }[]): number {
+  for (let u = heightU; u >= 1; u--) {
+    if (!occupied.some((o) => rangesOverlap(o.pos, o.uHeight, u, 1))) return u;
+  }
+  return 1;
 }
 
 // ── RackElevation ────────────────────────────────────────────────────────────
@@ -517,9 +798,33 @@ export default function RackElevation({ rack, nodes, readOnly = false, activity 
     [nodes],
   );
 
-  const used = usedUnits(placements);
+  // Manual rack items (patch panels, blanks, ...): rendered at their U range,
+  // counted as used and treated as occupied by device drag-and-drop.
+  const { data: rackItemData } = useRackItems(rack.id);
+  const rackItems = useMemo(() => rackItemData ?? [], [rackItemData]);
+  const blocks = useMemo(() => itemBlocks(rackItems, heightU), [rackItems, heightU]);
+  const placedItems = useMemo(() => {
+    const visible = new Set(blocks.map((b) => b.id));
+    return rackItems
+      .filter((i) => visible.has(i.id))
+      .map((item) => {
+        const uHeight = Math.max(1, item.u_height);
+        return { item, uHeight, top: rowFromTop(heightU, item.rack_u_position, uHeight) * U_PX + 1 };
+      });
+  }, [rackItems, blocks, heightU]);
 
-  const { moveDevice, assignDevice, setUHeight, saving } = useRackLayout(rack.id);
+  const used = usedUnits(placements, blocks);
+
+  const [itemDialog, setItemDialog] = useState<{ open: boolean; item: RackItem | null }>({ open: false, item: null });
+  const closeItemDialog = useCallback(() => setItemDialog((d) => ({ ...d, open: false })), []);
+  const defaultItemPos = useMemo(() => topmostFreeU(heightU, [...placements, ...blocks]), [heightU, placements, blocks]);
+  const [hoveredItemId, setHoveredItemId] = useState<number | null>(null);
+  const highlightItem = useCallback((id: number, on: boolean) => {
+    setHoveredItemId((cur) => (on ? id : cur === id ? null : cur));
+  }, []);
+
+  const { moveDevice, assignDevice, setUHeight, removeDevice, saving } = useRackLayout(rack.id);
+  const trayRef = useRef<HTMLDivElement>(null);
 
   const onDrop = useCallback(
     (device: TopologyNode, source: "rack" | "tray", pos: number, uHeight: number) => {
@@ -539,11 +844,16 @@ export default function RackElevation({ rack, nodes, readOnly = false, activity 
     rackId: rack.id,
     heightU,
     nodes,
+    blocked: blocks,
     bodyRef,
+    trayRef,
     readOnly,
     onDrop,
+    onRemove: removeDevice,
     onClick: openDevice,
   });
+  // A placed device is being dragged: the tray turns into a removal target.
+  const trayDropActive = drag?.source === "rack";
 
   const scaleRows = Array.from({ length: heightU }, (_, i) => heightU - i); // top row shows heightU
 
@@ -584,6 +894,18 @@ export default function RackElevation({ rack, nodes, readOnly = false, activity 
           <span className="text-warning text-[11px]">
             View-only: sign in as operator or admin to rearrange devices
           </span>
+        )}
+        {!readOnly && (
+          <Button
+            size="sm"
+            variant="secondary"
+            className="ml-auto"
+            data-testid="rack-add-item"
+            onClick={() => setItemDialog({ open: true, item: null })}
+          >
+            <Plus size={12} aria-hidden="true" />
+            Add item
+          </Button>
         )}
       </div>
 
@@ -639,6 +961,24 @@ export default function RackElevation({ rack, nodes, readOnly = false, activity 
                   activity={activity}
                   highlighted={highlightId === device.id}
                   onHighlight={(on) => highlight(device.id, on)}
+                  onRemove={readOnly ? undefined : () => removeDevice(device)}
+                />
+              </div>
+            ))}
+
+            {/* Manual rack items (not draggable; click opens the item dialog) */}
+            {placedItems.map(({ item, top, uHeight }) => (
+              <div
+                key={`item-${item.id}`}
+                className="absolute"
+                style={{ top, height: uHeight * U_PX - 2, left: 0, right: 0 }}
+              >
+                <RackItemPlate
+                  item={item}
+                  readOnly={readOnly}
+                  highlighted={!drag && hoveredItemId === item.id}
+                  onHighlight={(on) => highlightItem(item.id, on)}
+                  onOpen={() => setItemDialog({ open: true, item })}
                 />
               </div>
             ))}
@@ -694,18 +1034,50 @@ export default function RackElevation({ rack, nodes, readOnly = false, activity 
               onOpen={() => openDevice(device)}
             />
           ))}
+          {placedItems.map(({ item, top }) => (
+            <RackItemLabel
+              key={`item-${item.id}`}
+              item={item}
+              top={top}
+              highlighted={!drag && hoveredItemId === item.id}
+              onHighlight={(on) => highlightItem(item.id, on)}
+              onOpen={() => setItemDialog({ open: true, item })}
+            />
+          ))}
         </div>
         </div>
         </div>
 
-        {/* Unassigned devices tray */}
-        <div className="flex flex-col gap-3 min-w-[240px] flex-1 max-w-[360px]">
+        {/* Unassigned devices tray; doubles as the "remove from rack" drop
+            target while a placed device is dragged. */}
+        <div
+          ref={trayRef}
+          data-testid="rack-tray"
+          data-drop-active={trayDropActive ? "1" : "0"}
+          data-drop-over={trayDropActive && drag?.overTray ? "1" : "0"}
+          className={`flex flex-col gap-3 min-w-[240px] flex-1 max-w-[360px] rounded-card transition-colors duration-[120ms] motion-reduce:transition-none ${
+            trayDropActive
+              ? `outline-2 outline-dashed outline-offset-4 ${drag?.overTray ? "outline-accent bg-accent/10" : "outline-line-strong"}`
+              : ""
+          }`}
+        >
+          {trayDropActive && (
+            <div
+              data-testid="rack-tray-drop-hint"
+              className={`px-3 py-2 rounded-card border border-dashed text-[11px] font-semibold text-center ${
+                drag?.overTray ? "border-accent text-accent bg-accent/15" : "border-line-strong text-muted bg-panel"
+              }`}
+            >
+              Drop here to remove from rack
+            </div>
+          )}
           <TraySection
             title="Unplaced in this rack"
             devices={trayInRack}
             readOnly={readOnly}
             dragDeviceId={drag?.device.id ?? null}
             onDragStart={(e, d) => startDrag(e, d, "tray")}
+            onRemove={readOnly ? undefined : removeDevice}
           />
           <TraySection
             title="No rack assigned"
@@ -717,11 +1089,24 @@ export default function RackElevation({ rack, nodes, readOnly = false, activity 
           {!readOnly && (
             <div className="text-muted text-[10px]">
               Drag a device onto the rack to place it. Red preview means the position
-              overlaps another device or is out of range.
+              overlaps another device or rack item, or is out of range. Drag a placed
+              device onto this list to remove it from the rack.
             </div>
           )}
         </div>
       </div>
+
+      <RackItemDialog
+        open={itemDialog.open}
+        onClose={closeItemDialog}
+        rackId={rack.id}
+        heightU={heightU}
+        item={itemDialog.item}
+        defaultPos={defaultItemPos}
+        placements={placements}
+        items={rackItems}
+        readOnly={readOnly}
+      />
     </div>
   );
 }
@@ -732,12 +1117,16 @@ function TraySection({
   readOnly,
   dragDeviceId,
   onDragStart,
+  onRemove,
 }: {
   title: string;
   devices: TopologyNode[];
   readOnly: boolean;
   dragDeviceId: number | null;
   onDragStart: (e: React.PointerEvent, device: TopologyNode) => void;
+  // Per-item "remove from rack" action (devices assigned to this rack
+  // without a U position); omitted for the no-rack list and read-only mode.
+  onRemove?: (device: TopologyNode) => void;
 }) {
   return (
     <div className="border border-line rounded-card bg-panel">
@@ -768,6 +1157,7 @@ function TraySection({
                 <span className="text-muted text-[10px] ml-auto shrink-0">
                   {deviceUHeight(d)}U
                 </span>
+                {!readOnly && onRemove && <RemoveFromRackButton device={d} onRemove={() => onRemove(d)} />}
               </div>
             );
           })}

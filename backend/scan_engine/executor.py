@@ -34,6 +34,7 @@ from scan_engine.db_helpers import (
 )
 from scan_engine.dns import _resolve_host, _resolve_ip
 from scan_engine.ping import _build_ping_cmd
+from scanners.health import health_firmware, health_model
 from schemas import ScanResult, ScanSwitchMetric
 from shared.crypto import decrypt
 from shared.fencing import apply_fence
@@ -771,6 +772,37 @@ def _apply_if_name_cache(device: Device, sw) -> None:
     device.if_names_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _resolve_device_type(current: Optional[str], detected: str, vendor: str, vendor_override: bool) -> str:
+    """Decide the stored device type after a scan.
+
+    A detection is "confident" when a specific vendor scanner matched or a
+    generic device answered the UPS-MIB probe (anything but generic/switch).
+    - vendor_override set: keep the stored type; only a still-default
+      "switch" is upgraded by a confident detection.
+    - otherwise a confident detection wins; the generic "switch" fallback
+      keeps the stored type so a manual correction (meta PATCH) survives.
+    """
+    current = current or "switch"
+    detected = detected or "switch"
+    confident = not (vendor == "generic" and detected == "switch")
+    if vendor_override:
+        return detected if current == "switch" and confident else current
+    return detected if confident else current
+
+
+def _apply_health(device: Device, sw) -> None:
+    """Store a freshly collected health snapshot.
+
+    A scan without a snapshot (collection failed or not attempted) keeps the
+    previous one; its timestamp shows how stale it is.
+    """
+    health = getattr(sw, "health", None)
+    if not isinstance(health, dict):
+        return
+    device.health = health
+    device.health_updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def _read_interval_setting(key: str, default: int) -> int:
     try:
         return int(_read_db_setting(key, str(default)))
@@ -1019,8 +1051,11 @@ def _finalize_scan_db(
 
         # Determine vendor, model and firmware from scan data (overrides now live on Device)
         vendor = (sw.vendor if sw else "generic")
-        model = (extract_model(sw.sys_descr, sw.vendor) if sw else "")
-        firmware = (sw.firmware if sw else "")
+        # UPS / server ident values (health snapshot) beat sysDescr parsing.
+        sw_health = getattr(sw, "health", None) if sw else None
+        model = ((health_model(sw_health) or extract_model(sw.sys_descr, sw.vendor)) if sw else "")
+        firmware = ((health_firmware(sw_health) or sw.firmware) if sw else "")
+        detected_type = (getattr(sw, "device_type", None) or "switch") if sw else "switch"
 
         device = devices_by_ip.get(ip)
         if device:
@@ -1041,6 +1076,9 @@ def _finalize_scan_db(
                     )
                 else:
                     device.vendor = detected_vendor or device.vendor
+                device.device_type = _resolve_device_type(
+                    device.device_type, detected_type, detected_vendor, bool(device.vendor_override and device.vendor),
+                )
                 device.sys_name  = sw.sys_name  or device.sys_name
                 device.sys_descr = sw.sys_descr or device.sys_descr
                 device.location  = sw.location  or device.location
@@ -1050,6 +1088,7 @@ def _finalize_scan_db(
                 if scan_mode != "discovery":
                     _apply_stp_vlan_names(device, sw)
                     _apply_if_name_cache(device, sw)
+                    _apply_health(device, sw)
             elif ping_ok:
                 device.sys_name = device.sys_name or ip
                 device.sys_descr = device.sys_descr or "Discovered by ping (SNMP unavailable)"
@@ -1082,6 +1121,7 @@ def _finalize_scan_db(
                 model=model,
                 firmware=firmware,
                 vendor=vendor,
+                device_type=detected_type,
                 location=sw.location if sw else "",
                 ping_status=ping_status,
                 ping_rtt_ms=ping_rtt if ping_ok else 0,
@@ -1094,6 +1134,7 @@ def _finalize_scan_db(
             if scan_mode != "discovery":
                 _apply_stp_vlan_names(new_device, sw)
                 _apply_if_name_cache(new_device, sw)
+                _apply_health(new_device, sw)
             db.add(new_device)
             db.flush()
             devices_by_ip[ip] = new_device

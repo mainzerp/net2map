@@ -14,11 +14,18 @@ from typing import Dict, List
 #   - 1.3.6.1.4.1.25506 H3C, not necessarily Aruba CX
 # Devices behind those roots fall through to keyword matching; ambiguous ones
 # become "generic".
+# Compaq/HPE server management (232) is unambiguous for switches: HPE/Aruba
+# switches report sysObjectIDs under 11 or 47196. Its UPS branch (232.165,
+# CPQPOWER-MIB) wins over the server root via longest-prefix matching.
 VENDOR_OIDS: Dict[str, str] = {
     "1.3.6.1.4.1.47196": "aruba_cx",  # Aruba Networks (CX)
     "1.3.6.1.4.1.52642": "fs",        # FS.COM (FSOS)
     "1.3.6.1.4.1.41112": "unifi",     # Ubiquiti / UniFi
     "1.3.6.1.4.1.9":     "cisco",     # Cisco Systems
+    "1.3.6.1.4.1.534":   "eaton",     # Eaton / Powerware (XUPS-MIB)
+    "1.3.6.1.4.1.705":   "eaton",     # MGE UPS Systems (Eaton network cards)
+    "1.3.6.1.4.1.232.165": "hpe_ups", # HPE UPS Network Module (CPQPOWER-MIB)
+    "1.3.6.1.4.1.232":   "hpe_ilo",   # Compaq/HPE server management (iLO, Insight agents)
 }
 
 # sysDescr keyword patterns per vendor: case-insensitive regexes anchored on
@@ -30,7 +37,13 @@ VENDOR_KEYWORDS: Dict[str, List[str]] = {
     "unifi":    [r"\bunifi\b", r"\bubiquiti\b", r"\busw\b", r"\bu7\b", r"\budm\b", r"\buxg\b"],
     "opnsense": [r"\bopnsense\b", r"\bfreebsd\b"],
     "cisco":    [r"\bcisco\b", r"\bios[- ]xe\b", r"\bcatalyst\b"],
+    "eaton":    [r"\beaton\b"],
+    "hpe_ilo":  [r"\bintegrated lights[- ]out\b", r"\bilo\b", r"\bproliant\b"],
 }
+
+# Valid device kinds returned by VendorScanner.device_type() and accepted by
+# the device meta API.
+DEVICE_TYPES = ("switch", "firewall", "ups", "server")
 
 _VENDOR_KEYWORD_RES: Dict[str, List["re.Pattern"]] = {
     vendor: [re.compile(p, re.IGNORECASE) for p in patterns]

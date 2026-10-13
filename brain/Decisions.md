@@ -316,3 +316,19 @@
   replace each other. CI builds with the override and retags for GHCR.
 - The former git-ignored per-machine port override is replaced by `NET2MAP_PORT`
   (default 3000) in `docker-compose.yml`.
+
+## Rack items, device types and health (2026-10-13)
+
+- **Patch panels are `rack_items`, not devices** (user: placeholder only): own table
+  (migration 024) with kind/label/U position/U height/note; `devices.ip` stays NOT NULL
+  and the scan pipeline never sees them. Overlap checks cover devices and items in the
+  rack layout and item endpoints.
+- **UPS/server support via `devices.device_type` + `health` JSON** (migration 025;
+  user chose detection plus status values). Vendors `eaton` (.534/.705), `hpe_ups`
+  (.232.165), `hpe_ilo` (.232); HP root `.11` stays unmapped (Aruba/HPE switches).
+  RFC1628 UPS-MIB first, XUPS/CPQPOWER fallbacks; CPQ health MIBs for servers.
+  Health is collected on every non-discovery scan; generic devices get one UPS-MIB
+  probe GET. A confident detection overwrites a manual `device_type` unless
+  `vendor_override` is set.
+- **Device edits send only changed fields**: `/meta` treats explicit `null` as
+  "clear", so stale form snapshots must never be sent (cause of lost class membership).

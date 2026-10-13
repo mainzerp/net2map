@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, ChevronRight, CircleCheck, CircleX, EyeOff, TriangleAlert, type LucideIcon } from "lucide-react";
-import { formatTimestamp } from "../../utils/datetime";
+import { formatRelativeTime, formatTimestamp } from "../../utils/datetime";
+import { healthOf, healthSummary, needsAttention } from "../../utils/deviceHealth";
 import { useInspector } from "../../hooks/useInspector";
 import type { ScanRun, TopologyNode } from "../../types";
 
@@ -94,11 +95,16 @@ export function AttentionCard({ nodes, lastRun = null, className = "" }: Attenti
   const navigate = useNavigate();
   const { open: openInspector } = useInspector();
   const offline = nodes.filter((n) => !n.ignored && n.ping_status === "offline");
+  // UPS / server health warnings; offline devices are already listed above.
+  const unhealthy = nodes
+    .filter((n) => !n.ignored && n.ping_status !== "offline" && needsAttention(n))
+    .sort((a, b) => Number(healthOf(b)?.status === "critical") - Number(healthOf(a)?.status === "critical"));
   const ignoredCount = nodes.filter((n) => n.ignored).length;
   const unassignedCount = nodes.filter((n) => !n.ignored && !n.rack_id).length;
   const lastScanFailed = lastRun != null && (lastRun.status === "failed" || lastRun.status === "error");
 
-  const issueCount = offline.length + (lastScanFailed ? 1 : 0) + (unassignedCount > 0 ? 1 : 0);
+  const issueCount =
+    offline.length + unhealthy.length + (lastScanFailed ? 1 : 0) + (unassignedCount > 0 ? 1 : 0);
   const hasRows = issueCount > 0 || ignoredCount > 0;
 
   return (
@@ -151,6 +157,26 @@ export function AttentionCard({ nodes, lastRun = null, className = "" }: Attenti
               onClick={() => openInspector("device", d.id)}
             />
           ))}
+          {unhealthy.map((d) => {
+            const health = healthOf(d);
+            if (!health) return null;
+            const critical = health.status === "critical";
+            const name = d.sys_name || d.hostname || d.ip;
+            return (
+              <IssueRow
+                key={`health-${d.id}`}
+                tone={critical ? "danger" : "warning"}
+                icon={critical ? CircleX : TriangleAlert}
+                chip={critical ? "Critical" : "Warning"}
+                title={name}
+                detail={healthSummary(health)}
+                meta={d.health_updated_at ? `updated ${formatRelativeTime(d.health_updated_at)}` : undefined}
+                opensInspector
+                ariaLabel={`Open details for ${name} (health ${health.status})`}
+                onClick={() => openInspector("device", d.id)}
+              />
+            );
+          })}
           {unassignedCount > 0 && (
             <IssueRow
               tone="warning"

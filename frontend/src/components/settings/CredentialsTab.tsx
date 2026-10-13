@@ -114,7 +114,7 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
       api.patch(`/api/topology/devices/${dev.id}/meta`, { ignored: !dev.ignored }),
     onMutate: (dev) => setTogglingIgnoreId(dev.id),
     onSettled: () => setTogglingIgnoreId(null),
-    onSuccess: () => invalidate(queryKeys.devices, queryKeys.topology),
+    onSuccess: () => invalidate(queryKeys.devices, queryKeys.topology, queryKeys.stats),
   });
 
   const saveMutation = useMutation({

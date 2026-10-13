@@ -1,4 +1,5 @@
 // Shared formatters for the scan settings components.
+import { parseUtc } from "../../../utils/datetime";
 
 export function fmtDuration(ms: number | undefined | null): string {
   const value = Number(ms || 0);
@@ -8,6 +9,6 @@ export function fmtDuration(ms: number | undefined | null): string {
 
 export function fmtTs(ts: string | undefined | null): string {
   if (!ts) return "-";
-  const d = new Date(ts);
+  const d = parseUtc(ts);
   return Number.isNaN(d.getTime()) ? "-" : d.toLocaleTimeString();
 }

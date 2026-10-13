@@ -34,3 +34,6 @@ class OPNsenseScanner(VendorScanner, vendor_id="opnsense"):
     def supports_stp(self) -> bool:
         # Firewall: no bridge spanning tree to report.
         return False
+
+    def device_type(self) -> str:
+        return "firewall"

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { api, extractErrorMessage } from "../../api";
-import { queryKeys, useInvalidateApi } from "../../hooks/api";
+import { useInvalidateApi } from "../../hooks/api";
 import { useToast } from "../ToastProvider";
 import { Button, Card } from "../ui";
 import { SectionHeader } from "./shared";
@@ -28,7 +28,7 @@ function DataImportExportTabContent() {
   const [configData, setConfigData] = useState<string>("");
   const [configMsg, setConfigMsg] = useState<string>("");
   const { addToast } = useToast();
-  const { invalidate } = useInvalidateApi();
+  const { invalidateAll } = useInvalidateApi();
 
   const exportMutation = useMutation({
     mutationFn: () => api.get("/api/config/export") as Promise<{ data?: string }>,
@@ -48,7 +48,7 @@ function DataImportExportTabContent() {
       setConfigMsg(summary);
       addToast(summary, errorCount > 0 ? "warning" : "success");
       if (!values.dryRun) {
-        invalidate(queryKeys.snmpProfiles, queryKeys.credentials, queryKeys.appSettings);
+        invalidateAll();
       }
       if (errorCount > 0) {
         const details = res.errors!.map((e) => `${e.section} row ${e.row}: ${e.message}`).join("\n");

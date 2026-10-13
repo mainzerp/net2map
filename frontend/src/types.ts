@@ -64,8 +64,52 @@ export interface TopologyNode {
   stp?: DeviceStpInfo | null;
   // VLAN id (as string) -> VLAN name
   vlan_names?: Record<string, string>;
+  // Device kind derived from the detected vendor scanner (default "switch").
+  device_type?: DeviceType;
+  // Normalized SNMP health snapshot (UPS or server), null when not reported.
+  health?: DeviceHealth | null;
+  health_updated_at?: string | null;
   [key: string]: unknown;
 }
+
+export type DeviceType = "switch" | "firewall" | "ups" | "server";
+export type HealthStatus = "ok" | "warning" | "critical" | "unknown";
+// HPE CPQ condition, "unknown" also covers other(1) = not supported.
+export type HealthCondition = "ok" | "degraded" | "failed" | "unknown";
+
+export interface UpsHealth {
+  kind: "ups";
+  status: HealthStatus;
+  manufacturer: string | null;
+  model: string | null;
+  software: string | null;
+  battery_status: "unknown" | "normal" | "low" | "depleted" | null;
+  seconds_on_battery: number | null;
+  runtime_minutes: number | null;
+  charge_percent: number | null;
+  battery_temperature_c: number | null;
+  output_source: string | null;
+  load_percent: number | null;
+  input_voltage: number | null;
+  alarms_present: number | null;
+}
+
+export interface ServerHealth {
+  kind: "server";
+  status: HealthStatus;
+  overall: HealthCondition | null;
+  thermal: HealthCondition | null;
+  power_supply: HealthCondition | null;
+  fans: HealthCondition | null;
+  storage: HealthCondition | null;
+  temperature_max_c: number | null;
+  temperature_sensors: number | null;
+  product_name: string | null;
+  serial_number: string | null;
+  ilo_firmware: string | null;
+}
+
+export type DeviceHealth = UpsHealth | ServerHealth;
 
 export interface TopologyLink {
   id: number;
@@ -90,6 +134,24 @@ export interface RackInfo {
   map_y?: number;
   height_u?: number;
 }
+
+// Manually maintained rack placeholder (patch panel, blank, ...): occupies
+// U space in the rack elevation, has no ports and is never scanned.
+export type RackItemKind = "patch_panel" | "blank" | "cable_manager" | "shelf" | "other";
+
+export interface RackItem {
+  id: number;
+  rack_id: number;
+  kind: RackItemKind;
+  label: string;
+  rack_u_position: number;
+  u_height: number;
+  note: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export type RackItemInput = Pick<RackItem, "kind" | "label" | "rack_u_position" | "u_height" | "note">;
 
 export interface SwitchClass {
   id: number;

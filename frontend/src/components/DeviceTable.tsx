@@ -53,11 +53,11 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
   const devicesQuery = useDevices();
   const racksQuery = useRacks();
   const classesQuery = useQuery<SwitchClass[]>({
-    queryKey: ["switch-classes"],
+    queryKey: queryKeys.switchClasses,
     queryFn: () => api.get<SwitchClass[]>("/api/switch-classes"),
   });
   const modelsQuery = useQuery<SwitchModel[]>({
-    queryKey: ["switch-models"],
+    queryKey: queryKeys.switchModels,
     queryFn: () => api.get<SwitchModel[]>("/api/switch-models"),
   });
   const { invalidate } = useInvalidateApi();
@@ -68,6 +68,7 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
   const [bulkLoading, setBulkLoading] = useState(false);
   const [editState, setEditState] = useState<EditState>({ id: null, open: false });
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [initialForm, setInitialForm] = useState<FormState>(EMPTY_FORM);
   const [err, setErr] = useState("");
   const { addToast } = useToast();
 
@@ -129,16 +130,19 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
 
   const resetForm = () => {
     setForm(EMPTY_FORM);
+    setInitialForm(EMPTY_FORM);
     setEditState({ id: null, open: false });
     setErr("");
   };
 
   const startEdit = (dev: DeviceRow) => {
-    setForm({
+    const snapshot: FormState = {
       rack_id: dev.rack_id ?? null,
       class_id: dev.class_id ?? null,
       model_id: dev.model_id ?? null,
-    });
+    };
+    setForm(snapshot);
+    setInitialForm(snapshot);
     setEditState({ id: dev.id, open: true });
     setErr("");
   };
@@ -146,12 +150,18 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
   const submitEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr("");
+    // Send only changed fields: the backend treats an explicit null as
+    // "unassign", so echoing a stale snapshot would clear assignments.
+    const changes: Partial<FormState> = {};
+    (Object.keys(form) as (keyof FormState)[]).forEach((key) => {
+      if (form[key] !== initialForm[key]) changes[key] = form[key];
+    });
+    if (Object.keys(changes).length === 0) {
+      resetForm();
+      return;
+    }
     try {
-      await api.patch(`/api/topology/devices/${editState.id}/meta`, {
-        rack_id: form.rack_id,
-        class_id: form.class_id,
-        model_id: form.model_id,
-      });
+      await api.patch(`/api/topology/devices/${editState.id}/meta`, changes);
       invalidateDeviceData();
       resetForm();
     } catch (ex) {

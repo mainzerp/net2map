@@ -7,7 +7,9 @@ import useNet2MapStore from "../../store";
 import { speedLabel } from "../../theme/visual";
 import { Badge, Button, StatusDot, type BadgeTone } from "../../components/ui";
 import type { PortInfo } from "../../types";
+import { DEVICE_TYPE_LABEL, deviceTypeOf } from "../../utils/deviceHealth";
 import { DeviceLatencySection } from "../latency/DeviceLatencySection";
+import { DeviceHealthSection } from "./DeviceHealthSection";
 import {
   FactList,
   InspectorLoading,
@@ -111,6 +113,7 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
   const downCount = ports.length - upCount;
   const upPercent = ports.length > 0 ? Math.round((upCount / ports.length) * 100) : 0;
   const title = device.sys_name || device.hostname || device.ip;
+  const deviceType = deviceTypeOf(device);
 
   const showOnMap = () => {
     if (rack) setSelectedRack({ id: rack.id, label: rack.label, location: rack.location, devices: [] });
@@ -132,6 +135,11 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="font-mono text-muted">{device.ip}</span>
           {device.vendor && <Badge tone="neutral">{device.vendor}</Badge>}
+          {deviceType !== "switch" && (
+            <Badge tone="accent" data-testid="device-type">
+              {DEVICE_TYPE_LABEL[deviceType]}
+            </Badge>
+          )}
           {device.ignored && <Badge tone="warning">Ignored</Badge>}
           <span className="inline-flex items-center gap-1.5 text-muted">
             <StatusDot status={pingDotStatus(device.ping_status)} />
@@ -170,6 +178,8 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
           ]}
         />
       </InspectorSection>
+
+      <DeviceHealthSection device={device} />
 
       <DeviceLatencySection device={device} />
 

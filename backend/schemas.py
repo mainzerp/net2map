@@ -1,7 +1,7 @@
 """Pydantic schemas for request / response validation."""
 import re
 from datetime import datetime
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import (
     BaseModel,
@@ -159,6 +159,40 @@ class RackLayoutEntry(BaseModel):
 
 class RackLayoutIn(BaseModel):
     entries: List[RackLayoutEntry]
+
+
+RackItemKind = Literal["patch_panel", "blank", "cable_manager", "shelf", "other"]
+
+
+class RackItemCreate(BaseModel):
+    """Manually maintained rack placeholder (no ports, never scanned)."""
+    kind:            RackItemKind = "patch_panel"
+    label:           str = Field("", max_length=120)
+    rack_u_position: int = Field(..., ge=1, le=48)
+    u_height:        int = Field(1, ge=1, le=60)
+    note:            Optional[str] = Field(None, max_length=2000)
+
+
+class RackItemUpdate(BaseModel):
+    kind:            Optional[RackItemKind] = None
+    label:           Optional[str] = Field(None, max_length=120)
+    rack_u_position: Optional[int] = Field(None, ge=1, le=48)
+    u_height:        Optional[int] = Field(None, ge=1, le=60)
+    note:            Optional[str] = Field(None, max_length=2000)
+
+
+class RackItemOut(BaseModel):
+    id:              int
+    rack_id:         int
+    kind:            str
+    label:           str
+    rack_u_position: int
+    u_height:        int
+    note:            Optional[str] = None
+    created_at:      Optional[datetime] = None
+    updated_at:      Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ─── SwitchClass ──────────────────────────────────────────────────────────────
@@ -529,6 +563,11 @@ class DeviceOut(DeviceBase):
     total_ports:   Optional[int] = None   # port cutoff: ports beyond this index are hidden
     stp:           Optional[StpInfo] = None
     vlan_names:    Dict[str, str] = Field(default_factory=dict)
+    # Device kind ("switch" | "firewall" | "ups" | "server") and the
+    # normalized health snapshot (see scanners.health), NULL when not reported.
+    device_type:   str = "switch"
+    health:        Optional[Dict[str, Any]] = None
+    health_updated_at: Optional[datetime] = None
 
     # Raw Device STP columns: input only, folded into ``stp`` below.
     stp_protocol:  Optional[str] = Field(default=None, exclude=True)
@@ -543,6 +582,16 @@ class DeviceOut(DeviceBase):
         # u_height is declared on DeviceOut (not DeviceBase); NULL must map
         # to the 1U default rather than fail the int validation.
         return 1 if v is None else v
+
+    @field_validator("device_type", mode="before")
+    @classmethod
+    def _default_device_type(cls, v):
+        return v or "switch"
+
+    @field_validator("health", mode="before")
+    @classmethod
+    def _coerce_health(cls, v):
+        return v if isinstance(v, dict) else None
 
     @field_validator("vlan_names", mode="before")
     @classmethod
@@ -590,6 +639,8 @@ class DeviceMetaUpdate(BaseModel):
     vendor_override: Optional[bool] = None
     # Opt-in for the latency monitor in latency_mode "selected".
     latency_monitored: Optional[bool] = None
+    # Manual correction of the scan-derived device kind.
+    device_type: Optional[Literal["switch", "firewall", "ups", "server"]] = None
 
 
 class BulkDeviceMetaUpdate(BaseModel):

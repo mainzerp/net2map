@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from database import Device, get_db
 from database import Rack as RackModel
+from routers.rack_items import find_overlap, item_ranges
 from routers.topology import _bump_topo_version
 from schemas import RackCreate, RackLayoutIn, RackOut, RackUpdate
 from shared.audit import log_audit
@@ -46,6 +47,8 @@ def update_rack(rack_id: int, body: RackUpdate, request: Request, db: Session = 
         ).all()
         if any(d.rack_u_position + d.u_height - 1 > height for d in occupied):
             api_error(409, "U_POSITION_OUT_OF_RANGE", "Rack height would exclude an assigned device")
+        if any(start + size - 1 > height for start, size, _ in item_ranges(db, rack_id)):
+            api_error(409, "U_POSITION_OUT_OF_RANGE", "Rack height would exclude a rack item")
     # No rack field is nullable; explicit null values are ignored
     for k, v in payload.items():
         if v is not None:
@@ -120,6 +123,17 @@ def update_rack_layout(rack_id: int, body: RackLayoutIn, request: Request, db: S
                 409, "U_OVERLAP",
                 f"Devices {prev[2]} and {cur[2]} overlap in U-space",
                 details=[{"device_ids": [prev[2], cur[2]]}],
+            )
+
+    # Rack items (patch panels, blanks, ...) occupy U space as well
+    items = item_ranges(db, rack_id)
+    for e in body.entries:
+        conflict = find_overlap(e.rack_u_position, e.u_height, items)
+        if conflict:
+            api_error(
+                409, "U_OVERLAP",
+                f"Device {e.device_id} overlaps {conflict} in U-space",
+                details=[{"device_ids": [e.device_id]}],
             )
 
     for e in body.entries:

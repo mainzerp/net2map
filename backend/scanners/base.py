@@ -52,3 +52,25 @@ class VendorScanner(ABC):
         spanning tree (e.g. firewalls) override this to skip the requests.
         """
         return True
+
+    def supports_fdb(self) -> bool:
+        """Return True if the bridge forwarding database (FDB) should be walked.
+
+        Devices without a switching fabric (UPS network cards, server
+        management controllers) override this to skip the pointless walks.
+        """
+        return True
+
+    def device_type(self) -> str:
+        """Return the device kind: "switch" | "firewall" | "ups" | "server"."""
+        return "switch"
+
+    async def collect_health(self, snmp_get, snmp_walk) -> dict | None:
+        """Collect a normalized health snapshot (see scanners.health).
+
+        ``snmp_get(*oids)`` returns ``{oid: value_str}`` and ``snmp_walk(oid)``
+        returns ``[(oid, value_str)]``. Called once per non-discovery scan;
+        implementations must return None on failure and never raise. The
+        default (switches, firewalls) collects nothing.
+        """
+        return None

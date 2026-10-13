@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "../components/ToastProvider";
 import { useLogs, type LogEntry } from "../hooks/api";
 import { Badge, Button, EmptyState, Input, Select, Spinner, type BadgeTone } from "../components/ui";
+import { formatTimestamp } from "../utils/datetime";
 
 function levelTone(level: string | undefined): BadgeTone {
   if (level === "ERROR") return "danger";
@@ -11,6 +12,8 @@ function levelTone(level: string | undefined): BadgeTone {
 }
 
 const LIMIT_OPTIONS = [100, 300, 500, 1000, 2000];
+// Log entries need second precision; rendered in the browser's local time.
+const LOG_TIMESTAMP_FORMAT: Intl.DateTimeFormatOptions = { dateStyle: "short", timeStyle: "medium" };
 // Rows rendered per page; up to 2000 entries can be fetched at once.
 const PAGE_SIZE = 100;
 
@@ -157,7 +160,9 @@ export default function LogsPage() {
                   key={`${entry.ts || ""}-${start + idx}`}
                   className="grid grid-cols-[170px_90px_180px_1fr] gap-2 px-3 py-2 border-b border-line last:border-0 text-[10px] items-start"
                 >
-                  <span className="text-muted whitespace-nowrap">{ts || "-"}</span>
+                  <span className="text-muted whitespace-nowrap" title={ts || undefined}>
+                    {formatTimestamp(ts, LOG_TIMESTAMP_FORMAT)}
+                  </span>
                   <span>
                     <Badge tone={levelTone(level)}>{level || "-"}</Badge>
                   </span>

@@ -66,8 +66,8 @@ export const speedStrokeWidth = (mbps: number): number =>
   mbps >= 10000 ? 2.25 :
   mbps >= 1000  ? 1.5 : 1;
 
-export const VENDOR_LABEL: Record<string, string> = { aruba_cx: "Aruba CX", fs: "FS.com", unifi: "UniFi", opnsense: "OPNsense", generic: "Generic" };
-export const VENDOR_COLOR: Record<string, string> = { aruba_cx: PALETTE.amber, fs: PALETTE.slateTeal, unifi: PALETTE.inkBlue, opnsense: PALETTE.terracotta, generic: PALETTE.slate };
+export const VENDOR_LABEL: Record<string, string> = { aruba_cx: "Aruba CX", fs: "FS.com", unifi: "UniFi", opnsense: "OPNsense", eaton: "Eaton", hpe_ups: "HPE UPS", hpe_ilo: "HPE iLO", generic: "Generic" };
+export const VENDOR_COLOR: Record<string, string> = { aruba_cx: PALETTE.amber, fs: PALETTE.slateTeal, unifi: PALETTE.inkBlue, opnsense: PALETTE.terracotta, eaton: PALETTE.olive, hpe_ups: PALETTE.sage, hpe_ilo: PALETTE.plum, generic: PALETTE.slate };
 
 // Vendor pill badge: short readable name plus the vendor color. The vendor
 // colors are mid-tones tuned for >= 3:1 against panel in both themes, which is
@@ -85,6 +85,9 @@ export const VENDOR_BADGE: Record<string, VendorBadgeSpec> = {
   fs: { short: "FS", name: VENDOR_LABEL.fs, color: VENDOR_COLOR.fs },
   unifi: { short: "UniFi", name: VENDOR_LABEL.unifi, color: VENDOR_COLOR.unifi },
   opnsense: { short: "OPN", name: VENDOR_LABEL.opnsense, color: VENDOR_COLOR.opnsense },
+  eaton: { short: "Eaton", name: VENDOR_LABEL.eaton, color: VENDOR_COLOR.eaton },
+  hpe_ups: { short: "UPS", name: VENDOR_LABEL.hpe_ups, color: VENDOR_COLOR.hpe_ups },
+  hpe_ilo: { short: "iLO", name: VENDOR_LABEL.hpe_ilo, color: VENDOR_COLOR.hpe_ilo },
   generic: { short: "Gen", name: VENDOR_LABEL.generic, color: VENDOR_COLOR.generic },
 };
 

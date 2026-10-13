@@ -10,12 +10,13 @@ The project consists of a FastAPI backend (scan, persistence, API) and a React/V
 ## Features
 
 - SNMP scan of devices via SNMPv2c and SNMPv3, separate intervals for discovery, LLDP links and MAC tables; discovery IP ranges and DNS resolvers (PTR) configurable
-- Automatic vendor detection with dedicated scanners (Aruba CX, Cisco, FS.com, OPNsense, UniFi, Generic)
+- Automatic vendor detection with dedicated scanners (Aruba CX, Cisco, FS.com, OPNsense, UniFi, Eaton UPS, HPE UPS, HPE iLO, Generic)
+- Supported device kinds: switches, firewalls (OPNsense), UPS units (Eaton / MGE network cards, HPE UPS Network Module, any RFC 1628 UPS-MIB agent) and HPE ProLiant servers via iLO; UPS battery charge, runtime, load and output source and server subsystem conditions (thermal, power, fans, storage, temperatures) are collected over SNMP and shown in the inspector, the rack faceplates, the map and the dashboard "Attention needed" list
 - Firmware version capture per device (ENTITY-MIB OID, with vendor parsing from sysDescr as fallback)
 - Interactive topology map (React Flow) based on LLDP links, including port/speed info, auto-layout, device search, minimap and optional background image; layers "STP" (root bridge, root paths, blocked ports), "VLAN" and "Latency"
 - Endpoint tracking under `/devices`: MAC, IP, hostname and switch port per end device, including port history and ignoring
 - Network device overview under `/network` with rack, class, model, firmware and status
-- Rack elevation under `/racks`: real U positions (U1 at the bottom), drag and drop with preview, adjustable device height (`u_height`)
+- Rack elevation under `/racks`: real U positions (U1 at the bottom), drag and drop with preview, adjustable device height (`u_height`, stepper up to 10U)
 - Dashboard with status cards, "Attention needed" list, deep links and live scan display
 - Inspector sidebar for switches, endpoints and racks (linkable via `?inspect=`) and command palette (`Ctrl/Cmd+K` or `/`)
 - Scan history with changes per run, duration per switch and dry-run preview

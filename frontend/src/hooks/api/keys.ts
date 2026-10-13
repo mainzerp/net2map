@@ -8,6 +8,8 @@ export const queryKeys = {
   devices: ["devices"] as QueryKey,
   endpoints: ["endpoints"] as QueryKey,
   racks: ["racks"] as QueryKey,
+  // Prefix ["rack-items"] matches the item lists of every rack.
+  rackItems: (rackId?: number) => (rackId == null ? ["rack-items"] : ["rack-items", rackId]) as QueryKey,
   logs: (params?: Record<string, unknown>) => ["logs", params ?? {}] as QueryKey,
   snmpProfiles: ["snmp-profiles"] as QueryKey,
   credentials: ["credentials"] as QueryKey,

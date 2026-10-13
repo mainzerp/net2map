@@ -63,7 +63,7 @@ function ClassesTabContent({ newEntryTrigger }: ClassesTabContentProps) {
       }
     },
     onSuccess: () => {
-      invalidate(queryKeys.switchClasses);
+      invalidate(queryKeys.switchClasses, queryKeys.topology);
       resetForm();
     },
     onError: (ex) => setErr(extractErrorMessage(ex)),
@@ -72,7 +72,7 @@ function ClassesTabContent({ newEntryTrigger }: ClassesTabContentProps) {
   const deleteMutation = useMutation({
     mutationFn: (id: number) => api.del(`/api/switch-classes/${id}`),
     onSuccess: () => {
-      invalidate(queryKeys.switchClasses);
+      invalidate(queryKeys.switchClasses, queryKeys.topology, queryKeys.devices);
       setDeleteTarget(null);
     },
   });

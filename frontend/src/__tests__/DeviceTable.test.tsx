@@ -3,7 +3,7 @@
  */
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderWithRouter } from "./test-utils";
 
 // Mock the store
@@ -15,10 +15,11 @@ vi.mock("../store", () => {
 
 // Mock api module
 const mockApiGet = vi.fn();
+const mockApiPatch = vi.fn();
 vi.mock("../api", () => ({
   api: {
     get: (...args: unknown[]) => mockApiGet(...args),
-    patch: vi.fn(),
+    patch: (...args: unknown[]) => mockApiPatch(...args),
     invalidate: vi.fn(),
   },
   API: "",
@@ -132,5 +133,84 @@ describe("DeviceTable", () => {
       expect(screen.getByText(/boom/)).toBeTruthy();
     });
     expect(screen.getByText("Retry")).toBeTruthy();
+  });
+
+  describe("edit modal", () => {
+    const classifiedDevice = {
+      ...devices[0],
+      rack_id: null,
+      class_id: 5,
+      model_id: null,
+    };
+
+    function mockEditApi() {
+      mockApiGet.mockImplementation((path: string) => {
+        if (path.startsWith("/api/devices")) return Promise.resolve([classifiedDevice]);
+        if (path === "/api/racks") return Promise.resolve([{ id: 7, label: "Rack-A", room: "" }]);
+        if (path === "/api/switch-classes") {
+          return Promise.resolve([
+            { id: 5, label: "Core", color: "" },
+            { id: 6, label: "Access", color: "" },
+          ]);
+        }
+        if (path === "/api/switch-models") return Promise.resolve([]);
+        return Promise.resolve([]);
+      });
+      mockApiPatch.mockResolvedValue({});
+    }
+
+    async function openEditModal() {
+      renderWithRouter(<DeviceTable {...defaultProps} />);
+      await waitFor(() => {
+        expect(screen.getByText("Core")).toBeTruthy();
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+      const dialog = await screen.findByRole("dialog");
+      const [rackSelect, classSelect] = within(dialog).getAllByRole("combobox");
+      return { dialog, rackSelect, classSelect };
+    }
+
+    it("editing only the rack does not send class_id", async () => {
+      mockEditApi();
+      const { dialog, rackSelect } = await openEditModal();
+
+      fireEvent.change(rackSelect, { target: { value: "7" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(mockApiPatch).toHaveBeenCalledTimes(1);
+      });
+      const [path, body] = mockApiPatch.mock.calls[0];
+      expect(path).toBe("/api/topology/devices/1/meta");
+      expect(body).toEqual({ rack_id: 7 });
+      expect(body).not.toHaveProperty("class_id");
+      expect(body).not.toHaveProperty("model_id");
+    });
+
+    it("changing the class sends class_id", async () => {
+      mockEditApi();
+      const { dialog, classSelect } = await openEditModal();
+
+      fireEvent.change(classSelect, { target: { value: "6" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(mockApiPatch).toHaveBeenCalledTimes(1);
+      });
+      const [, body] = mockApiPatch.mock.calls[0];
+      expect(body).toEqual({ class_id: 6 });
+    });
+
+    it("skips the request when nothing changed", async () => {
+      mockEditApi();
+      const { dialog } = await openEditModal();
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).toBeNull();
+      });
+      expect(mockApiPatch).not.toHaveBeenCalled();
+    });
   });
 });

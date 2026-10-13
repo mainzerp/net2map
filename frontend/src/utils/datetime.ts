@@ -1,16 +1,22 @@
 // Shared timestamp formatting for table cells and status lines.
-export function formatTimestamp(ts: string | null | undefined): string {
+export const DEFAULT_TIMESTAMP_FORMAT: Intl.DateTimeFormatOptions = { dateStyle: "short", timeStyle: "short" };
+
+export function formatTimestamp(
+  ts: string | null | undefined,
+  options: Intl.DateTimeFormatOptions = DEFAULT_TIMESTAMP_FORMAT,
+): string {
   if (!ts) return "-";
-  const d = new Date(ts);
+  const d = parseUtc(ts);
   if (Number.isNaN(d.getTime())) return String(ts);
-  return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+  return d.toLocaleString(undefined, options);
 }
 
 // Backend timestamps are stored in UTC; naive ISO strings (no "Z" or offset)
 // must therefore be parsed as UTC, not local time.
-function parseUtc(ts: string): Date {
-  const hasZone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(ts);
-  return new Date(hasZone ? ts : `${ts}Z`);
+export function parseUtc(ts: string): Date {
+  const iso = ts.trim().replace(" ", "T");
+  const hasZone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(iso);
+  return new Date(hasZone ? iso : `${iso}Z`);
 }
 
 // Compact relative time, e.g. "just now", "5m ago", "3h ago", "2d ago".

@@ -77,7 +77,7 @@ function ModelsTabContent({ newEntryTrigger }: ModelsTabContentProps) {
       }
     },
     onSuccess: () => {
-      invalidate(queryKeys.switchModels);
+      invalidate(queryKeys.switchModels, queryKeys.topology, queryKeys.devices);
       resetForm();
     },
     onError: (ex) => setErr(extractErrorMessage(ex)),
@@ -86,7 +86,7 @@ function ModelsTabContent({ newEntryTrigger }: ModelsTabContentProps) {
   const deleteMutation = useMutation({
     mutationFn: (id: number) => api.del(`/api/switch-models/${id}`),
     onSuccess: () => {
-      invalidate(queryKeys.switchModels);
+      invalidate(queryKeys.switchModels, queryKeys.topology, queryKeys.devices);
       setDeleteTarget(null);
     },
   });
