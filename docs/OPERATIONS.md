@@ -114,8 +114,9 @@ without it they are per process.
    `[entrypoint] Running Alembic migrations...` followed by uvicorn startup.
    Migrations run automatically on every backend start (`alembic upgrade head`).
 5. Open `http://localhost:3000` and log in as `admin` with
-   `DEFAULT_ADMIN_PASSWORD`. Create personal users (Settings) and change the admin
-   password.
+   `DEFAULT_ADMIN_PASSWORD`. Create personal users and change the admin password
+   via the users API (`docs/API.md`; there is no user-management page in the UI).
+   UI usage is described in `docs/USER_GUIDE.md`.
 6. Put a TLS-terminating reverse proxy in front of port 3000 for production (see
    README, section "TLS / HTTPS Setup"). Do not publish the backend port.
 7. Schedule backups (`BACKUP.md`, cron section) and keep a separate copy of `.env`.

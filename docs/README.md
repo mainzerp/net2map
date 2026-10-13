@@ -10,8 +10,9 @@ owns and the reading order. It does not own any topic itself.
 2. `BACKUP.md` — database backup/restore manual.
 3. `VERSION.md` — release history; single source of truth for the version.
 4. `brain/BRAIN.md` — project brain: mission, goals, decisions, roadmap.
-5. `docs/OPERATIONS.md` — when deploying, updating or troubleshooting the stack.
-6. `docs/API.md` — when working on backend endpoints or API clients.
+5. `docs/USER_GUIDE.md` — when operating Net2Map in the browser.
+6. `docs/OPERATIONS.md` — when deploying, updating or troubleshooting the stack.
+7. `docs/API.md` — when working on backend endpoints or API clients.
 
 ## What lives where
 
@@ -27,6 +28,7 @@ owns and the reading order. It does not own any topic itself.
 | `brain/How We Work.md` | Build rhythm and verification commands |
 | `brain/Decisions.md` | Decisions with rationale |
 | `brain/roadmap.md` | Live pipeline board (Backlog / In Progress / Testing / Done / Idea Bank) |
+| `docs/USER_GUIDE.md` | End-user guide for the web UI: login and roles, first scan, every page and settings tab, inspector, command palette, shortcuts, scans, latency monitor, browser-side troubleshooting (English; deployment stays in `docs/OPERATIONS.md`) |
 | `docs/API.md` | API reference: versioning, auth/RBAC, WebSocket ticket flow, error format, endpoint tables per router, central schemas (English) |
 | `docs/OPERATIONS.md` | Ops/deployment: containers and ports, env var reference, setup, update/rollback, health/metrics, logs, demo stack, troubleshooting (English; backup commands stay in `BACKUP.md`) |
 

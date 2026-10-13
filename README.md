@@ -65,7 +65,7 @@ repository; see `docs/OPERATIONS.md`, section "Demo stack").
 - `frontend/` – React + Vite + TypeScript (Tailwind v4, TanStack Query, React Flow), served via Nginx in the Docker setup
 - `docker-compose.yml` – Starts frontend and backend together (plus PostgreSQL, Redis, Celery worker/beat and the latency monitor `latency-monitor`)
 
-Further documentation: `docs/API.md` (API reference), `docs/OPERATIONS.md` (operations, deployment, environment variables); overview in `docs/README.md`.
+Further documentation: `docs/USER_GUIDE.md` (how to use the web UI), `docs/API.md` (API reference), `docs/OPERATIONS.md` (operations, deployment, environment variables); overview in `docs/README.md`.
 
 ## Quickstart with Docker
 
@@ -163,6 +163,8 @@ Optionally, the backend URL can be set via `VITE_API_URL`.
 2. Start a scan
 3. Check devices, links and racks in the map
 4. If needed, manually correct vendor/model per device
+
+Step-by-step instructions for every page: `docs/USER_GUIDE.md`.
 
 ## API Versioning
 
