@@ -1,5 +1,46 @@
 # Version History
 
+## v3.4.0 -- Rack items, UPS/server health, rack fixes
+
+**Type:** MINOR
+
+Released on 2026-10-13 as tag `v3.4.0` (images under
+`ghcr.io/mainzerp/net2map/backend` and `/frontend`, also tagged `latest`).
+Commit `219a6e1`. Migrations 024 (`rack_items`) and 025 (`devices.device_type`, `health`,
+`health_updated_at`) run automatically when the backend starts. Pull or rebuild all
+backend services (`backend`, `celery-worker`, `celery-beat`, `latency-monitor`) so the
+scan workers get the new scanners.
+
+### Features
+
+- Rack items: manually maintained placeholders in the rack view (patch panel, blank
+  panel, cable manager, shelf, other) with label, U position, U height and note. API
+  `GET/POST /racks/{id}/items`, `PATCH/DELETE /rack-items/{id}`; overlap checks against
+  devices and other items, also in `PATCH /racks/{id}/layout`.
+- UPS and server support via SNMP: vendors `eaton` (.534, .705), `hpe_ups` (.232.165)
+  and `hpe_ilo` (.232); other UPS models are recognized via RFC1628 UPS-MIB. New
+  device fields `device_type` (switch, firewall, ups, server), `health` and
+  `health_updated_at`; UPS charge, runtime, load, output source, battery status and
+  alarms; server overall, thermal, power, fan and storage conditions, max temperature,
+  serial and iLO firmware. Shown in the inspector, as a rack faceplate strip, as map
+  node icons and in the dashboard "Attention needed" card. `device_type` can be
+  corrected via `PATCH /topology/devices/{id}/meta`.
+- Devices can be removed from a rack: drag a placed device onto the tray or use the
+  "Remove from rack" button.
+- The rack U-height stepper allows up to 10U (was 4U).
+
+### Fixes
+
+- Devices lost their switch class when edited in the device table: the edit form
+  always sent `class_id` from a possibly stale snapshot; only changed fields are sent
+  now.
+- Settings changes (switch classes, models, racks, ignore toggle, config import, SNMP
+  profiles) now refresh the map, device list and dashboard immediately.
+- Timestamps are shown in browser local time: the Logs page showed raw UTC strings,
+  and naive UTC values from the API were parsed as local time elsewhere.
+- Clearing a device's rack (single and bulk) also clears its U position.
+- FDB walks are skipped for UPS and server devices.
+
 ## v3.3.0 -- Prebuilt images by default, local build override
 
 **Type:** MINOR

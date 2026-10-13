@@ -18,6 +18,41 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
+- Devices lose switch class membership (released v3.4.0) · priority: P1 · area: frontend
+  Cause: `DeviceTable.submitEdit` always PATCHed `class_id` from a stale cache snapshot;
+  `/meta` treats explicit null as unassign. Fix: only changed fields are sent.
+  Passed: DeviceTable tests (rack-only edit omits class_id), backend meta test.
+  User to verify: assign classes, add/edit a new switch in Devices, classes stay.
+- Settings changes apply immediately (released v3.4.0) · priority: P2 · area: frontend
+  Added invalidations (topology/devices/stats/credentials/all) in SwitchClasses,
+  SwitchModels, Racks, Credentials ignore, ImportExport, SnmpProfiles tabs.
+  User to verify: change a class color in Settings, map shows it without reload.
+- Timestamps in browser local time (released v3.4.0) · priority: P2 · area: frontend
+  `formatTimestamp`/`fmtTs` parse naive backend timestamps as UTC; LogsPage formats
+  `entry.ts` (raw ISO in tooltip). Passed: datetime tests in any TZ.
+  User to verify: Logs page times match the local clock.
+- Patch panels as manual rack items (released v3.4.0, migration 024) · priority: P2 · area: full-stack
+  `rack_items` table + `/racks/{id}/items`, `/rack-items/{id}`; kinds patch_panel,
+  blank, cable_manager, shelf, other; overlap checks vs devices and items; "Add item"
+  in the rack view. Passed: 11 backend + 10 frontend tests, typecheck.
+  Open: topology `/meta` still allows placing a device onto an item (no U overlap
+  check there at all); items not draggable (edit U position in dialog).
+  User to verify: /racks, add a patch panel, drag a device onto it is refused.
+- Remove devices from a rack (released v3.4.0) · priority: P2 · area: full-stack
+  Drag a placed device onto the tray (drop zone highlighted) or use the hover "X"
+  button on the faceplate / tray entry: `rack_id` and `rack_u_position` become null.
+  Backend: clearing `rack_id` (single and bulk) now also clears the position.
+  Passed: 8 frontend + 4 backend tests, typecheck, ruff.
+  User to verify: /racks, drag a device onto the tray, it moves to "Unassigned".
+- UPS (HPE/Eaton) and HPE servers via SNMP with status (released v3.4.0, migration 025) · priority: P2 · area: full-stack
+  `device_type` + `health` JSON on devices; scanners eaton/hpe_ups/hpe_ilo; UPS-MIB
+  probe for generic devices; inspector health section, rack health strip, map icons,
+  dashboard attention rows; U stepper up to 10U. Passed: ruff, 833 backend tests
+  (7 snmp_driver asyncore local only), typecheck, 254 frontend tests.
+  Not verified against real hardware (OIDs checked against librenms MIBs only).
+  User to verify: rebuild stack incl. workers, add credentials for a UPS and an iLO,
+  run a scan, check inspector values and rack placement.
+
 - Prebuilt images by default + local build override (released v3.3.0, 9ae8698) · priority: P2 · area: ci
   Done: `docker-compose.yml` runs GHCR images (`NET2MAP_VERSION`, default `latest`),
   `docker-compose.local.yml` builds the checkout under local image names, CI pushes
