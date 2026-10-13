@@ -459,8 +459,8 @@ def test_migration_020_upgrade_downgrade_sqlite():
         assert "lease_fences" not in sa.inspect(conn).get_table_names()
 
 
-def test_alembic_head_is_025():
+def test_alembic_head_is_026():
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory(str(BACKEND / "alembic"))
-    assert script.get_heads() == ["025"]
+    assert script.get_heads() == ["026"]

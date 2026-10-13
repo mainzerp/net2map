@@ -3,7 +3,7 @@ import { ArrowRight, ChevronRight, CircleCheck, CircleX, EyeOff, TriangleAlert, 
 import { formatRelativeTime, formatTimestamp } from "../../utils/datetime";
 import { healthOf, healthSummary, needsAttention } from "../../utils/deviceHealth";
 import { useInspector } from "../../hooks/useInspector";
-import type { ScanRun, TopologyNode } from "../../types";
+import type { ScanRun, SwitchClass, TopologyNode } from "../../types";
 
 // Primary dashboard block: everything that needs a human look, as rows with an
 // icon+word status chip on a soft background (status never by color alone).
@@ -88,10 +88,13 @@ function IssueRow({
 export interface AttentionCardProps {
   nodes: TopologyNode[];
   lastRun?: ScanRun | null;
+  // Switch classes; devices whose class allows placement outside a rack are
+  // not reported as missing a rack.
+  classes?: SwitchClass[];
   className?: string;
 }
 
-export function AttentionCard({ nodes, lastRun = null, className = "" }: AttentionCardProps) {
+export function AttentionCard({ nodes, lastRun = null, classes = [], className = "" }: AttentionCardProps) {
   const navigate = useNavigate();
   const { open: openInspector } = useInspector();
   const offline = nodes.filter((n) => !n.ignored && n.ping_status === "offline");
@@ -100,7 +103,10 @@ export function AttentionCard({ nodes, lastRun = null, className = "" }: Attenti
     .filter((n) => !n.ignored && n.ping_status !== "offline" && needsAttention(n))
     .sort((a, b) => Number(healthOf(b)?.status === "critical") - Number(healthOf(a)?.status === "critical"));
   const ignoredCount = nodes.filter((n) => n.ignored).length;
-  const unassignedCount = nodes.filter((n) => !n.ignored && !n.rack_id).length;
+  const outsideRackClassIds = new Set(classes.filter((c) => c.allow_outside_rack).map((c) => c.id));
+  const unassignedCount = nodes.filter(
+    (n) => !n.ignored && !n.rack_id && !(n.class_id != null && outsideRackClassIds.has(n.class_id)),
+  ).length;
   const lastScanFailed = lastRun != null && (lastRun.status === "failed" || lastRun.status === "error");
 
   const issueCount =

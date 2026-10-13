@@ -13,6 +13,7 @@ import type {
   PortInfo,
 } from "../../types";
 import { CABLE_COLORS, speedColor, speedLabelToMbps } from "../../theme/visual";
+import { floorKeyOf, inFloor, type FloorKey, type FloorScope } from "./floors";
 
 export interface MapRack {
   id: number;
@@ -69,13 +70,18 @@ export function speedFallbackColor(label: string | undefined): string {
 
 // Visible racks ----------------------------------------------------------------
 
+// The optional floor scope restricts every builder to the active floor; with
+// no scope (no floors defined) everything is included as before.
+
 export function buildMapRacks(
   nodes: TopologyNode[],
   managedRacks: RackInfo[],
   filters: FilterState,
+  scope?: FloorScope | null,
 ): MapRack[] {
   const map: Record<number, MapRack> = {};
   (managedRacks || []).forEach(r => {
+    if (scope && !inFloor(scope.rackFloor(r), scope.active)) return;
     map[r.id] = {
       id: r.id,
       label: r.label,
@@ -117,6 +123,7 @@ export function buildOutsideNodes(
   nodes: TopologyNode[],
   switchClasses: SwitchClass[],
   filters: FilterState,
+  scope?: FloorScope | null,
 ): TopologyNode[] {
   const classAllowsOutside = computeClassAllowsOutside(switchClasses);
   // Nodes without a rack are shown outside when their class allows it.
@@ -125,6 +132,9 @@ export function buildOutsideNodes(
   let result = nodes.filter(
     node => node.rack_id == null && (node.class_id == null || classAllowsOutside[node.class_id]),
   );
+  if (scope) {
+    result = result.filter(node => inFloor(scope.deviceFloor(node), scope.active));
+  }
   if (filters?.classes) {
     result = result.filter(node => node.class_id && filters.classes!.has(node.class_id));
   }
@@ -137,11 +147,13 @@ export function buildEndpointIndex(
   nodes: TopologyNode[],
   managedRacks: RackInfo[],
   switchClasses: SwitchClass[],
+  scope?: FloorScope | null,
 ): Record<string, EndpointId> {
   const classAllowsOutside = computeClassAllowsOutside(switchClasses);
   const rackIds = new Set((managedRacks || []).map(r => String(r.id)));
   const map: Record<string, EndpointId> = {};
   nodes.forEach(node => {
+    if (scope && !inFloor(scope.deviceFloor(node), scope.active)) return;
     const rackKey = node.rack_id != null ? String(node.rack_id) : null;
     if (rackKey && rackIds.has(rackKey)) {
       map[node.ip] = rackKey;
@@ -169,24 +181,101 @@ export function buildAggregatedLinks(
     if (!grouped[key]) grouped[key] = { key, from: endpointA, to: endpointB, individual: [] };
     grouped[key].individual.push(l);
   });
-  return Object.values(grouped).map(g => {
-    // Deduplicate by sorted port-pair key to avoid counting both directions
-    const portSeen = new Set<string>();
-    const unique: TopologyLink[] = [];
-    g.individual.forEach(l => {
-      const pk = [l.local_ip + ":" + l.local_port, l.remote_ip + ":" + l.remote_port].sort().join("|");
-      if (!portSeen.has(pk)) {
-        portSeen.add(pk);
-        unique.push(l);
-      }
-    });
-    // Pick the highest speed for the line color
-    const best = unique.reduce(
-      (a, b) => ((SPEED_ORDER[b.speed_label || ""] || 0) > (SPEED_ORDER[a.speed_label || ""] || 0) ? b : a),
-      unique[0],
-    );
-    return { ...g, count: unique.length, speed: best?.speed_label };
+  return Object.values(grouped).map(finalizeAggregate);
+}
+
+function finalizeAggregate(
+  g: { key: string; from: EndpointId; to: EndpointId; individual: TopologyLink[] },
+): AggregatedLink {
+  // Deduplicate by sorted port-pair key to avoid counting both directions
+  const portSeen = new Set<string>();
+  const unique: TopologyLink[] = [];
+  g.individual.forEach(l => {
+    const pk = [l.local_ip + ":" + l.local_port, l.remote_ip + ":" + l.remote_port].sort().join("|");
+    if (!portSeen.has(pk)) {
+      portSeen.add(pk);
+      unique.push(l);
+    }
   });
+  // Pick the highest speed for the line color
+  const best = unique.reduce(
+    (a, b) => ((SPEED_ORDER[b.speed_label || ""] || 0) > (SPEED_ORDER[a.speed_label || ""] || 0) ? b : a),
+    unique[0],
+  );
+  return { ...g, count: unique.length, speed: best?.speed_label };
+}
+
+// Portals (cross-floor links) -----------------------------------------------------
+// A link whose one endpoint is visible on the active floor and whose other
+// endpoint lives on another floor (or is unassigned) becomes a portal: one
+// portal node per remote endpoint, with one aggregated edge (from = local,
+// to = remote) per local endpoint it connects to.
+
+export interface Portal {
+  remote: EndpointId;
+  remoteFloor: FloorKey;
+  links: AggregatedLink[];
+}
+
+export function portalNodeId(remote: EndpointId): string {
+  return `portal:${remote}`;
+}
+
+// Floor key of an endpoint id (rack id or `outside:<deviceId>`).
+export function makeEndpointFloor(
+  nodes: TopologyNode[],
+  managedRacks: RackInfo[],
+  scope: FloorScope,
+): (endpoint: EndpointId) => FloorKey {
+  const racksById = new Map((managedRacks || []).map(r => [String(r.id), r]));
+  const nodesById = new Map((nodes || []).map(n => [String(n.id), n]));
+  return endpoint => {
+    if (endpoint.startsWith("outside:")) {
+      const node = nodesById.get(endpoint.slice("outside:".length));
+      return floorKeyOf(node ? scope.deviceFloor(node) : null);
+    }
+    const rack = racksById.get(endpoint);
+    return floorKeyOf(rack ? scope.rackFloor(rack) : null);
+  };
+}
+
+export function buildPortals(
+  links: TopologyLink[],
+  endpointByIp: Record<string, EndpointId>,
+  visibleEndpointIds: Set<EndpointId>,
+  endpointFloor: (endpoint: EndpointId) => FloorKey,
+  active: FloorKey,
+): Portal[] {
+  const grouped: Record<string, { key: string; from: EndpointId; to: EndpointId; individual: TopologyLink[] }> = {};
+  (links || []).forEach(l => {
+    const a = endpointByIp[l.local_ip];
+    const b = endpointByIp[l.remote_ip];
+    if (!a || !b || a === b) return;
+    const aLocal = visibleEndpointIds.has(a);
+    const bLocal = visibleEndpointIds.has(b);
+    if (aLocal === bLocal) return;
+    const local = aLocal ? a : b;
+    const remote = aLocal ? b : a;
+    // Same floor but hidden by a filter: no portal (matches plain filtering).
+    if (endpointFloor(remote) === active) return;
+    const key = [local, remote].sort().join("|");
+    if (!grouped[key]) grouped[key] = { key, from: local, to: remote, individual: [] };
+    grouped[key].individual.push(l);
+  });
+  const byRemote = new Map<EndpointId, AggregatedLink[]>();
+  Object.values(grouped).forEach(g => {
+    const agg = finalizeAggregate(g);
+    const list = byRemote.get(agg.to) ?? [];
+    list.push(agg);
+    byRemote.set(agg.to, list);
+  });
+  return [...byRemote.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([remote, list]) => ({
+      remote,
+      remoteFloor: endpointFloor(remote),
+      links: list.sort((x, y) => x.from.localeCompare(y.from)),
+    }));
 }
 
 // Link status -------------------------------------------------------------------

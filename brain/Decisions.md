@@ -332,3 +332,16 @@
   `vendor_override` is set.
 - **Device edits send only changed fields**: `/meta` treats explicit `null` as
   "clear", so stale form snapshots must never be sent (cause of lost class membership).
+
+## Buildings and floors on the map (2026-10-13)
+
+- **Campus model** (user decision): buildings > floors, exactly one floor active on the
+  map, no all-floors view. Racks and unracked devices carry `floor_id`; a racked
+  device's effective floor is its rack's floor (computed in the frontend).
+- **Cross-floor links are portal nodes** (user decision): one per remote endpoint,
+  click switches floor and focuses the device; not persisted.
+- **Background per floor** in `/data/floor-<id>-background.<ext>` with per-floor
+  opacity/scale/color; the legacy single-image endpoints stay as deprecated aliases
+  for the first floor (keeps the change MINOR). Migration 026 creates "Main building" /
+  "Ground floor" and moves existing racks, unracked devices and the background there.
+- Items without a floor (new scan results) appear on an "Unassigned" pseudo-floor.

@@ -83,7 +83,9 @@ empty, so a stock compose deployment without `JWT_SECRET` runs in legacy mode.
   `localStorage` (`auth_token`).
 - A global dependency (`_require_auth`) applies to every HTTP route of the app.
   Exempt paths (matched against the server-parsed path, version-independent):
-  `/health`, `/auth/login`, `/auth/refresh`, `/map-background`. On exempt paths a
+  `/health`, `/auth/login`, `/auth/refresh`, `/map-background`, and for `GET` only
+  `/floors/{floor_id}/background` (per-floor background images loaded via `<img>`;
+  `POST`/`DELETE` on that path are not exempt). On exempt paths a
   presented valid token is still honored ("soft auth"), so role-guarded methods on
   those paths (upload/delete of the map background) still require a token.
 - `/metrics` is NOT exempt: with auth enabled it requires a bearer token.
@@ -214,6 +216,9 @@ monitor in `latency_mode=selected`). Plus:
 - `id`, `last_seen`, `ports: PortOut[]`
 - `rack_id`, `class_id`, `model_id`, `rack_u_position` (1..48 or null = not placed),
   `u_height` (default 1)
+- `floor_id`: floor of an unracked device, or null. A racked device's effective
+  floor is its rack's `floor_id` (computed by the client); rack changes never
+  modify `floor_id`.
 - `ports_per_row`, `total_ports`: resolved from the assigned switch model
 - `stp: StpInfo | null`: bridge-level spanning tree summary of the default instance.
   `StpInfo` = `protocol` (`stp|rstp|mstp|unknown`), `bridge_id`
@@ -268,7 +273,8 @@ are non-ignored devices.
 ### TopologyOut
 
 `nodes: DeviceOut[]` (non-ignored devices), `links: TopologyLinkOut[]`,
-`racks: RackOut[]`, `classes: SwitchClassOut[]`, `models: SwitchModelOut[]`.
+`racks: RackOut[]`, `classes: SwitchClassOut[]`, `models: SwitchModelOut[]`,
+`buildings: BuildingOut[]` (sorted by `sort_order`, then `id`; see the floors router).
 
 ### Secret masking
 
@@ -342,8 +348,8 @@ Physical racks and rack elevation layout.
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
 | GET | `/racks` | any | List racks. | `RackOut[]` |
-| POST | `/racks` | op+ | Create (`height_u` 6..60, default 42). | `RackCreate` -> `RackOut` (201) |
-| PUT | `/racks/{rack_id}` | op+ | Update. A `height_u` that would exclude a placed device or a rack item -> 409 `U_POSITION_OUT_OF_RANGE`. | `RackUpdate` -> `RackOut` |
+| POST | `/racks` | op+ | Create (`height_u` 6..60, default 42; optional `floor_id`, unknown -> 404 `FLOOR_NOT_FOUND`). | `RackCreate` -> `RackOut` (201) |
+| PUT | `/racks/{rack_id}` | op+ | Update. A `height_u` that would exclude a placed device or a rack item -> 409 `U_POSITION_OUT_OF_RANGE`. `floor_id`: unknown -> 404 `FLOOR_NOT_FOUND`, explicit null clears it (other null fields are ignored). | `RackUpdate` -> `RackOut` |
 | DELETE | `/racks/{rack_id}` | admin | Delete; detaches its devices and deletes its rack items. | 204 |
 | PATCH | `/racks/{rack_id}/layout` | op+ | Set U positions/heights of devices in this rack. Omitted devices stay in place. Rejects duplicates and devices not in the rack (422), unknown devices (404), out-of-range placements and U overlaps with other devices or rack items (409 `U_POSITION_OUT_OF_RANGE`, `U_OVERLAP`). | `RackLayoutIn` `{entries: [{device_id, rack_u_position, u_height}]}` -> `{"updated": n}` |
 
@@ -364,6 +370,42 @@ items (409 `U_OVERLAP`). Writes bump the topology version and are audit-logged
 | POST | `/racks/{rack_id}/items` | op+ | Create an item. | `RackItemCreate` `{kind, label, rack_u_position, u_height, note}` -> `RackItemOut` (201) |
 | PATCH | `/rack-items/{item_id}` | op+ | Partial update; explicit null is ignored except for `note` (clears it). Unknown item -> 404 `RACK_ITEM_NOT_FOUND`. | `RackItemUpdate` -> `RackItemOut` |
 | DELETE | `/rack-items/{item_id}` | op+ | Delete an item. | 204 |
+
+### floors (`routers/floors.py`)
+
+Buildings and their floors for the topology map (migration 026). Every floor has
+its own background image (stored as `/data/floor-<id>-background.<ext>`) and
+background settings. Racks (`floor_id`) and unracked devices (`floor_id`) are
+assigned to floors; a racked device's effective floor is its rack's floor. Writes
+bump the topology version and are audit-logged (`building`, `floor`,
+`floor_background`). Buildings and floors are ordered by `sort_order`, then `id`.
+
+Schemas:
+
+- `BuildingOut`: `id`, `label`, `description` (nullable), `sort_order`,
+  `floors: FloorOut[]`.
+- `FloorOut`: `id`, `building_id`, `label`, `sort_order`, `has_background`,
+  `bg_version` (incremented on every background upload/delete; use it as a cache
+  buster), `bg_opacity`, `bg_scale`, `bg_color`.
+- `BuildingCreate` `{label (1..120 chars), description?, sort_order? = 0}`;
+  `BuildingUpdate` all optional (explicit null clears `description`, other nulls
+  are ignored).
+- `FloorCreate` `{label (1..120 chars), sort_order? = 0}`; `FloorUpdate`
+  `{label?, sort_order?, building_id?, bg_opacity? (0..1), bg_scale? (0.1..10),
+  bg_color? (max 20 chars)}`; out-of-range values -> 422, explicit nulls are ignored.
+
+| Method | Path | Role | Description | Schema |
+|---|---|---|---|---|
+| GET | `/buildings` | any | List buildings with their floors. | `BuildingOut[]` |
+| POST | `/buildings` | op+ | Create a building. | `BuildingCreate` -> `BuildingOut` (201) |
+| PATCH | `/buildings/{building_id}` | op+ | Partial update. Unknown -> 404 `BUILDING_NOT_FOUND`. | `BuildingUpdate` -> `BuildingOut` |
+| DELETE | `/buildings/{building_id}` | admin | Delete with all floors; racks/devices on them get `floor_id` null; background files are deleted. | 204 |
+| POST | `/buildings/{building_id}/floors` | op+ | Create a floor. | `FloorCreate` -> `FloorOut` (201) |
+| PATCH | `/floors/{floor_id}` | op+ | Partial update (also moves the floor to another building). Unknown floor -> 404 `FLOOR_NOT_FOUND`, unknown `building_id` -> 404 `BUILDING_NOT_FOUND`. | `FloorUpdate` -> `FloorOut` |
+| DELETE | `/floors/{floor_id}` | admin | Delete; racks/devices on it get `floor_id` null; background file is deleted. | 204 |
+| POST | `/floors/{floor_id}/background` | op+ | Upload/replace the floor background (multipart field `file`); same validation, sanitizing, size limit and 5/min rate limit as `POST /map-background`. Increments `bg_version`. | -> `FloorOut` |
+| GET | `/floors/{floor_id}/background` | public (GET only) | Serve the floor background with the same headers and single-range rule as `GET /map-background`. `404 NO_BACKGROUND_IMAGE` when unset or the floor does not exist. | file |
+| DELETE | `/floors/{floor_id}/background` | op+ | Remove the floor background. Increments `bg_version`. | -> `FloorOut` |
 
 ### switch_classes (`routers/switch_classes.py`)
 
@@ -421,25 +463,31 @@ version (invalidates the `GET /topology` ETag cache).
 
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
-| GET | `/topology` | any | Full map: non-ignored devices, links, racks, classes, models. ETag/304. | `TopologyOut` |
+| GET | `/topology` | any | Full map: non-ignored devices, links, racks, classes, models, buildings with floors. ETag/304. | `TopologyOut` |
 | GET | `/devices` | any | All devices including ignored, ordered by IP. ETag/304. | `DeviceOut[]` |
 | PATCH | `/topology/devices/{device_id}/position` | op+ | Persist drag-and-drop position. | `DevicePositionUpdate` `{map_x, map_y}` -> `DeviceOut` |
 | PATCH | `/topology/racks/{rack_id}/position` | op+ | Persist rack position on the map. | `RackPositionUpdate` -> `RackOut` |
-| PATCH | `/topology/devices/bulk-meta` | op+ | Bulk set `ignored`, `rack_id` / `clear_rack`, `class_id` (enforces `allow_outside_rack`). | `BulkDeviceMetaUpdate` -> `{"updated": n}` |
-| PATCH | `/topology/devices/{device_id}/meta` | op+ | Partial update of location, sys_name, vendor (sets `vendor_override`), model, rack/class/model ids, ignored, label, enabled, `rack_u_position` (null unplaces), `u_height`, `vendor_override`, `latency_monitored`, `device_type` (`switch|firewall|ups|server`, other values 422). Audit-logged with the changed field names. | `DeviceMetaUpdate` -> `DeviceOut` |
+| PATCH | `/topology/devices/bulk-meta` | op+ | Bulk set `ignored`, `rack_id` / `clear_rack`, `class_id` (enforces `allow_outside_rack`), `floor_id` / `clear_floor` (unknown floor -> 404 `FLOOR_NOT_FOUND`). | `BulkDeviceMetaUpdate` -> `{"updated": n}` |
+| PATCH | `/topology/devices/{device_id}/meta` | op+ | Partial update of location, sys_name, vendor (sets `vendor_override`), model, rack/class/model ids, `floor_id` (explicit null clears, unknown -> 404 `FLOOR_NOT_FOUND`; rack changes keep it), ignored, label, enabled, `rack_u_position` (null unplaces), `u_height`, `vendor_override`, `latency_monitored`, `device_type` (`switch|firewall|ups|server`, other values 422). Audit-logged with the changed field names. | `DeviceMetaUpdate` -> `DeviceOut` |
 
 ### map_bg (`routers/map_bg.py`)
 
-Map background image and display settings. The image is stored under `/data` in the
-backend container; opacity/scale/color are stored as app settings in the database.
+Deprecated since migration 026: use the per-floor endpoints of the floors router.
+These endpoints keep working and operate on the default floor = the first floor
+ordered by building (`sort_order`, `id`), then floor (`sort_order`, `id`). The
+image is stored as `/data/floor-<id>-background.<ext>` in the backend container;
+opacity/scale/color are the floor's `bg_opacity`/`bg_scale`/`bg_color`. Without
+any floor, `GET /map-background` returns 404 and `GET /map-settings` the defaults
+(`0.3`, `1.0`, `#020817`); `POST /map-background` and `PUT /map-settings` first
+create a building "Main building" with a floor "Ground floor".
 
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
-| POST | `/map-background` | op+ (token required although the path is auth-exempt) | Upload/replace (multipart field `file`). Allowed: png, jpeg, gif, webp (magic-byte check) and SVG (sanitized against an element allowlist). Max 20 MB (`FILE_TOO_LARGE`, `shared/file_settings.py`); nginx allows bodies up to 25 MB. 5/min. | -> `{ok, filename, size}` |
-| GET | `/map-background` | public | Serve the stored image (`Content-Security-Policy: script-src 'none'`). Single byte range only (`416` otherwise). `404 NO_BACKGROUND_IMAGE` when unset. | file |
-| DELETE | `/map-background` | admin (token required) | Remove the image. | -> `{ok}` |
-| GET | `/map-settings` | any | Background opacity, scale, color. | `MapSettingsOut` |
-| PUT | `/map-settings` | op+ | Update (opacity clamped 0..1, scale 0.1..10, color max 20 chars). | `MapSettingsUpdate` -> `MapSettingsOut` |
+| POST | `/map-background` | op+ (token required although the path is auth-exempt) | Deprecated. Upload/replace (multipart field `file`). Allowed: png, jpeg, gif, webp (magic-byte check) and SVG (sanitized against an element allowlist). Max 20 MB (`FILE_TOO_LARGE`, `shared/file_settings.py`); nginx allows bodies up to 25 MB. 5/min. | -> `{ok, filename, size}` |
+| GET | `/map-background` | public | Deprecated. Serve the default floor's image (`Content-Security-Policy: script-src 'none'`). Single byte range only (`416` otherwise). `404 NO_BACKGROUND_IMAGE` when unset. | file |
+| DELETE | `/map-background` | admin (token required) | Deprecated. Remove the default floor's image. | -> `{ok}` |
+| GET | `/map-settings` | any | Deprecated. Default floor's background opacity, scale, color. | `MapSettingsOut` |
+| PUT | `/map-settings` | op+ | Deprecated. Update (opacity clamped 0..1, scale 0.1..10, color max 20 chars). | `MapSettingsUpdate` -> `MapSettingsOut` |
 
 ### scan_settings (`routers/scan_settings.py`)
 

@@ -22,5 +22,19 @@ export {
   type ScanRunEntry,
 } from "./useScanConfig";
 export { useDnsServers } from "./useDnsServers";
-export { useMapSettings, useMapBackground, type MapSettings } from "./useMapSettings";
+export {
+  useBuildings,
+  useCreateBuilding,
+  useUpdateBuilding,
+  useDeleteBuilding,
+  useCreateFloor,
+  useUpdateFloor,
+  useDeleteFloor,
+  useUploadFloorBackground,
+  useDeleteFloorBackground,
+  uploadFloorBackground,
+  type BuildingInput,
+  type FloorInput,
+  type FloorPatch,
+} from "./useBuildings";
 export { useLatencySummary, useLatencyHistory, latencyRefetchMs } from "./useLatency";

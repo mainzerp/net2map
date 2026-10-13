@@ -34,6 +34,7 @@ import type {
   FilterState,
   LatencyDevice,
   LatencySummary,
+  Building,
 } from "../../types";
 import { useTheme } from "../../theme/ThemeProvider";
 import { speedLabelToMbps, speedStrokeWidth } from "../../theme/visual";
@@ -55,7 +56,23 @@ import {
   speedFallbackColor,
   linkStatus,
   aggregateLinkStatus,
+  buildPortals,
+  makeEndpointFloor,
+  portalNodeId,
+  type AggregatedLink,
+  type Portal,
 } from "./graph";
+import {
+  createFloorScope,
+  findFloor,
+  flattenFloors,
+  floorDisplayLabel,
+  floorKeyOf,
+  viewportStorageKey,
+  type FloorKey,
+} from "./floors";
+import FloorSwitcher from "./FloorSwitcher";
+import PortalNode from "./nodes/PortalNode";
 import { ZoomTierContext, ScanPulseContext, zoomTier } from "./zoomTier";
 import {
   FlowEnabledContext,
@@ -93,10 +110,18 @@ import {
 } from "./layout";
 import type { TopoFlowNode, AggregatedFlowEdge, EdgeOverlay } from "./flowTypes";
 
-const nodeTypes = { rack: RackNode, device: DeviceNode, mapBackground: BackgroundNode } as unknown as NodeTypes;
+const nodeTypes = {
+  rack: RackNode,
+  device: DeviceNode,
+  mapBackground: BackgroundNode,
+  portal: PortalNode,
+} as unknown as NodeTypes;
 const edgeTypes = { aggregated: AggregatedEdge } as unknown as EdgeTypes;
 
-const VIEWPORT_STORAGE_KEY = "net2map-zoom";
+// Portal nodes stack beside their local endpoint (deterministic, not persisted).
+const PORTAL_NODE_SIZE = { width: 200, height: 30 };
+const PORTAL_GAP_X = 56;
+const PORTAL_GAP_Y = 10;
 
 // Shared empty latency index: keeps the edge-overlay memo stable while the
 // latency layer is inactive, so summary polls do not re-render every edge.
@@ -150,6 +175,14 @@ interface TopologyCanvasProps {
   scanPulseIps?: string[];
   // Latency monitor summary for the latency layer (polled by the page).
   latency?: LatencySummary | null;
+  // Buildings/floors: with an active floor the canvas only shows racks and
+  // devices of that floor plus portal nodes for cross-floor links. Null or
+  // omitted = unscoped map (no floors defined).
+  buildings?: Building[];
+  activeFloor?: FloorKey | null;
+  floorCounts?: Map<FloorKey, number>;
+  unassignedCount?: number;
+  onActiveFloorChange?: (key: FloorKey) => void;
 }
 
 // Zoom the "Show on map" focus lands on: close tier for devices (port strip
@@ -158,10 +191,19 @@ const FOCUS_DEVICE_ZOOM = 1.3;
 const FOCUS_RACK_ZOOM = 1.0;
 
 const EMPTY_IPS: string[] = [];
+const EMPTY_BUILDINGS: Building[] = [];
+const EMPTY_COUNTS: Map<FloorKey, number> = new Map();
+const LEGACY_VIEWPORT_KEY = viewportStorageKey(null);
 
-function loadStoredViewport(): Viewport | null {
+// Per-floor viewport ("net2map-zoom:<floorKey>"); the first floor falls back
+// to the pre-floors key so an existing saved view carries over.
+function loadStoredViewport(key: string, legacyFallback: boolean): Viewport | null {
+  return parseStoredViewport(key) ?? (legacyFallback ? parseStoredViewport(LEGACY_VIEWPORT_KEY) : null);
+}
+
+function parseStoredViewport(key: string): Viewport | null {
   try {
-    const raw = localStorage.getItem(VIEWPORT_STORAGE_KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     // Current xyflow format
@@ -197,6 +239,8 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
     selectedLink, rackPairColorMap,
     mapBgUrl, mapBgOpacity, mapBgScale, mapBgColor,
     stats, updatedAt, scan, scanPulseIps = EMPTY_IPS, latency = null,
+    buildings = EMPTY_BUILDINGS, activeFloor = null, floorCounts = EMPTY_COUNTS, unassignedCount = 0,
+    onActiveFloorChange,
   } = props;
 
   const rf = useReactFlow();
@@ -218,7 +262,25 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
   }, []);
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState<TopoFlowNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<AggregatedFlowEdge>([]);
-  const [initialViewport] = useState<Viewport | null>(loadStoredViewport);
+  const firstFloorId = useMemo(() => flattenFloors(buildings)[0]?.floor.id ?? null, [buildings]);
+  const viewportKey = viewportStorageKey(activeFloor);
+  const legacyViewportFallback = activeFloor != null && activeFloor === firstFloorId;
+  const [initialViewport] = useState<Viewport | null>(() => loadStoredViewport(viewportKey, legacyViewportFallback));
+  const viewportKeyRef = useRef(viewportKey);
+  // Floor the current flowNodes were built for (null = unscoped); lets the
+  // focus and fit effects wait until a floor switch has been rebuilt.
+  const [builtFloor, setBuiltFloor] = useState<FloorKey | null>(null);
+  const pendingFitRef = useRef(false);
+  const scope = useMemo(
+    () => (activeFloor != null ? createFloorScope(activeFloor, managedRacks) : null),
+    [activeFloor, managedRacks],
+  );
+  // Rack filter chips only list racks of the active floor.
+  const floorRacks = useMemo(
+    () => (scope ? managedRacks.filter(r => floorKeyOf(scope.rackFloor(r)) === scope.active) : managedRacks),
+    [managedRacks, scope],
+  );
+  const activeBuildingId = typeof activeFloor === "number" ? findFloor(buildings, activeFloor)?.building.id ?? null : null;
   // Node ids whose dragged position was sent to the backend but may not be
   // reflected in the polled topology yet; the rebuild keeps their canvas
   // position until the server catches up.
@@ -229,10 +291,13 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
     [switchClasses],
   );
 
-  const racks = useMemo(() => buildMapRacks(nodes, managedRacks, filters), [nodes, managedRacks, filters]);
+  const racks = useMemo(
+    () => buildMapRacks(nodes, managedRacks, filters, scope),
+    [nodes, managedRacks, filters, scope],
+  );
   const outsideNodes = useMemo(
-    () => buildOutsideNodes(nodes, switchClasses, filters),
-    [nodes, switchClasses, filters],
+    () => buildOutsideNodes(nodes, switchClasses, filters, scope),
+    [nodes, switchClasses, filters, scope],
   );
 
   // Resolve node positions: stored coordinates where available, dagre for
@@ -276,7 +341,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
     // Partial dagre: lay out only unpositioned nodes, anchored beside the
     // bounding box of the positioned ones.
     if (pending.length > 0) {
-      const endpointByIp = buildEndpointIndex(nodes, managedRacks, switchClasses);
+      const endpointByIp = buildEndpointIndex(nodes, managedRacks, switchClasses, scope);
       const pendingEdges = (links || [])
         .map(l => {
           const a = endpointByIp[l.local_ip];
@@ -302,16 +367,23 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
 
     const byId = new Map(positioned.map(p => [p.id, p]));
     return { positions: byId };
-  }, [racks, outsideNodes, nodes, managedRacks, switchClasses, links]);
+  }, [racks, outsideNodes, nodes, managedRacks, switchClasses, links, scope]);
 
-  // Aggregated inter-endpoint links for the canvas.
-  const aggregated = useMemo(() => {
+  // Aggregated inter-endpoint links for the canvas, plus portals for links
+  // that leave the active floor. The endpoint index stays global so remote
+  // endpoints on other floors can be resolved.
+  const { aggregated, portals } = useMemo(() => {
     const endpointByIp = buildEndpointIndex(nodes, managedRacks, switchClasses);
     const visible = new Set<string>();
     racks.forEach(r => visible.add(String(r.id)));
     outsideNodes.forEach(n => visible.add(`outside:${n.id}`));
-    return buildAggregatedLinks(links, endpointByIp, visible);
-  }, [nodes, managedRacks, switchClasses, racks, outsideNodes, links]);
+    const local = buildAggregatedLinks(links, endpointByIp, visible);
+    const cross: Portal[] = scope
+      ? buildPortals(links, endpointByIp, visible, makeEndpointFloor(nodes, managedRacks, scope), scope.active)
+      : [];
+    return { aggregated: local, portals: cross };
+  }, [nodes, managedRacks, switchClasses, racks, outsideNodes, links, scope]);
+  const portalLinks = useMemo<AggregatedLink[]>(() => portals.flatMap(p => p.links), [portals]);
 
   const nodesByIp = useMemo(() => new Map(nodes.map(n => [n.ip, n])), [nodes]);
 
@@ -345,7 +417,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
     if (layer === "off") return result;
     const endpointByIp = buildEndpointIndex(nodes, managedRacks, switchClasses);
     const color = selectedVlan == null ? undefined : vlanColor(selectedVlan);
-    aggregated.forEach(l => {
+    [...aggregated, ...portalLinks].forEach(l => {
       const pairKey = [l.from, l.to].sort().join("|");
       if (layer === "latency") {
         // Unknown on both ends: no overlay, the edge keeps its default look.
@@ -379,7 +451,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
       });
     });
     return result;
-  }, [layer, selectedVlan, aggregated, nodes, nodesByIp, managedRacks, switchClasses, latencyById]);
+  }, [layer, selectedVlan, aggregated, portalLinks, nodes, nodesByIp, managedRacks, switchClasses, latencyById]);
 
   // Which endpoint pair contains the link selected in RackDetail.
   const activePairKey = useMemo(() => {
@@ -390,6 +462,39 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
     if (!a || !b || a === b) return null;
     return [a, b].sort().join("|");
   }, [selectedLink, nodes, managedRacks, switchClasses]);
+
+  // Display data per portal: "<floor> / <rack label or device name>" (with a
+  // building prefix when the remote floor is in another building), the local
+  // node it is anchored to, and the remote device a click focuses.
+  const portalViews = useMemo(() => {
+    if (portals.length === 0) return [];
+    const endpointByIp = buildEndpointIndex(nodes, managedRacks, switchClasses);
+    const racksById = new Map(managedRacks.map(r => [String(r.id), r]));
+    const nodesById = new Map(nodes.map(n => [String(n.id), n]));
+    return portals.map(portal => {
+      const first = portal.links[0];
+      const targetLabel = portal.remote.startsWith("outside:")
+        ? (() => {
+            const n = nodesById.get(portal.remote.slice("outside:".length));
+            return n ? n.sys_name || n.ip : portal.remote;
+          })()
+        : racksById.get(portal.remote)?.label ?? `Rack ${portal.remote}`;
+      const floorLabel = floorDisplayLabel(buildings, portal.remoteFloor, activeBuildingId);
+      const link = first.individual[0];
+      const remoteIp = link && endpointByIp[link.local_ip] === portal.remote ? link.local_ip : link?.remote_ip;
+      return {
+        id: portalNodeId(portal.remote),
+        anchorId: endpointToNodeId(first.from),
+        data: {
+          label: `${floorLabel} / ${targetLabel}`,
+          floorLabel,
+          targetLabel,
+          remoteFloor: portal.remoteFloor,
+          remoteDeviceId: remoteIp ? nodesByIp.get(remoteIp)?.id ?? null : null,
+        },
+      };
+    });
+  }, [portals, nodes, managedRacks, switchClasses, buildings, activeBuildingId, nodesByIp]);
 
   // Rebuild flow nodes/edges whenever the model changes. Selection flags are
   // carried over from the previous node state.
@@ -478,41 +583,97 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
         });
       });
 
+      // Portals: stacked to the right of their anchor (local) node. As child
+      // nodes (parentId) they follow the anchor while it is dragged; their
+      // position is relative to it and never persisted.
+      const placedById = new Map(next.map(n => [n.id, n]));
+      const stackCount = new Map<string, number>();
+      portalViews.forEach(view => {
+        const anchor = placedById.get(view.anchorId);
+        if (!anchor) return;
+        const anchorWidth = (anchor.style?.width as number) ?? DEVICE_NODE_SIZE.width;
+        const slot = stackCount.get(view.anchorId) ?? 0;
+        stackCount.set(view.anchorId, slot + 1);
+        next.push({
+          id: view.id,
+          type: "portal",
+          parentId: view.anchorId,
+          position: {
+            x: anchorWidth + PORTAL_GAP_X,
+            y: slot * (PORTAL_NODE_SIZE.height + PORTAL_GAP_Y),
+          },
+          data: view.data,
+          style: { width: PORTAL_NODE_SIZE.width, height: PORTAL_NODE_SIZE.height, zIndex: 1 },
+          draggable: false,
+          selectable: false,
+          deletable: false,
+        });
+      });
+
       return next;
     });
     // Drop pending markers for nodes whose PATCHed position has landed.
     caughtUp.forEach(id => pendingPositionRef.current.delete(id));
+    setBuiltFloor(activeFloor);
 
-    setEdges(
-      aggregated.map(l => {
-        const pairKey = [l.from, l.to].sort().join("|");
-        const color = rackPairColorMap[pairKey] || speedFallbackColor(l.speed);
-        // Ink weight encodes the best member speed; the count is in the label.
-        const width = speedStrokeWidth(speedLabelToMbps(l.speed));
-        const status = aggregateLinkStatus(l.individual.map(link => linkStatus(link, nodesByIp)));
-        return {
-          id: `agg:${pairKey}`,
-          source: endpointToNodeId(l.from),
-          target: endpointToNodeId(l.to),
-          type: "aggregated",
-          data: {
-            label: l.count > 1 ? `${l.count}x ${l.speed || ""}`.trim() : l.speed || "",
-            color,
-            width,
-            active: activePairKey === pairKey,
-            status,
-            overlay: edgeOverlays.get(pairKey),
-          },
-          selectable: false,
-          deletable: false,
-        };
-      }),
-    );
-  }, [graphModel, aggregated, activePairKey, racks, outsideNodes, classMap, rackPairColorMap, nodesByIp, edgeOverlays, layer, selectedVlan, mapBgUrl, mapBgOpacity, mapBgScale, mapBgColor, setFlowNodes, setEdges]);
+    const toEdge = (l: AggregatedLink, portal: boolean): AggregatedFlowEdge => {
+      const pairKey = [l.from, l.to].sort().join("|");
+      const color = rackPairColorMap[pairKey] || speedFallbackColor(l.speed);
+      // Ink weight encodes the best member speed; the count is in the label.
+      const width = speedStrokeWidth(speedLabelToMbps(l.speed));
+      const status = aggregateLinkStatus(l.individual.map(link => linkStatus(link, nodesByIp)));
+      return {
+        id: `${portal ? "portal-edge" : "agg"}:${pairKey}`,
+        source: endpointToNodeId(l.from),
+        target: portal ? portalNodeId(l.to) : endpointToNodeId(l.to),
+        type: "aggregated",
+        data: {
+          label: l.count > 1 ? `${l.count}x ${l.speed || ""}`.trim() : l.speed || "",
+          color,
+          width,
+          active: activePairKey === pairKey,
+          status,
+          overlay: edgeOverlays.get(pairKey),
+          portal,
+        },
+        selectable: false,
+        deletable: false,
+      };
+    };
+
+    setEdges([
+      ...aggregated.map(l => toEdge(l, false)),
+      ...portalLinks.map(l => toEdge(l, true)),
+    ]);
+  }, [graphModel, aggregated, portalLinks, portalViews, activeFloor, activePairKey, racks, outsideNodes, classMap, rackPairColorMap, nodesByIp, edgeOverlays, layer, selectedVlan, mapBgUrl, mapBgOpacity, mapBgScale, mapBgColor, setFlowNodes, setEdges]);
+
+  // Floor switch: restore the new floor's saved viewport, or fit the view
+  // once the new floor has been rebuilt and measured.
+  useEffect(() => {
+    if (viewportKeyRef.current === viewportKey) return;
+    viewportKeyRef.current = viewportKey;
+    const stored = loadStoredViewport(viewportKey, legacyViewportFallback);
+    if (stored) {
+      pendingFitRef.current = false;
+      void rf.setViewport(stored);
+    } else {
+      pendingFitRef.current = true;
+    }
+  }, [viewportKey, legacyViewportFallback, rf]);
+
+  useEffect(() => {
+    if (!pendingFitRef.current || builtFloor !== activeFloor || !nodesInitialized) return;
+    pendingFitRef.current = false;
+    requestAnimationFrame(() => {
+      if (!mountedRef.current) return;
+      void rf.fitView({ duration: 0, padding: 0.15 });
+    });
+  }, [builtFloor, activeFloor, nodesInitialized, flowNodes, rf]);
 
   // Center the viewport on a rack/outside node when its selection changes
   // (covers rack clicks, toolbar search and the highlightPortKey deep-link).
   const lastCenteredRef = useRef<string | null>(null);
+  const floorRequestRef = useRef<{ deviceId: number; floor: FloorKey } | null>(null);
   useEffect(() => {
     const key = selectedRackId != null
       ? rackNodeId(selectedRackId)
@@ -548,6 +709,24 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
       clearFocusDevice();
       return;
     }
+    if (scope) {
+      // Target on another floor: switch first (once), then wait until the
+      // new floor has been rebuilt before looking for the node.
+      const targetFloor = floorKeyOf(scope.deviceFloor(device));
+      if (targetFloor !== scope.active) {
+        const requested = floorRequestRef.current;
+        if (onActiveFloorChange && !(requested && requested.deviceId === device.id && requested.floor === targetFloor)) {
+          floorRequestRef.current = { deviceId: device.id, floor: targetFloor };
+          onActiveFloorChange(targetFloor);
+        } else {
+          floorRequestRef.current = null;
+          clearFocusDevice();
+        }
+        return;
+      }
+      if (builtFloor !== scope.active) return;
+    }
+    floorRequestRef.current = null;
     const rackTarget = device.rack_id != null ? rackNodeId(device.rack_id) : null;
     const target =
       (rackTarget && flowNodes.find(n => n.id === rackTarget)) ||
@@ -574,7 +753,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
       void rf.setCenter(cx, cy, { zoom, duration: prefersReducedMotion() ? 0 : 400 });
     });
     clearFocusDevice();
-  }, [focusDeviceId, nodes, flowNodes, nodesInitialized, rf, clearFocusDevice]);
+  }, [focusDeviceId, nodes, flowNodes, nodesInitialized, rf, clearFocusDevice, scope, builtFloor, onActiveFloorChange]);
 
   const handleNodeDragStop = useCallback(
     (_event: MouseEvent | TouchEvent, node: TopoFlowNode) => {
@@ -622,13 +801,21 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
           if (onOpenDevice) onOpenDevice(device.id);
           else onSelectOutside(device);
         }
+        return;
+      }
+      if (node.type === "portal") {
+        // Switch to the remote floor, then select and focus the remote device
+        // through the regular search/focus path (TopologyCanvas focus effect).
+        onActiveFloorChange?.(node.data.remoteFloor);
+        const device = nodes.find(n => n.id === node.data.remoteDeviceId);
+        if (device) onSearchSelect(device);
       }
     },
-    [racks, nodes, onSelectRack, onSelectOutside, onOpenDevice],
+    [racks, nodes, onSelectRack, onSelectOutside, onOpenDevice, onActiveFloorChange, onSearchSelect],
   );
 
   const handleAutoLayout = useCallback(() => {
-    const topLevel = flowNodes.filter(n => n.type !== "mapBackground");
+    const topLevel = flowNodes.filter(n => n.type !== "mapBackground" && n.type !== "portal");
     const laid = dagreLayout(
       topLevel.map(n => ({
         id: n.id,
@@ -696,13 +883,19 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
 
   const handleMoveEnd = useCallback((_e: unknown, viewport: Viewport) => {
     try {
-      localStorage.setItem(VIEWPORT_STORAGE_KEY, JSON.stringify(viewport));
+      localStorage.setItem(viewportKeyRef.current, JSON.stringify(viewport));
     } catch { /* ignore */ }
   }, []);
 
   const minimapNodeColor = useCallback(
     (node: TopoFlowNode) =>
-      node.type === "rack" ? "var(--accent)" : node.type === "mapBackground" ? "var(--line)" : "var(--muted)",
+      node.type === "rack"
+        ? "var(--accent)"
+        : node.type === "mapBackground"
+          ? "var(--line)"
+          : node.type === "portal"
+            ? "var(--line-strong)"
+            : "var(--muted)",
     [],
   );
 
@@ -710,7 +903,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
     <div className="flex flex-col w-full h-full">
       <MapToolbar
         devices={nodes}
-        racks={managedRacks}
+        racks={floorRacks}
         classes={switchClasses}
         filters={filters}
         onFilterChange={onFilterChange}
@@ -795,6 +988,15 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
         </ScanPulseContext.Provider>
         </FlowEnabledContext.Provider>
         </ZoomTierContext.Provider>
+        {activeFloor != null && onActiveFloorChange && (
+          <FloorSwitcher
+            buildings={buildings}
+            active={activeFloor}
+            counts={floorCounts}
+            unassignedCount={unassignedCount}
+            onChange={onActiveFloorChange}
+          />
+        )}
         <MapLayerLegend layer={layer} vlanId={selectedVlan} vlanLabel={selectedVlanLabel} stpDomains={stpDomains} />
         {scan?.active && <ScanOverlay progress={scan.progress} label={scan.label} />}
       </div>

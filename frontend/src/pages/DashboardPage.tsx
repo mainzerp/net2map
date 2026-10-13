@@ -11,11 +11,12 @@ import { ScanHero } from "../features/dashboard/ScanHero";
 import { AttentionCard } from "../features/dashboard/AttentionCard";
 import { DistributionPanel } from "../features/dashboard/DistributionCards";
 import { RackOverview } from "../features/dashboard/RackOverview";
+import { findFloor } from "../features/topology/floors";
 import { LatencyCard } from "../features/latency/LatencyCard";
 import { useLastScanRun } from "../features/dashboard/useLastScanRun";
 import { api, extractErrorMessage } from "../api";
 import { formatTimestamp } from "../utils/datetime";
-import type { ScanProgress } from "../types";
+import type { ScanProgress, TopologyData } from "../types";
 import { revealContainerVariants, revealItemVariants, useReducedMotion } from "../theme/motion";
 
 function DashboardSkeleton() {
@@ -196,7 +197,7 @@ export default function DashboardPage() {
     }
   };
 
-  const topology = topologyQuery.data ?? { nodes: [], links: [], racks: [], classes: [], models: [] };
+  const topology: TopologyData = topologyQuery.data ?? { nodes: [], links: [], racks: [], classes: [], models: [], buildings: [] };
   const apiStats = statsQuery.data ?? null;
 
   const stats = useMemo(() => {
@@ -225,7 +226,16 @@ export default function DashboardPage() {
       const devs = nodes.filter((n) => n.rack_id === r.id);
       const tp = devs.reduce((s, d) => s + d.ports.length, 0);
       const ap = devs.reduce((s, d) => s + d.ports.filter((p) => p.oper_status === 1).length, 0);
-      return { id: r.id, label: r.label, room: r.room, deviceCount: devs.length, totalPorts: tp, activePorts: ap };
+      const floor = findFloor(topology.buildings, r.floor_id);
+      return {
+        id: r.id,
+        label: r.label,
+        room: r.room,
+        floor: floor ? `${floor.building.label} / ${floor.floor.label}` : null,
+        deviceCount: devs.length,
+        totalPorts: tp,
+        activePorts: ap,
+      };
     });
 
     return {
@@ -339,7 +349,7 @@ export default function DashboardPage() {
 
       <div className="grid gap-6 lg:grid-cols-3 items-start">
         <m.div variants={revealItem} className="lg:col-span-2 min-w-0">
-          <AttentionCard nodes={topology.nodes} lastRun={lastRun} />
+          <AttentionCard nodes={topology.nodes} lastRun={lastRun} classes={topology.classes} />
         </m.div>
         <m.div variants={revealItem} className="flex flex-col gap-6 min-w-0">
           <LatencyCard />

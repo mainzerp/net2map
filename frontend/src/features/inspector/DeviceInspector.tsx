@@ -1,7 +1,12 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { useMutation } from "@tanstack/react-query";
 import { Container, MapPin } from "lucide-react";
-import { useDevices, useTopology } from "../../hooks/api";
+import { api, extractErrorMessage, getStoredUser } from "../../api";
+import { queryKeys, useDevices, useInvalidateApi, useTopology } from "../../hooks/api";
+import { useToast } from "../../components/ToastProvider";
+import FloorSelect from "../topology/FloorSelect";
+import { findFloor, flattenFloors } from "../topology/floors";
 import { searchWithInspect, useInspector } from "../../hooks/useInspector";
 import useNet2MapStore from "../../store";
 import { speedLabel } from "../../theme/visual";
@@ -67,6 +72,14 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
   const navigate = useNavigate();
   const setSelectedRack = useNet2MapStore((s) => s.setSelectedRack);
   const setFocusDevice = useNet2MapStore((s) => s.setFocusDevice);
+  const { invalidate } = useInvalidateApi();
+  const { addToast } = useToast();
+  const canEdit = (getStoredUser()?.role ?? "viewer") !== "viewer";
+  const floorMutation = useMutation({
+    mutationFn: (floorId: number | null) => api.patch(`/api/topology/devices/${id}/meta`, { floor_id: floorId }),
+    onSuccess: () => invalidate(queryKeys.topology, queryKeys.devices),
+    onError: (ex) => addToast(`Failed to change floor: ${extractErrorMessage(ex)}`, "error"),
+  });
 
   const device = useMemo(
     () => data?.nodes.find((n) => n.id === id) ?? devicesQuery.data?.find((n) => n.id === id),
@@ -114,6 +127,27 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
   const upPercent = ports.length > 0 ? Math.round((upCount / ports.length) * 100) : 0;
   const title = device.sys_name || device.hostname || device.ip;
   const deviceType = deviceTypeOf(device);
+
+  // Floor: racked devices inherit the rack's floor; others are assigned here.
+  const buildings = data?.buildings ?? [];
+  const hasFloors = flattenFloors(buildings).length > 0;
+  const effectiveFloorId = rack ? rack.floor_id ?? null : device.floor_id ?? null;
+  const effectiveFloor = findFloor(buildings, effectiveFloorId);
+  const floorText = effectiveFloor ? `${effectiveFloor.building.label} / ${effectiveFloor.floor.label}` : "Unassigned";
+  const floorValue = !hasFloors
+    ? null
+    : rack || !canEdit
+      ? `${floorText}${rack ? " (from rack)" : ""}`
+      : (
+          <FloorSelect
+            aria-label="Floor"
+            buildings={buildings}
+            value={device.floor_id ?? null}
+            disabled={floorMutation.isPending}
+            onChange={(floorId) => floorMutation.mutate(floorId)}
+            className="py-1"
+          />
+        );
 
   const showOnMap = () => {
     if (rack) setSelectedRack({ id: rack.id, label: rack.label, location: rack.location, devices: [] });
@@ -175,6 +209,7 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
               label: "Rack",
               value: rack ? <LinkButton onClick={() => open("rack", rack.id)}>{rack.label}</LinkButton> : null,
             },
+            { label: "Floor", value: floorValue },
           ]}
         />
       </InspectorSection>

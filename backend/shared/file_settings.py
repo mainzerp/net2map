@@ -2,35 +2,172 @@
 import json
 import logging
 import os
+import re
+import xml.etree.ElementTree as ET
 
-from fastapi import HTTPException
+import filetype
+from defusedxml import ElementTree as SafeET
+from fastapi import HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse
+
+from shared.errors import api_error
 
 _log = logging.getLogger(__name__)
 
 # ─── Map Background (file-system) ──────────────────────────────────────────────
 
+# Directory holding the per-floor background images. Read at call time (not
+# imported by value) so tests and migration 026 can point it at a tmp dir.
 MAP_BG_DIR = "/data"
+# Legacy single background (/data/map-background.<ext>), moved to the default
+# floor by migration 026.
 MAP_BG_FILENAME = "map-background"
 ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
 ALLOWED_IMAGE_TYPES = {"png", "jpeg", "jpg", "gif", "webp"}
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 
 
-def _find_bg_file():
-    """Return the path of the stored background image, or None."""
-    for ext in ALLOWED_EXTENSIONS:
-        path = os.path.join(MAP_BG_DIR, MAP_BG_FILENAME + ext)
-        if os.path.isfile(path):
-            return path
-    return None
+def floor_bg_filename(floor_id: int, ext: str) -> str:
+    """File name of a floor background, e.g. "floor-3-background.png"."""
+    return f"floor-{floor_id}-background{ext}"
 
 
-def _clear_bg_files():
-    """Remove any existing background image files."""
+def floor_bg_path(floor_id: int, ext: str) -> str:
+    return os.path.join(MAP_BG_DIR, floor_bg_filename(floor_id, ext))
+
+
+def find_floor_bg_file(floor_id: int, ext: str | None):
+    """Return the path of a floor's stored background image, or None."""
+    if not ext:
+        return None
+    path = floor_bg_path(floor_id, ext)
+    return path if os.path.isfile(path) else None
+
+
+def clear_floor_bg_files(floor_id: int):
+    """Remove any background image file of a floor (all allowed extensions)."""
     for ext in ALLOWED_EXTENSIONS:
-        path = os.path.join(MAP_BG_DIR, MAP_BG_FILENAME + ext)
+        path = floor_bg_path(floor_id, ext)
         if os.path.isfile(path):
-            os.remove(path)
+            try:
+                os.remove(path)
+            except OSError as exc:
+                _log.warning("Could not remove floor background %s: %s", path, exc)
+
+
+def store_floor_bg_file(floor_id: int, ext: str, contents: bytes) -> str:
+    """Replace a floor's background image file and return its path."""
+    clear_floor_bg_files(floor_id)
+    dest = floor_bg_path(floor_id, ext)
+    with open(dest, "wb") as f:
+        f.write(contents)
+    return dest
+
+
+_SVG_NS = "http://www.w3.org/2000/svg"
+_XLINK_NS = "http://www.w3.org/1999/xlink"
+
+# Allowlist of SVG elements kept in uploaded backgrounds. Anything else
+# (script, foreignObject, set/animate, style, a, ...) is dropped entirely.
+_SVG_ALLOWED_ELEMENTS = {
+    "svg", "g", "defs", "title", "desc", "symbol", "use", "marker",
+    "path", "rect", "circle", "ellipse", "line", "polyline", "polygon",
+    "text", "tspan", "image", "pattern", "clippath",
+    "lineargradient", "radialgradient", "stop",
+}
+
+_UNSAFE_URI_RE = re.compile(r"[\x00-\x20]*(?:javascript|vbscript)\s*:", re.IGNORECASE)
+_EXTERNAL_URL_RE = re.compile(r"url\(\s*[\"']?\s*(?!#)", re.IGNORECASE)
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1].lower() if isinstance(tag, str) else ""
+
+
+def _sanitize_svg_element(elem) -> None:
+    """Recursively strip disallowed elements and dangerous attributes in place."""
+    for child in list(elem):
+        if _local_name(child.tag) not in _SVG_ALLOWED_ELEMENTS:
+            elem.remove(child)
+            continue
+        _sanitize_svg_element(child)
+
+    for attr in list(elem.attrib):
+        local = _local_name(attr)
+        value = elem.attrib[attr]
+        if local.startswith("on"):
+            del elem.attrib[attr]
+        elif _UNSAFE_URI_RE.match(value):
+            del elem.attrib[attr]
+        elif local == "href":
+            # Only internal fragment references and inline data images survive
+            if not (value.startswith("#") or value.startswith("data:image/")):
+                del elem.attrib[attr]
+        elif _EXTERNAL_URL_RE.search(value):
+            del elem.attrib[attr]
+
+
+def _sanitize_svg(raw: bytes) -> bytes:
+    """Parse SVG and re-serialize it with only allowlisted content."""
+    try:
+        root = SafeET.fromstring(raw)
+    except Exception:
+        raise HTTPException(400, detail={"error": {"code": "INVALID_SVG", "message": "Invalid or malicious SVG file"}})
+    if _local_name(root.tag) != "svg":
+        raise HTTPException(400, detail={"error": {"code": "INVALID_SVG", "message": "File is not an SVG document"}})
+    _sanitize_svg_element(root)
+    ET.register_namespace("", _SVG_NS)
+    ET.register_namespace("xlink", _XLINK_NS)
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+async def read_validated_background(file: UploadFile) -> tuple[str, bytes]:
+    """Validate an uploaded background image and return (extension, contents).
+
+    Checks the extension, enforces MAX_FILE_SIZE with a bounded read, verifies
+    raster images via magic bytes and sanitizes SVG documents.
+    """
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        api_error(400, "UNSUPPORTED_FILE_TYPE", f"Unsupported file type '{ext}'. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}", field="file")
+
+    # Read bounded: at most MAX_FILE_SIZE + 1 bytes so an oversized upload is
+    # rejected without buffering the whole body in memory.
+    contents = await file.read(MAX_FILE_SIZE + 1)
+    if len(contents) > MAX_FILE_SIZE:
+        api_error(400, "FILE_TOO_LARGE", f"File too large. Maximum size is {MAX_FILE_SIZE // (1024*1024)} MB.", field="file")
+
+    # Validate MIME type via magic bytes (skip for SVG which is text-based)
+    if ext == ".svg":
+        contents = _sanitize_svg(contents)
+    else:
+        kind = filetype.guess(contents)
+        detected = kind.extension if kind else None
+        if detected not in ALLOWED_IMAGE_TYPES:
+            api_error(400, "UNSUPPORTED_IMAGE_TYPE", f"Unsupported image type: {detected or 'unknown'}. Allowed: png, jpeg, gif, webp.", field="file")
+    return ext, contents
+
+
+def check_background_range(request: Request):
+    """Reject multi-range or oversized Range headers with 416."""
+    # Backgrounds do not need multipart ranges. Bound parsing work even on
+    # older Starlette installations vulnerable to quadratic range merging.
+    ranges = request.headers.getlist("range")
+    if len(ranges) > 1 or any(len(value) > 128 or "," in value for value in ranges):
+        api_error(416, "INVALID_RANGE", "Only a single bounded byte range is supported")
+
+
+def background_file_response(path: str) -> FileResponse:
+    """Serve a stored background image with hardening headers."""
+    return FileResponse(
+        path,
+        headers={
+            # SVG is served from the app origin; keep it inert even if a
+            # malicious file ever lands on disk. "inline" keeps <img> usable.
+            "Content-Security-Policy": "script-src 'none'",
+            "Content-Disposition": "inline",
+        },
+    )
 
 
 # ─── DB-backed settings helpers ────────────────────────────────────────────────
@@ -149,24 +286,7 @@ def _write_dns_settings(servers: list[str]):
 
 # ─── Map Settings (DB-backed) ─────────────────────────────────────────────────
 
+# Map background settings live on each floor (floors.bg_opacity/bg_scale/
+# bg_color) since migration 026; these are the defaults reported by the legacy
+# GET /map-settings when no floor exists yet.
 DEFAULT_MAP_SETTINGS = {"opacity": 0.3, "scale": 1.0, "bg_color": "#020817"}
-
-
-def _read_map_settings():
-    try:
-        return {
-            "opacity": float(_read_db_setting("map_opacity", "0.3")),
-            "scale": float(_read_db_setting("map_scale", "1.0")),
-            "bg_color": _read_db_setting("map_bg_color", "#020817"),
-        }
-    except (ValueError, TypeError):
-        return {**DEFAULT_MAP_SETTINGS}
-
-
-def _write_map_settings(data):
-    current = _read_map_settings()
-    merged = {**current, **data}
-    _write_db_setting("map_opacity", str(merged["opacity"]))
-    _write_db_setting("map_scale", str(merged["scale"]))
-    _write_db_setting("map_bg_color", str(merged.get("bg_color", "#020817"))[:20])
-    return merged

@@ -31,7 +31,7 @@ the checkout folder):
 |---|---|---|
 | `net2map_pgdata` | postgres `/var/lib/postgresql/data` | Database. Covered by `BACKUP.md`. |
 | `net2map_redisdata` | redis `/data` | Redis AOF (revocation entries, job state). |
-| `net2map_data` | backend and celery-worker `/data` | Map background image (`/data/map-background.<ext>`). Not covered by the database backup. Map opacity/scale/color are stored in the database. |
+| `net2map_data` | backend and celery-worker `/data` | Per-floor map background images (`/data/floor-<id>-background.<ext>`; migration 026 renames a legacy `/data/map-background.<ext>` to the default floor's file). Not covered by the database backup. Background opacity/scale/color are stored per floor in the database. |
 
 Other compose details:
 

@@ -12,13 +12,22 @@ import TopologyCanvas, {
   type DevicePositionPatch,
 } from "../features/topology/TopologyCanvas";
 import { buildRackPairColorMap } from "../features/topology/graph";
+import {
+  createFloorScope,
+  findFloor,
+  floorKeyOf,
+  summarizeFloors,
+  type FloorKey,
+} from "../features/topology/floors";
+import { useActiveFloor } from "../features/topology/useActiveFloor";
 import RackDetail from "../components/map/RackDetail";
 import { useInspector } from "../hooks/useInspector";
 import { useMapBackground } from "../hooks/useMapBackground";
 import { useRackOrders } from "../hooks/useRackOrders";
-import type { TopologyNode, TopologyLink, SelectedRack, FilterState, TopologyData } from "../types";
+import type { TopologyNode, TopologyLink, SelectedRack, FilterState, TopologyData, Building } from "../types";
 
-const EMPTY_TOPOLOGY: TopologyData = { nodes: [], links: [], racks: [], classes: [], models: [] };
+const EMPTY_TOPOLOGY: TopologyData = { nodes: [], links: [], racks: [], classes: [], models: [], buildings: [] };
+const EMPTY_BUILDINGS: Building[] = [];
 
 // ── MapPage ──────────────────────────────────────────────────────────────────
 export default function MapPage() {
@@ -31,7 +40,20 @@ export default function MapPage() {
   const topology = topologyQuery.data ?? EMPTY_TOPOLOGY;
   const loadError = topologyQuery.error ? extractErrorMessage(topologyQuery.error) : null;
 
-  const { mapBgUrl, mapBgOpacity, mapBgScale, mapBgColor } = useMapBackground();
+  // Buildings/floors: one active floor at a time (URL ?floor= wins over the
+  // persisted choice); no floors at all = unscoped map as before.
+  const buildings = topology.buildings ?? EMPTY_BUILDINGS;
+  const floorSummary = useMemo(
+    () => summarizeFloors(topology.nodes, topology.racks || [], topology.classes || []),
+    [topology.nodes, topology.racks, topology.classes],
+  );
+  const { active: activeFloor, setActive: setActiveFloor } = useActiveFloor(
+    buildings,
+    floorSummary.unassigned > 0,
+    topologyQuery.data != null,
+  );
+  const activeFloorEntry = typeof activeFloor === "number" ? findFloor(buildings, activeFloor) : null;
+  const { mapBgUrl, mapBgOpacity, mapBgScale, mapBgColor } = useMapBackground(activeFloorEntry?.floor ?? null);
   const selectedRack = useNet2MapStore(s => s.selectedRack);
   const setSelectedRack = useNet2MapStore(s => s.setSelectedRack);
   const highlightPortKey = useNet2MapStore(s => s.highlightPortKey);
@@ -104,6 +126,16 @@ export default function MapPage() {
     };
   }, []);
 
+  // Switching floors closes a side panel whose rack/device is not on the
+  // target floor (portal clicks and focus select the new target themselves).
+  const handleActiveFloorChange = useCallback((key: FloorKey) => {
+    const scope = createFloorScope(key, topology.racks || []);
+    const rack = selectedRack ? (topology.racks || []).find(r => r.id === selectedRack.id) : undefined;
+    if (rack && floorKeyOf(scope.rackFloor(rack)) !== key) setSelectedRack(null);
+    if (selectedOutsideNode && floorKeyOf(scope.deviceFloor(selectedOutsideNode)) !== key) setSelectedOutsideNode(null);
+    setActiveFloor(key);
+  }, [topology.racks, selectedRack, selectedOutsideNode, setSelectedRack, setActiveFloor]);
+
   const selectedRackFull = useMemo(() => {
     if (!selectedRack) return null;
     const selectedRackId = Number(selectedRack.id);
@@ -120,6 +152,11 @@ export default function MapPage() {
     if (colonIdx < 0) return;
     const switchIp = highlightPortKey.slice(0, colonIdx);
     const node = topology.nodes.find(n => n.ip === switchIp);
+    // The highlighted switch may sit on another floor: show that floor.
+    if (node && activeFloor != null) {
+      const key = floorKeyOf(createFloorScope(activeFloor, topology.racks || []).deviceFloor(node));
+      if (key !== activeFloor) setActiveFloor(key);
+    }
     if (node?.rack_id) {
       const rack = (topology.racks || []).find(r => r.id === node.rack_id);
       if (rack) {
@@ -128,7 +165,7 @@ export default function MapPage() {
     }
     const timer = setTimeout(() => clearHighlightPortKey(), 3000);
     return () => clearTimeout(timer);
-  }, [highlightPortKey, topology.nodes, topology.racks, setSelectedRack, clearHighlightPortKey]);
+  }, [highlightPortKey, topology.nodes, topology.racks, setSelectedRack, clearHighlightPortKey, activeFloor, setActiveFloor]);
 
   // Clear selected link when switching racks
   const handleSelectRack = (rack: { id: number; label: string; location: string }) => {
@@ -316,6 +353,11 @@ export default function MapPage() {
               scan={scanOverlay}
               scanPulseIps={scanPulseIps}
               latency={latencyQuery.data ?? null}
+              buildings={buildings}
+              activeFloor={activeFloor}
+              floorCounts={floorSummary.counts}
+              unassignedCount={floorSummary.unassigned}
+              onActiveFloorChange={handleActiveFloorChange}
             />
           </div>
           {topology.nodes.length === 0 && !topologyQuery.isPending && (

@@ -3,7 +3,9 @@ import { Link } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { api, extractErrorMessage } from "../../api";
 import type { RackInfo, TopologyNode } from "../../types";
-import { queryKeys, useDevices, useInvalidateApi, useRacks } from "../../hooks/api";
+import { queryKeys, useBuildings, useDevices, useInvalidateApi, useRacks } from "../../hooks/api";
+import FloorSelect from "../../features/topology/FloorSelect";
+import { findFloor, flattenFloors } from "../../features/topology/floors";
 import { Button, Card, EmptyState, Input, Modal } from "../ui";
 import { ConfirmDeleteModal, DeviceAssignment, Field, TabLoading } from "./shared";
 
@@ -13,6 +15,7 @@ interface RackForm {
   room: string;
   description: string;
   height_u: number | string;
+  floor_id: number | null;
 }
 
 interface EditState {
@@ -24,11 +27,13 @@ interface RacksTabContentProps {
   newEntryTrigger: number;
 }
 
-const EMPTY_RACK_FORM: RackForm = { label: "", room: "", description: "", height_u: 42 };
+const EMPTY_RACK_FORM: RackForm = { label: "", room: "", description: "", height_u: 42, floor_id: null };
 
 function RacksTabContent({ newEntryTrigger }: RacksTabContentProps) {
   const { data: racks = [], isLoading } = useRacks();
   const { data: devicesRaw } = useDevices();
+  const { data: buildings = [] } = useBuildings();
+  const hasFloors = flattenFloors(buildings).length > 0;
   const { invalidate } = useInvalidateApi();
 
   const devices: TopologyNode[] = Array.isArray(devicesRaw) ? devicesRaw : [];
@@ -48,7 +53,7 @@ function RacksTabContent({ newEntryTrigger }: RacksTabContentProps) {
   const startNew = () => { setForm({ ...EMPTY_RACK_FORM }); setEditState({ id: null, open: true }); setErr(""); };
   const startEdit = (r: RackInfo) => {
     setEditState({ id: r.id, open: true });
-    setForm({ label: r.label, room: r.room, description: r.description ?? "", height_u: r.height_u ?? 42 });
+    setForm({ label: r.label, room: r.room, description: r.description ?? "", height_u: r.height_u ?? 42, floor_id: r.floor_id ?? null });
     setErr("");
   };
 
@@ -63,6 +68,7 @@ function RacksTabContent({ newEntryTrigger }: RacksTabContentProps) {
         room: values.form.room,
         description: values.form.description,
         height_u: Math.max(6, Math.min(60, Number(values.form.height_u) || 42)),
+        floor_id: values.form.floor_id,
       };
       if (values.id) {
         await api.put(`/api/racks/${values.id}`, payload);
@@ -131,6 +137,15 @@ function RacksTabContent({ newEntryTrigger }: RacksTabContentProps) {
                 <Input value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} placeholder="optional" />
               </Field>
             </div>
+            {hasFloors && (
+              <Field label="Floor">
+                <FloorSelect
+                  buildings={buildings}
+                  value={form.floor_id}
+                  onChange={(floorId) => setForm((f) => ({ ...f, floor_id: floorId }))}
+                />
+              </Field>
+            )}
             {err && <div className="text-[11px] text-danger">{err}</div>}
             <div className="flex gap-2 mt-1">
               <Button type="submit" variant="primary" className="flex-1" disabled={saveMutation.isPending}>
@@ -162,6 +177,7 @@ function RacksTabContent({ newEntryTrigger }: RacksTabContentProps) {
             const assigned = devices.filter((d) => d.rack_id === rack.id);
             const available = devices.filter((d) => d.rack_id == null && !d.ignored);
             const selVal = assignSel[rack.id] || "";
+            const floor = findFloor(buildings, rack.floor_id);
             return (
               <Card key={rack.id}>
                 <div className="flex items-start gap-2">
@@ -173,6 +189,11 @@ function RacksTabContent({ newEntryTrigger }: RacksTabContentProps) {
                     {(rack.room || rack.description) && (
                       <div className="text-muted text-[10px] mt-0.5">
                         {rack.room}{rack.room && rack.description ? " - " : ""}{rack.description}
+                      </div>
+                    )}
+                    {hasFloors && (
+                      <div className="text-muted text-[10px] mt-0.5" data-testid={`rack-floor-${rack.id}`}>
+                        {floor ? `${floor.building.label} / ${floor.floor.label}` : "No floor assigned"}
                       </div>
                     )}
                   </div>

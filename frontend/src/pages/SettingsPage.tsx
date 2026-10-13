@@ -7,7 +7,7 @@ import ClassesTabContent      from "../components/settings/SwitchClassesTab";
 import ModelsTabContent       from "../components/settings/SwitchModelsTab";
 import EngineTabContent       from "../components/settings/ScanSettingsTab";
 import DnsSettingsTabContent  from "../components/settings/DnsTab";
-import MapSettingsTabContent  from "../components/settings/MapSettingsTab";
+import BuildingsFloorsTabContent from "../components/settings/BuildingsFloorsTab";
 import DataImportExportTabContent from "../components/settings/ImportExportTab";
 
 interface NavItem {
@@ -47,7 +47,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     group: "APPEARANCE",
     items: [
-      { tab:"map",      label:"Map",       desc:"Background image settings" },
+      { tab:"floors",   label:"Buildings & floors", desc:"Floors and floor plans for the map" },
     ],
   },
   {
@@ -70,6 +70,11 @@ export default function SettingsPage() {
   const [newEntryTrigger, setNewEntryTrigger] = useState(0);
 
   useEffect(() => { setNewEntryTrigger(0); }, [tab]);
+
+  // The former "Map" tab (global background) became "Buildings & floors".
+  if (tab === "map") {
+    return <Navigate to="/settings/floors" replace />;
+  }
 
   if (!VALID_TABS.has(tab)) {
     return <Navigate to="/settings/credentials" replace />;
@@ -149,7 +154,7 @@ export default function SettingsPage() {
           {tab === "models"   && <ModelsTabContent newEntryTrigger={newEntryTrigger} />}
           {tab === "scan"     && <EngineTabContent />}
           {tab === "dns"      && <DnsSettingsTabContent />}
-          {tab === "map"      && <MapSettingsTabContent />}
+          {tab === "floors"   && <BuildingsFloorsTabContent />}
         </div>
       </div>
     </div>

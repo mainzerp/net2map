@@ -1,5 +1,6 @@
 """Authentication: JWT tokens, bcrypt passwords, role-based guards."""
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -54,13 +55,20 @@ _AUTH_EXEMPT_PATHS = {"/health"}
 # every mount ("/api/v1/...", the legacy "/api/..." alias, future versions)
 # shares one list.
 _AUTH_EXEMPT_API_PATHS = {"/auth/login", "/map-background", "/auth/refresh", "/auth/logout"}
+# Version-relative path patterns exempt from authentication for GET only
+# (per-floor background images are loaded via <img> without a token).
+_AUTH_EXEMPT_API_GET_PATTERNS = (re.compile(r"/floors/\d+/background"),)
 
 
-def _is_auth_exempt(path: str) -> bool:
+def _is_auth_exempt(path: str, method: str | None = None) -> bool:
     if path in _AUTH_EXEMPT_PATHS:
         return True
     rel = api_relative_path(path)
-    return rel is not None and rel in _AUTH_EXEMPT_API_PATHS
+    if rel is None:
+        return False
+    if rel in _AUTH_EXEMPT_API_PATHS:
+        return True
+    return method == "GET" and any(p.fullmatch(rel) for p in _AUTH_EXEMPT_API_GET_PATTERNS)
 
 
 def create_token(user_id: int, username: str, role: str) -> str:
@@ -219,7 +227,7 @@ def _require_auth(request: HTTPConnection, credentials: HTTPAuthorizationCredent
         return  # auth disabled -- startup warning already logged
     # Authorization uses the server-parsed route path, never a URL reconstructed
     # from the untrusted Host header (which may contain path delimiters).
-    if _is_auth_exempt(request.scope["path"]):
+    if _is_auth_exempt(request.scope["path"], request.scope.get("method")):
         # Soft auth: a presented token is honored (so role-guarded endpoints on
         # exempt paths still work), but an absent or invalid token is tolerated.
         if credentials:

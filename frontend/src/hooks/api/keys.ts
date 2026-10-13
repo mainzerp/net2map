@@ -20,8 +20,7 @@ export const queryKeys = {
   scanRuns: ["scan-runs"] as QueryKey,
   discoveryRanges: ["discovery-ranges"] as QueryKey,
   dnsSettings: ["dns-settings"] as QueryKey,
-  mapSettings: ["map-settings"] as QueryKey,
-  mapBackground: ["map-background"] as QueryKey,
+  buildings: ["buildings"] as QueryKey,
   latencySummary: ["latency", "summary"] as QueryKey,
   // Prefix ["latency", "history"] matches every range/device variant.
   latencyHistory: (params?: { range: string; deviceId?: number | null }) =>

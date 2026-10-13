@@ -1,14 +1,15 @@
 /**
  * Tests for the React Flow topology canvas: rack nodes render for racked
  * devices, unracked devices render as device nodes, the toolbar search finds
- * devices, and filter chips hide racks from the canvas.
+ * devices, filter chips hide racks from the canvas, and the active floor
+ * scopes the canvas (portals switch floors).
  */
 import React from "react";
 import { describe, it, expect, vi, beforeAll } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import TopologyCanvas from "../features/topology/TopologyCanvas";
-import type { TopologyNode, RackInfo } from "../types";
+import type { Building, TopologyNode, RackInfo } from "../types";
 
 // ── jsdom shims for @xyflow/react ────────────────────────────────────────────
 beforeAll(() => {
@@ -118,6 +119,26 @@ function makeRack(overrides: Partial<RackInfo>): RackInfo {
   };
 }
 
+const BUILDINGS: Building[] = [
+  {
+    id: 1,
+    label: "Main",
+    description: null,
+    sort_order: 0,
+    floors: [10, 11].map((id, i) => ({
+      id,
+      building_id: 1,
+      label: i === 0 ? "Ground" : "First",
+      sort_order: i,
+      has_background: false,
+      bg_version: 0,
+      bg_opacity: 0.3,
+      bg_scale: 1,
+      bg_color: "#020817",
+    })),
+  },
+];
+
 const defaultProps = {
   links: [],
   managedRacks: [] as RackInfo[],
@@ -161,12 +182,47 @@ describe("TopologyCanvas", () => {
     expect(rackTexts[0]).toContain("Keller");
   });
 
-  it("offers Auto-Layout only when no floor-plan background is set", () => {
-    const nodes = [makeNode({ id: 4, ip: "192.168.120.219", sys_name: "AP-Terasse" })];
-    const { rerender } = render(<TopologyCanvas {...defaultProps} nodes={nodes} />);
+  it("offers Auto-Layout only when the active floor has no floor-plan background", () => {
+    const nodes = [makeNode({ id: 4, ip: "192.168.120.219", sys_name: "AP-Terasse", floor_id: 10 })];
+    const floorProps = { buildings: BUILDINGS, activeFloor: 10, onActiveFloorChange: () => {} };
+    const { rerender } = render(<TopologyCanvas {...defaultProps} {...floorProps} nodes={nodes} />);
     expect(screen.queryByRole("button", { name: "Auto-Layout" })).toBeTruthy();
-    rerender(<TopologyCanvas {...defaultProps} nodes={nodes} mapBgUrl="/api/map-bg?v=1" />);
+    rerender(
+      <TopologyCanvas {...defaultProps} {...floorProps} nodes={nodes} mapBgUrl="/api/v1/floors/10/background?v=1" />,
+    );
     expect(screen.queryByRole("button", { name: "Auto-Layout" })).toBeNull();
+  });
+
+  it("filters to the active floor and switches floor when a portal is clicked", async () => {
+    const onActiveFloorChange = vi.fn();
+    const onSearchSelect = vi.fn();
+    const nodes = [
+      makeNode({ id: 7, ip: "10.0.1.1", sys_name: "sw-ground", floor_id: 10, map_x: 200, map_y: 200 }),
+      makeNode({ id: 8, ip: "10.0.2.1", sys_name: "sw-first", floor_id: 11, map_x: 500, map_y: 200 }),
+    ];
+    const links = [{
+      id: 1,
+      local_ip: "10.0.1.1", local_port: "1", remote_ip: "10.0.2.1", remote_port: "1",
+      local_sys_name: "sw-ground", remote_sys_name: "sw-first", speed_label: "1G",
+    }];
+    render(
+      <TopologyCanvas
+        {...defaultProps}
+        nodes={nodes}
+        links={links}
+        buildings={BUILDINGS}
+        activeFloor={10}
+        onActiveFloorChange={onActiveFloorChange}
+        onSearchSelect={onSearchSelect}
+      />,
+    );
+    expect(screen.getByText("sw-ground")).toBeTruthy();
+    expect(screen.queryByText("sw-first", { selector: ".topo-node-label" })).toBeNull();
+    const portal = await screen.findByTestId("portal-node");
+    expect(portal.textContent).toContain("First / sw-first");
+    fireEvent.click(portal);
+    expect(onActiveFloorChange).toHaveBeenCalledWith(11);
+    expect(onSearchSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 8 }));
   });
 
   it("renders devices without rack and class as outside device nodes", () => {

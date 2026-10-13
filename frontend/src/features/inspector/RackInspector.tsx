@@ -1,7 +1,12 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { useMutation } from "@tanstack/react-query";
 import { Container } from "lucide-react";
-import { useTopology } from "../../hooks/api";
+import { api, extractErrorMessage, getStoredUser } from "../../api";
+import { queryKeys, useInvalidateApi, useTopology } from "../../hooks/api";
+import { useToast } from "../../components/ToastProvider";
+import FloorSelect from "../topology/FloorSelect";
+import { findFloor, flattenFloors } from "../topology/floors";
 import { searchWithInspect, useInspector } from "../../hooks/useInspector";
 import { rackHeightU } from "../racks/rackLayout";
 import { Badge, Button, StatusDot } from "../../components/ui";
@@ -11,6 +16,14 @@ export default function RackInspector({ id, titleId }: { id: number; titleId: st
   const { data, isLoading } = useTopology();
   const { open, close, raw } = useInspector();
   const navigate = useNavigate();
+  const { invalidate } = useInvalidateApi();
+  const { addToast } = useToast();
+  const canEdit = (getStoredUser()?.role ?? "viewer") !== "viewer";
+  const floorMutation = useMutation({
+    mutationFn: (floorId: number | null) => api.put(`/api/racks/${id}`, { floor_id: floorId }),
+    onSuccess: () => invalidate(queryKeys.topology, queryKeys.racks, queryKeys.devices),
+    onError: (ex) => addToast(`Failed to change floor: ${extractErrorMessage(ex)}`, "error"),
+  });
 
   const rack = useMemo(() => data?.racks.find((r) => r.id === id), [data, id]);
   // Top of the rack first (highest U), unplaced devices last.
@@ -29,6 +42,23 @@ export default function RackInspector({ id, titleId }: { id: number; titleId: st
 
   if (isLoading) return <InspectorLoading titleId={titleId} />;
   if (!rack) return <InspectorNotFound titleId={titleId} what="Rack" onClose={close} />;
+
+  const buildings = data?.buildings ?? [];
+  const floor = findFloor(buildings, rack.floor_id);
+  const floorValue = flattenFloors(buildings).length === 0
+    ? null
+    : canEdit
+      ? (
+          <FloorSelect
+            aria-label="Floor"
+            buildings={buildings}
+            value={rack.floor_id ?? null}
+            disabled={floorMutation.isPending}
+            onChange={(floorId) => floorMutation.mutate(floorId)}
+            className="py-1"
+          />
+        )
+      : floor ? `${floor.building.label} / ${floor.floor.label}` : "Unassigned";
 
   const openRackView = () =>
     navigate({ pathname: "/racks", search: searchWithInspect({ rack: String(rack.id) }, raw) });
@@ -54,6 +84,7 @@ export default function RackInspector({ id, titleId }: { id: number; titleId: st
           facts={[
             { label: "Room", value: rack.room },
             { label: "Location", value: rack.location },
+            { label: "Floor", value: floorValue },
             { label: "Height", value: `${rackHeightU(rack)}U` },
             { label: "Description", value: rack.description },
           ]}

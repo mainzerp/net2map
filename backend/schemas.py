@@ -126,6 +126,7 @@ class RackBase(BaseModel):
     map_x:       float = 100.0
     map_y:       float = 100.0
     height_u:    int = Field(42, ge=6, le=60)
+    floor_id:    Optional[int] = None
 
 
 class RackCreate(RackBase):
@@ -139,6 +140,8 @@ class RackUpdate(BaseModel):
     map_x:       Optional[float] = None
     map_y:       Optional[float] = None
     height_u:    Optional[int] = Field(None, ge=6, le=60)
+    # Explicit null removes the rack from its floor
+    floor_id:    Optional[int] = None
 
 
 class RackOut(RackBase):
@@ -193,6 +196,81 @@ class RackItemOut(BaseModel):
     updated_at:      Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ─── Buildings and floors ─────────────────────────────────────────────────────
+
+class FloorCreate(BaseModel):
+    label:      str = Field(..., min_length=1, max_length=120)
+    sort_order: int = 0
+
+
+class FloorUpdate(BaseModel):
+    label:       Optional[str] = Field(None, min_length=1, max_length=120)
+    sort_order:  Optional[int] = None
+    building_id: Optional[int] = None
+    bg_opacity:  Optional[float] = Field(None, ge=0.0, le=1.0)
+    bg_scale:    Optional[float] = Field(None, ge=0.1, le=10.0)
+    bg_color:    Optional[str] = Field(None, max_length=20)
+
+
+class FloorOut(BaseModel):
+    id:             int
+    building_id:    int
+    label:          str
+    sort_order:     int = 0
+    has_background: bool = False
+    bg_version:     int = 0
+    bg_opacity:     float = 0.3
+    bg_scale:       float = 1.0
+    bg_color:       str = "#020817"
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_has_background(cls, data):
+        # ORM rows carry bg_ext; the API only exposes whether a file is set.
+        if not isinstance(data, dict) and hasattr(data, "bg_ext"):
+            return {
+                "id": data.id,
+                "building_id": data.building_id,
+                "label": data.label,
+                "sort_order": data.sort_order or 0,
+                "has_background": data.bg_ext is not None,
+                "bg_version": data.bg_version or 0,
+                "bg_opacity": 0.3 if data.bg_opacity is None else data.bg_opacity,
+                "bg_scale": 1.0 if data.bg_scale is None else data.bg_scale,
+                "bg_color": data.bg_color or "#020817",
+            }
+        return data
+
+
+class BuildingCreate(BaseModel):
+    label:       str = Field(..., min_length=1, max_length=120)
+    description: Optional[str] = None
+    sort_order:  int = 0
+
+
+class BuildingUpdate(BaseModel):
+    label:       Optional[str] = Field(None, min_length=1, max_length=120)
+    description: Optional[str] = None
+    sort_order:  Optional[int] = None
+
+
+class BuildingOut(BaseModel):
+    id:          int
+    label:       str
+    description: Optional[str] = None
+    sort_order:  int = 0
+    floors:      List[FloorOut] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("floors", mode="after")
+    @classmethod
+    def _sort_floors(cls, v):
+        return sorted(v, key=lambda f: (f.sort_order, f.id))
 
 
 # ─── SwitchClass ──────────────────────────────────────────────────────────────
@@ -557,6 +635,7 @@ class DeviceOut(DeviceBase):
     rack_id:       Optional[int] = None
     class_id:      Optional[int] = None
     model_id:      Optional[int] = None
+    floor_id:      Optional[int] = None
     rack_u_position: Optional[int] = None
     u_height:      int = 1
     ports_per_row: Optional[int] = None   # resolved from switch_model
@@ -629,6 +708,8 @@ class DeviceMetaUpdate(BaseModel):
     rack_id:  Optional[int] = None
     class_id: Optional[int] = None
     model_id: Optional[int] = None
+    # Floor of an unracked device; explicit null clears it
+    floor_id: Optional[int] = None
     ignored:  Optional[bool] = None
     label:    Optional[str] = None
     enabled:  Optional[bool] = None
@@ -650,6 +731,9 @@ class BulkDeviceMetaUpdate(BaseModel):
     class_id: Optional[int] = None
     # Explicitly unassign devices from their rack (rack_id cannot express this)
     clear_rack: bool = False
+    floor_id: Optional[int] = None
+    # Explicitly unassign devices from their floor (floor_id cannot express this)
+    clear_floor: bool = False
 
 
 # ─── Endpoint ─────────────────────────────────────────────────────────────────
@@ -716,6 +800,7 @@ class TopologyOut(BaseModel):
     racks:   List[RackOut]          = []
     classes: List[SwitchClassOut]   = []
     models:  List[SwitchModelOut]   = []
+    buildings: List[BuildingOut]    = []
 
 
 # ─── Scan ─────────────────────────────────────────────────────────────────────

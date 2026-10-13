@@ -5,6 +5,8 @@ export interface RackStatRow {
   id: number;
   label: string;
   room?: string;
+  // "Building / Floor" when the rack is assigned to a floor.
+  floor?: string | null;
   deviceCount: number;
   totalPorts: number;
   activePorts: number;
@@ -14,6 +16,7 @@ export interface RackStatRow {
 export function RackOverview({ racks }: { racks: RackStatRow[] }) {
   const navigate = useNavigate();
   if (racks.length === 0) return null;
+  const showFloor = racks.some((r) => r.floor);
   return (
     <section
       aria-labelledby="racks-heading"
@@ -37,6 +40,9 @@ export function RackOverview({ racks }: { racks: RackStatRow[] }) {
           <thead>
             <tr className="border-y border-line text-left bg-panel-2/50">
               <th className="py-2 pl-5 pr-3 text-[10px] font-semibold uppercase tracking-wider text-muted">Rack</th>
+              {showFloor && (
+                <th className="py-2 pr-3 text-[10px] font-semibold uppercase tracking-wider text-muted">Building / Floor</th>
+              )}
               <th className="py-2 pr-3 text-[10px] font-semibold uppercase tracking-wider text-muted">Room</th>
               <th className="py-2 pr-3 text-[10px] font-semibold uppercase tracking-wider text-muted text-right">Switches</th>
               <th className="py-2 pr-3 text-[10px] font-semibold uppercase tracking-wider text-muted text-right">Ports</th>
@@ -49,6 +55,7 @@ export function RackOverview({ racks }: { racks: RackStatRow[] }) {
               return (
                 <tr key={r.id} className="border-b border-line last:border-0">
                   <td className="py-2.5 pl-5 pr-3 font-semibold text-primary">{r.label}</td>
+                  {showFloor && <td className="py-2.5 pr-3 text-muted">{r.floor || "-"}</td>}
                   <td className="py-2.5 pr-3 text-muted">{r.room || "-"}</td>
                   <td className="py-2.5 pr-3 text-right text-primary">{r.deviceCount}</td>
                   <td className="py-2.5 pr-3 text-right text-muted">{r.totalPorts}</td>

@@ -43,6 +43,8 @@ import { LATENCY_EDGE_COLOR, type LatencyEdgeTone } from "../../latency/latency"
 
 const DOWN_DASH = "4 4";
 const BLOCKED_DASH = "5 4";
+// Cross-floor edges to portal nodes are always dashed.
+const PORTAL_DASH = "6 5";
 const FADED_OPACITY = 0.25;
 
 // Static class strings so Tailwind picks them up.
@@ -96,7 +98,7 @@ function AggregatedEdge({ id, source, target, data, selected }: EdgeProps<Aggreg
       : emphasized
         ? overlayColor
         : up ? data?.color || "var(--line-strong)" : "var(--muted)";
-  const dash = blockedOnly ? BLOCKED_DASH : up ? undefined : DOWN_DASH;
+  const dash = blockedOnly ? BLOCKED_DASH : data?.portal ? PORTAL_DASH : up ? undefined : DOWN_DASH;
   const inkOpacity = faded ? FADED_OPACITY : active || emphasized || blockedOnly ? 1 : up ? 0.85 : 0.7;
   const showFlow = up && flowEnabled && (!overlay || emphasized);
   const rootEnd = emphasized && overlay?.layer === "stp" ? overlay.rootEnd ?? null : null;

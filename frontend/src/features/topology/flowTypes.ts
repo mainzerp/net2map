@@ -34,7 +34,18 @@ export type BackgroundNodeData = {
 };
 export type BackgroundFlowNode = Node<BackgroundNodeData, "mapBackground">;
 
-export type TopoFlowNode = RackFlowNode | DeviceFlowNode | BackgroundFlowNode;
+// Stand-in for a remote endpoint on another floor (cross-floor link).
+export type PortalNodeData = {
+  label: string;
+  floorLabel: string;
+  targetLabel: string;
+  remoteFloor: number | "unassigned";
+  // Device the click focuses (the remote end of the first member link).
+  remoteDeviceId: number | null;
+};
+export type PortalFlowNode = Node<PortalNodeData, "portal">;
+
+export type TopoFlowNode = RackFlowNode | DeviceFlowNode | BackgroundFlowNode | PortalFlowNode;
 
 // Logical layer encoding of one aggregated edge (absent when the layer is Off).
 //  - emphasis: drawn in the layer's overlay color; faded: dimmed to ~0.25
@@ -62,5 +73,7 @@ export type AggregatedEdgeData = {
   active: boolean;
   status: LinkStatus;
   overlay?: EdgeOverlay;
+  // Edge to a portal node: always drawn dashed.
+  portal?: boolean;
 };
 export type AggregatedFlowEdge = Edge<AggregatedEdgeData, "aggregated">;

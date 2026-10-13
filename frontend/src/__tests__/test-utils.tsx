@@ -77,6 +77,60 @@ export function stubMemoryStorage() {
 }
 
 /**
+ * jsdom shims for @xyflow/react canvases (same as TopologyMap.test.tsx): a
+ * ResizeObserver that reports one measurement per element, DOMMatrixReadOnly,
+ * and box metrics that honor inline width/height. Call from beforeAll.
+ */
+export function installXyflowShims() {
+  class ResizeObserverMock {
+    callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) {
+      this.callback = callback;
+    }
+    observe(target: Element) {
+      const entry = {
+        target,
+        contentRect: target.getBoundingClientRect(),
+        borderBoxSize: [{ inlineSize: 0, blockSize: 0 }],
+        contentBoxSize: [{ inlineSize: 0, blockSize: 0 }],
+        devicePixelContentBoxSize: [],
+      } as unknown as ResizeObserverEntry;
+      Promise.resolve().then(() => this.callback([entry], this as unknown as ResizeObserver));
+    }
+    unobserve() {}
+    disconnect() {}
+  }
+  const g = globalThis as unknown as Record<string, unknown>;
+  g.ResizeObserver = g.ResizeObserver || ResizeObserverMock;
+  class DOMMatrixReadOnlyMock {
+    m22: number;
+    constructor(transform?: string) {
+      const scale = transform?.match(/scale\(([\d.]+)\)/)?.[1];
+      this.m22 = scale !== undefined ? Number(scale) : 1;
+    }
+  }
+  g.DOMMatrixReadOnly = g.DOMMatrixReadOnly || DOMMatrixReadOnlyMock;
+  Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return parseFloat(this.style?.width || "0") || 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return parseFloat(this.style?.height || "0") || 0;
+    },
+  });
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    const el = this as HTMLElement;
+    const width = parseFloat(el.style?.width || "0") || 0;
+    const height = parseFloat(el.style?.height || "0") || 0;
+    return { width, height, x: 0, y: 0, top: 0, left: 0, right: width, bottom: height, toJSON: () => ({}) } as DOMRect;
+  };
+}
+
+/**
  * Helper to wait for async component updates.
  */
 export { waitFor, screen, act } from "@testing-library/react";

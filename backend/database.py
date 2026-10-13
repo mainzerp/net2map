@@ -51,6 +51,43 @@ def get_db():
 
 # ─── Models ───────────────────────────────────────────────────────────────────
 
+class Building(Base):
+    """Building grouping one or more floors of the topology map."""
+    __tablename__ = "buildings"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    label       = Column(String(120), nullable=False)
+    description = Column(Text, nullable=True)
+    sort_order  = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at  = Column(DateTime, server_default=func.now())
+    updated_at  = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    floors = relationship(
+        "Floor", back_populates="building", cascade="all, delete-orphan",
+        order_by="[Floor.sort_order, Floor.id]",
+    )
+
+
+class Floor(Base):
+    """Floor of a building with its own map background and background settings."""
+    __tablename__ = "floors"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    building_id = Column(Integer, ForeignKey("buildings.id", ondelete="CASCADE"), nullable=False, index=True)
+    label       = Column(String(120), nullable=False)
+    sort_order  = Column(Integer, nullable=False, default=0, server_default="0")
+    # File extension (".png", ".svg", ...) of /data/floor-<id>-background<ext>; NULL = no background
+    bg_ext      = Column(String(10), nullable=True)
+    bg_version  = Column(Integer, nullable=False, default=0, server_default="0")
+    bg_opacity  = Column(Float, nullable=False, default=0.3, server_default="0.3")
+    bg_scale    = Column(Float, nullable=False, default=1.0, server_default="1.0")
+    bg_color    = Column(String(20), nullable=False, default="#020817", server_default="#020817")
+    created_at  = Column(DateTime, server_default=func.now())
+    updated_at  = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    building = relationship("Building", back_populates="floors")
+
+
 class Rack(Base):
     """Manually defined rack / enclosure in the data center."""
     __tablename__ = "racks"
@@ -62,6 +99,7 @@ class Rack(Base):
     map_x       = Column(Float, default=100.0)
     map_y       = Column(Float, default=100.0)
     height_u    = Column(Integer, nullable=False, server_default="42")  # usable rack units
+    floor_id    = Column(Integer, ForeignKey("floors.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at  = Column(DateTime, server_default=func.now())
     updated_at  = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -214,6 +252,8 @@ class Device(Base):
     rack_id      = Column(Integer, ForeignKey("racks.id"), nullable=True)
     class_id     = Column(Integer, ForeignKey("switch_classes.id"), nullable=True)
     model_id     = Column(Integer, ForeignKey("switch_models.id"), nullable=True)
+    # Floor of an unracked device; a racked device inherits its rack's floor
+    floor_id     = Column(Integer, ForeignKey("floors.id", ondelete="SET NULL"), nullable=True, index=True)
 
     # Rack elevation placement: 1-based bottom U position (null = not placed)
     # and the number of rack units the device occupies.

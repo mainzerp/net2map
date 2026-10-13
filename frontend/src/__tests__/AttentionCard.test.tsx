@@ -8,7 +8,7 @@ import { fireEvent, screen } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
 import { renderWithRouter } from "./test-utils";
 import { AttentionCard } from "../features/dashboard/AttentionCard";
-import type { TopologyNode } from "../types";
+import type { SwitchClass, TopologyNode } from "../types";
 
 function LocationProbe() {
   const location = useLocation();
@@ -79,5 +79,29 @@ describe("AttentionCard", () => {
 
     fireEvent.click(row);
     expect(screen.getByTestId("location").textContent).toBe("/network");
+  });
+
+  it("does not count unracked devices whose class allows outside-rack placement", () => {
+    const classes: SwitchClass[] = [
+      { id: 3, label: "Access", color: "#000000", description: "", allow_outside_rack: true },
+      { id: 4, label: "Core", color: "#000000", description: "", allow_outside_rack: false },
+    ];
+    const nodes = [
+      makeNode({ id: 20, ip: "10.0.0.20", rack_id: null, class_id: 3 }),
+      makeNode({ id: 21, ip: "10.0.0.21", rack_id: null, class_id: 4 }),
+      makeNode({ id: 22, ip: "10.0.0.22", rack_id: null, class_id: null }),
+    ];
+    renderWithRouter(<AttentionCard nodes={nodes} classes={classes} />);
+    expect(screen.getByRole("button", { name: /2 switches not assigned to a rack/ })).toBeTruthy();
+  });
+
+  it("hides the rack row when every unracked device may stay outside a rack", () => {
+    const classes: SwitchClass[] = [
+      { id: 3, label: "Access", color: "#000000", description: "", allow_outside_rack: true },
+    ];
+    renderWithRouter(
+      <AttentionCard nodes={[makeNode({ id: 20, rack_id: null, class_id: 3 })]} classes={classes} />,
+    );
+    expect(screen.queryByRole("button", { name: /not assigned to a rack/ })).toBeNull();
   });
 });

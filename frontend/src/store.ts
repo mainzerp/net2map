@@ -1,7 +1,19 @@
 import { create } from "zustand";
-import { api, apiUrl, _getAuthHeader } from "./api";
+import { api } from "./api";
 import type { Net2MapState, SelectedRack } from "./types";
-import { resolveMapBgColor } from "./theme/mapBackground";
+
+type FloorKeyValue = number | "unassigned";
+
+export const FLOOR_STORAGE_KEY = "net2map-floor";
+
+export function loadStoredFloor(): FloorKeyValue | null {
+  try {
+    const raw = localStorage.getItem(FLOOR_STORAGE_KEY);
+    if (raw === "unassigned") return "unassigned";
+    if (raw && /^\d+$/.test(raw)) return Number(raw);
+  } catch { /* ignore */ }
+  return null;
+}
 
 // Map focus slice ("Show on map" / toolbar search). Kept local to the store
 // module so the shared Net2MapState type in types.ts stays untouched.
@@ -15,7 +27,7 @@ export interface MapFocusSlice {
 
 export type Net2MapStoreState = Net2MapState & MapFocusSlice;
 
-const useNet2MapStore = create<Net2MapStoreState>((set, get) => ({
+const useNet2MapStore = create<Net2MapStoreState>((set) => ({
   // ── Map focus slice ──────────────────────────────────────────────────────
   focusDeviceId: null,
   setFocusDevice: (id: number | null) => set({ focusDeviceId: id }),
@@ -39,45 +51,16 @@ const useNet2MapStore = create<Net2MapStoreState>((set, get) => ({
   setHighlightPortKey: (key: string | null) => set({ highlightPortKey: key }),
   clearHighlightPortKey: () => set({ highlightPortKey: null }),
 
-  // ── Map background slice ─────────────────────────────────────────────────
-  bgUrl: null,
-  bgNat: null,
-  bgOpacity: 0.3,
-  bgScale: 1,
-  // Empty string = follow the theme surface (see theme/mapBackground.ts).
-  bgColor: "",
-  // Session-scoped image version: repeat mounts reuse the cached image, and
-  // upload/delete mutations bump it so the new URL bypasses the cache.
-  bgVersion: Date.now(),
-
-  bumpMapBackgroundVersion: () => set(s => ({ bgVersion: s.bgVersion + 1 })),
-
-  loadMapBackground: () => {
-    // Single existence check (aborted before the body downloads), then one
-    // real load via Image which also yields the natural dimensions.
-    fetch(apiUrl("/api/map-background"), { headers: _getAuthHeader() })
-      .then(r => {
-        if (!r.ok) throw new Error();
-        r.body?.cancel().catch(() => {});
-        const url = `${apiUrl("/api/map-background")}?v=${get().bgVersion}`;
-        const img = new Image();
-        img.onload = () => set({ bgUrl: url, bgNat: { w: img.naturalWidth, h: img.naturalHeight } });
-        // On decode/load failure clear bgUrl too, otherwise the grid falls away
-        // while no image renders in its place.
-        img.onerror = () => set({ bgUrl: null, bgNat: null });
-        img.src = url;
-      })
-      .catch(() => { set({ bgUrl: null, bgNat: null }); });
-  },
-
-  loadMapSettings: () => {
-    api.get<Record<string, unknown>>("/api/map-settings").then((s) => {
-      const patch: Partial<Net2MapState> = {};
-      if (s.opacity != null) patch.bgOpacity = s.opacity as number;
-      if (s.scale != null) patch.bgScale = s.scale as number;
-      if (s.bg_color != null) patch.bgColor = resolveMapBgColor(s.bg_color as string);
-      set(patch);
-    }).catch(console.error);
+  // ── Active floor slice ───────────────────────────────────────────────────
+  // The URL param (?floor=) wins over this value; see
+  // features/topology/useActiveFloor.ts.
+  activeFloor: loadStoredFloor(),
+  setActiveFloor: (key: FloorKeyValue | null) => {
+    try {
+      if (key == null) localStorage.removeItem(FLOOR_STORAGE_KEY);
+      else localStorage.setItem(FLOOR_STORAGE_KEY, String(key));
+    } catch { /* ignore */ }
+    set({ activeFloor: key });
   },
 
   // ── Scan slice ───────────────────────────────────────────────────────────

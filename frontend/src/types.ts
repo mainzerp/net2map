@@ -69,6 +69,9 @@ export interface TopologyNode {
   // Normalized SNMP health snapshot (UPS or server), null when not reported.
   health?: DeviceHealth | null;
   health_updated_at?: string | null;
+  // Floor of a device outside any rack; racked devices inherit their rack's
+  // floor (see features/topology/floors.ts effective floor helpers).
+  floor_id?: number | null;
   [key: string]: unknown;
 }
 
@@ -133,6 +136,31 @@ export interface RackInfo {
   map_x?: number;
   map_y?: number;
   height_u?: number;
+  floor_id?: number | null;
+}
+
+// ── Buildings and floors (GET /api/buildings, TopologyData.buildings) ────────
+
+export interface Floor {
+  id: number;
+  building_id: number;
+  label: string;
+  sort_order: number;
+  has_background: boolean;
+  // Incremented on every background upload/delete; used as cache-buster.
+  bg_version: number;
+  bg_opacity: number;
+  bg_scale: number;
+  bg_color: string;
+}
+
+export interface Building {
+  id: number;
+  label: string;
+  description: string | null;
+  sort_order: number;
+  // Sorted by sort_order.
+  floors: Floor[];
 }
 
 // Manually maintained rack placeholder (patch panel, blank, ...): occupies
@@ -174,6 +202,8 @@ export interface TopologyData {
   racks: RackInfo[];
   classes: SwitchClass[];
   models: SwitchModel[];
+  // Sorted buildings with their floors; absent on older backends.
+  buildings?: Building[];
 }
 
 // ── Latency monitor (GET /api/latency/summary, /api/latency/history) ────────
@@ -259,18 +289,10 @@ export interface Net2MapState {
   setHighlightPortKey: (key: string | null) => void;
   clearHighlightPortKey: () => void;
 
-  // Map background
-  bgUrl: string | null;
-  bgNat: { w: number; h: number } | null;
-  bgOpacity: number;
-  bgScale: number;
-  bgColor: string;
-  // Cache-bust token for /api/map-background URLs: stable per session so the
-  // image stays cached, bumped on successful upload/delete mutations.
-  bgVersion: number;
-  bumpMapBackgroundVersion: () => void;
-  loadMapBackground: () => void;
-  loadMapSettings: () => void;
+  // Active map floor: a floor id, "unassigned", or null when nothing has been
+  // chosen yet. Persisted in localStorage ("net2map-floor").
+  activeFloor: number | "unassigned" | null;
+  setActiveFloor: (key: number | "unassigned" | null) => void;
 
   // Scan
   activeScanJobId: string | null;

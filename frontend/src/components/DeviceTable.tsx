@@ -3,7 +3,8 @@ import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, extractErrorMessage } from "../api";
 import { useToast } from "./ToastProvider";
-import { useDevices, useRacks, useInvalidateApi } from "../hooks/api";
+import { useBuildings, useDevices, useRacks, useInvalidateApi } from "../hooks/api";
+import { flattenFloors } from "../features/topology/floors";
 import { queryKeys } from "../hooks/api";
 import {
   Badge,
@@ -60,6 +61,7 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
     queryKey: queryKeys.switchModels,
     queryFn: () => api.get<SwitchModel[]>("/api/switch-models"),
   });
+  const buildingsQuery = useBuildings();
   const { invalidate } = useInvalidateApi();
   const { open: openInspector } = useInspector();
 
@@ -123,6 +125,26 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
       invalidateDeviceData();
     } catch (ex) {
       addToast(`Failed to update devices: ${extractErrorMessage(ex)}`, "error");
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  // Bulk "Move to floor": only affects devices outside racks (racked devices
+  // follow their rack's floor). "none" clears the floor assignment.
+  const floorEntries = useMemo(() => flattenFloors(buildingsQuery.data), [buildingsQuery.data]);
+  const bulkMoveFloor = async (value: string) => {
+    if (!value) return;
+    setBulkLoading(true);
+    try {
+      await api.patch("/api/topology/devices/bulk-meta", {
+        device_ids: [...selected],
+        ...(value === "none" ? { clear_floor: true } : { floor_id: Number(value) }),
+      });
+      setSelected(new Set());
+      invalidateDeviceData();
+    } catch (ex) {
+      addToast(`Failed to move devices: ${extractErrorMessage(ex)}`, "error");
     } finally {
       setBulkLoading(false);
     }
@@ -388,6 +410,24 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
               <Button variant="primary" size="sm" disabled={bulkLoading} onClick={() => bulkIgnore(false)}>
                 Re-enable Selected
               </Button>
+              {floorEntries.length > 0 && (
+                <Select
+                  aria-label="Move to floor"
+                  value=""
+                  disabled={bulkLoading}
+                  onChange={(e) => void bulkMoveFloor(e.target.value)}
+                  title="Racked devices keep following their rack's floor"
+                  className="w-auto"
+                >
+                  <option value="">Move to floor...</option>
+                  <option value="none">No floor (unassigned)</option>
+                  {floorEntries.map(({ floor, building }) => (
+                    <option key={floor.id} value={floor.id}>
+                      {building.label} / {floor.label}
+                    </option>
+                  ))}
+                </Select>
+              )}
               <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
                 Clear
               </Button>

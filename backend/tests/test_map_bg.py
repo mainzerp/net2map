@@ -38,6 +38,11 @@ def _png_bytes():
     return sig + ihdr + idat + iend
 
 
+def _saved(tmp_path, ext):
+    """Path of the default floor's background file (legacy endpoints store it per floor)."""
+    return os.path.join(str(tmp_path), f"floor-1-background{ext}")
+
+
 # ---------------------------------------------------------------------------
 # T3a: Map Background Upload Tests (8 tests)
 # ---------------------------------------------------------------------------
@@ -47,7 +52,6 @@ class TestMapBackgroundUpload:
 
     def test_upload_png_success(self, client, jwt_headers, tmp_path, monkeypatch):
         monkeypatch.setattr("shared.file_settings.MAP_BG_DIR", str(tmp_path))
-        monkeypatch.setattr("routers.map_bg.MAP_BG_DIR", str(tmp_path))
         data = _png_bytes()
         resp = client.post(
             "/api/map-background",
@@ -59,7 +63,7 @@ class TestMapBackgroundUpload:
         assert body["ok"] is True
         assert body["filename"] == "bg.png"
         assert body["size"] == len(data)
-        assert os.path.isfile(os.path.join(str(tmp_path), "map-background.png"))
+        assert os.path.isfile(_saved(tmp_path, ".png"))
 
     def test_upload_unsupported_extension_rejected(self, client, jwt_headers):
         resp = client.post(
@@ -71,7 +75,7 @@ class TestMapBackgroundUpload:
         assert "UNSUPPORTED_FILE_TYPE" in resp.text
 
     def test_upload_file_too_large(self, client, jwt_headers, monkeypatch):
-        monkeypatch.setattr("routers.map_bg.MAX_FILE_SIZE", 10)
+        monkeypatch.setattr("shared.file_settings.MAX_FILE_SIZE", 10)
         resp = client.post(
             "/api/map-background",
             headers=jwt_headers,
@@ -82,7 +86,6 @@ class TestMapBackgroundUpload:
 
     def test_upload_invalid_image_magic_bytes(self, client, jwt_headers, tmp_path, monkeypatch):
         monkeypatch.setattr("shared.file_settings.MAP_BG_DIR", str(tmp_path))
-        monkeypatch.setattr("routers.map_bg.MAP_BG_DIR", str(tmp_path))
         resp = client.post(
             "/api/map-background",
             headers=jwt_headers,
@@ -93,7 +96,6 @@ class TestMapBackgroundUpload:
 
     def test_upload_svg_sanitized(self, client, jwt_headers, tmp_path, monkeypatch):
         monkeypatch.setattr("shared.file_settings.MAP_BG_DIR", str(tmp_path))
-        monkeypatch.setattr("routers.map_bg.MAP_BG_DIR", str(tmp_path))
         svg = b'<svg xmlns="http://www.w3.org/2000/svg"><circle r="10"/></svg>'
         resp = client.post(
             "/api/map-background",
@@ -102,12 +104,11 @@ class TestMapBackgroundUpload:
         )
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
-        saved = os.path.join(str(tmp_path), "map-background.svg")
+        saved = _saved(tmp_path, ".svg")
         assert os.path.isfile(saved)
 
     def test_upload_svg_script_tags_stripped(self, client, jwt_headers, tmp_path, monkeypatch):
         monkeypatch.setattr("shared.file_settings.MAP_BG_DIR", str(tmp_path))
-        monkeypatch.setattr("routers.map_bg.MAP_BG_DIR", str(tmp_path))
         svg = (
             b'<svg xmlns="http://www.w3.org/2000/svg">'
             b'<script>alert("xss")</script>'
@@ -120,7 +121,7 @@ class TestMapBackgroundUpload:
             files={"file": ("bg.svg", io.BytesIO(svg), "image/svg+xml")},
         )
         assert resp.status_code == 200
-        saved = os.path.join(str(tmp_path), "map-background.svg")
+        saved = _saved(tmp_path, ".svg")
         content = open(saved, "r").read()
         assert "<script" not in content.lower()
         assert "onclick" not in content.lower()
@@ -141,9 +142,9 @@ class TestMapBackgroundDelete:
 
     def test_delete_removes_background(self, client, jwt_headers, tmp_path, monkeypatch):
         monkeypatch.setattr("shared.file_settings.MAP_BG_DIR", str(tmp_path))
-        monkeypatch.setattr("routers.map_bg.MAP_BG_DIR", str(tmp_path))
-        # create a dummy file
-        dummy = os.path.join(str(tmp_path), "map-background.png")
+        # create the default floor, then a dummy file for it
+        assert client.put("/api/map-settings", headers=jwt_headers, json={}).status_code == 200
+        dummy = _saved(tmp_path, ".png")
         with open(dummy, "wb") as f:
             f.write(b"\x00")
         resp = client.delete("/api/map-background", headers=jwt_headers)
@@ -197,7 +198,6 @@ class TestSvgSanitizerHardening:
 
     def _upload_svg(self, client, jwt_headers, tmp_path, monkeypatch, svg: bytes):
         monkeypatch.setattr("shared.file_settings.MAP_BG_DIR", str(tmp_path))
-        monkeypatch.setattr("routers.map_bg.MAP_BG_DIR", str(tmp_path))
         return client.post(
             "/api/map-background",
             headers=jwt_headers,
@@ -216,7 +216,7 @@ class TestSvgSanitizerHardening:
         )
         resp = self._upload_svg(client, jwt_headers, tmp_path, monkeypatch, svg)
         assert resp.status_code == 200
-        content = open(os.path.join(str(tmp_path), "map-background.svg"), "r").read().lower()
+        content = open(_saved(tmp_path, ".svg"), "r").read().lower()
         assert "foreignobject" not in content
         assert "<set" not in content
         assert "<animate" not in content
@@ -233,7 +233,7 @@ class TestSvgSanitizerHardening:
         )
         resp = self._upload_svg(client, jwt_headers, tmp_path, monkeypatch, svg)
         assert resp.status_code == 200
-        content = open(os.path.join(str(tmp_path), "map-background.svg"), "r").read().lower()
+        content = open(_saved(tmp_path, ".svg"), "r").read().lower()
         assert "onload" not in content
         assert "onclick" not in content
         assert "<script" not in content
@@ -251,7 +251,7 @@ class TestSvgSanitizerHardening:
         )
         resp = self._upload_svg(client, jwt_headers, tmp_path, monkeypatch, svg)
         assert resp.status_code == 200
-        content = open(os.path.join(str(tmp_path), "map-background.svg"), "r").read().lower()
+        content = open(_saved(tmp_path, ".svg"), "r").read().lower()
         assert "javascript:" not in content
         assert "evil.example" not in content
         assert "#local-symbol" in content
@@ -264,7 +264,7 @@ class TestSvgSanitizerHardening:
         )
         resp = self._upload_svg(client, jwt_headers, tmp_path, monkeypatch, svg)
         assert resp.status_code == 200
-        content = open(os.path.join(str(tmp_path), "map-background.svg"), "r").read()
+        content = open(_saved(tmp_path, ".svg"), "r").read()
         assert "data:image/png;base64" in content
 
     def test_strips_external_css_url_references(self, client, jwt_headers, tmp_path, monkeypatch):
@@ -276,7 +276,7 @@ class TestSvgSanitizerHardening:
         )
         resp = self._upload_svg(client, jwt_headers, tmp_path, monkeypatch, svg)
         assert resp.status_code == 200
-        content = open(os.path.join(str(tmp_path), "map-background.svg"), "r").read().lower()
+        content = open(_saved(tmp_path, ".svg"), "r").read().lower()
         assert "evil.example" not in content
         assert "url(#localgradient)" in content
 
@@ -307,7 +307,6 @@ class TestMapBackgroundDeliveryHeaders:
 
     def test_get_sets_csp_and_inline_disposition(self, client, jwt_headers, tmp_path, monkeypatch):
         monkeypatch.setattr("shared.file_settings.MAP_BG_DIR", str(tmp_path))
-        monkeypatch.setattr("routers.map_bg.MAP_BG_DIR", str(tmp_path))
         resp = client.post(
             "/api/map-background",
             headers=jwt_headers,

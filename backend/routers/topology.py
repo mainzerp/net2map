@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from database import Device, TopologyLink, get_db
+from database import Building, Device, Floor, TopologyLink, get_db
 from database import Rack as RackModel
 from database import SwitchClass as SwitchClassModel
 from database import SwitchModel as SwitchModelModel
@@ -105,6 +105,7 @@ def get_topology(request: Request, db: Session = Depends(get_db)):
     racks   = db.query(RackModel).order_by(RackModel.id).all()
     classes = db.query(SwitchClassModel).order_by(SwitchClassModel.id).all()
     models  = db.query(SwitchModelModel).order_by(SwitchModelModel.id).all()
+    buildings = db.query(Building).order_by(Building.sort_order, Building.id).all()
 
     # Build a lookup for ports_per_row from switch models
     model_ppr = {m.id: m.ports_per_row for m in models}
@@ -120,7 +121,9 @@ def get_topology(request: Request, db: Session = Depends(get_db)):
             dout.total_ports = model_tp[d.model_id]
         node_dicts.append(dout)
 
-    result  = TopologyOut(nodes=node_dicts, links=links, racks=racks, classes=classes, models=models)
+    result  = TopologyOut(
+        nodes=node_dicts, links=links, racks=racks, classes=classes, models=models, buildings=buildings,
+    )
     body = result.model_dump_json()
     etag = f'"v{topo_version}"'
 
@@ -194,6 +197,12 @@ def bulk_update_device_meta(body: BulkDeviceMetaUpdate, request: Request, db: Se
                 if unracked > 0:
                     api_error(400, "OUTSIDE_RACK_NOT_ALLOWED", "Selected switch class requires rack assignment")
         updates["class_id"] = body.class_id
+    if body.clear_floor:
+        updates["floor_id"] = None
+    elif body.floor_id is not None:
+        if not db.query(Floor).filter(Floor.id == body.floor_id).first():
+            api_error(404, "FLOOR_NOT_FOUND", "Floor not found")
+        updates["floor_id"] = body.floor_id
     if not updates:
         api_error(400, "NO_FIELDS", "No fields to update")
     count = db.query(Device).filter(Device.id.in_(body.device_ids)).update(updates, synchronize_session="fetch")
@@ -232,6 +241,9 @@ def update_device_meta(
         if not target_class.allow_outside_rack:
             api_error(400, "OUTSIDE_RACK_NOT_ALLOWED", "Selected switch class requires rack assignment")
 
+    if payload.get("floor_id") is not None and not db.query(Floor).filter(Floor.id == payload["floor_id"]).first():
+        api_error(404, "FLOOR_NOT_FOUND", "Floor not found")
+
     if "location" in payload:
         device.location = payload["location"]
     if "sys_name" in payload:
@@ -254,6 +266,9 @@ def update_device_meta(
             device.rack_u_position = None
     if "class_id" in payload:
         device.class_id = payload["class_id"]
+    if "floor_id" in payload:
+        # Explicit null clears the floor; rack changes never touch floor_id
+        device.floor_id = payload["floor_id"]
     if "model_id" in payload:
         model_id = payload["model_id"]
         if model_id is not None and not db.query(SwitchModelModel).filter(SwitchModelModel.id == model_id).first():

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from database import Device, get_db
 from database import Rack as RackModel
+from routers.floors import ensure_floor_exists
 from routers.rack_items import find_overlap, item_ranges
 from routers.topology import _bump_topo_version
 from schemas import RackCreate, RackLayoutIn, RackOut, RackUpdate
@@ -24,6 +25,7 @@ def list_racks(db: Session = Depends(get_db)):
 @router.post("/racks", response_model=RackOut, status_code=201,
              dependencies=[require_role("admin", "operator")])
 def create_rack(body: RackCreate, request: Request, db: Session = Depends(get_db)):
+    ensure_floor_exists(db, body.floor_id)
     rack = RackModel(**body.model_dump())
     db.add(rack)
     db.commit()
@@ -49,9 +51,13 @@ def update_rack(rack_id: int, body: RackUpdate, request: Request, db: Session = 
             api_error(409, "U_POSITION_OUT_OF_RANGE", "Rack height would exclude an assigned device")
         if any(start + size - 1 > height for start, size, _ in item_ranges(db, rack_id)):
             api_error(409, "U_POSITION_OUT_OF_RANGE", "Rack height would exclude a rack item")
-    # No rack field is nullable; explicit null values are ignored
+    if "floor_id" in payload:
+        ensure_floor_exists(db, payload["floor_id"])
+        # floor_id is the only nullable rack field; explicit null clears it
+        rack.floor_id = payload["floor_id"]
+    # No other rack field is nullable; explicit null values are ignored
     for k, v in payload.items():
-        if v is not None:
+        if v is not None and k != "floor_id":
             setattr(rack, k, v)
     db.commit()
     db.refresh(rack)

@@ -14,6 +14,7 @@ The project consists of a FastAPI backend (scan, persistence, API) and a React/V
 - Supported device kinds: switches, firewalls (OPNsense), UPS units (Eaton / MGE network cards, HPE UPS Network Module, any RFC 1628 UPS-MIB agent) and HPE ProLiant servers via iLO; UPS battery charge, runtime, load and output source and server subsystem conditions (thermal, power, fans, storage, temperatures) are collected over SNMP and shown in the inspector, the rack faceplates, the map and the dashboard "Attention needed" list
 - Firmware version capture per device (ENTITY-MIB OID, with vendor parsing from sysDescr as fallback)
 - Interactive topology map (React Flow) based on LLDP links, including port/speed info, auto-layout, device search, minimap and optional background image; layers "STP" (root bridge, root paths, blocked ports), "VLAN" and "Latency"
+- Buildings and floors: model a campus as buildings with floors, each floor with its own floor plan; the map shows one floor at a time with a floor switcher, an "Unassigned" tab for racks/devices without a floor, and portal nodes for links to other floors (click to jump to the remote device)
 - Endpoint tracking under `/devices`: MAC, IP, hostname and switch port per end device, including port history and ignoring
 - Network device overview under `/network` with rack, class, model, firmware and status
 - Rack elevation under `/racks`: real U positions (U1 at the bottom), drag and drop with preview, adjustable device height (`u_height`, stepper up to 10U)

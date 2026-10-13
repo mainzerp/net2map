@@ -154,9 +154,10 @@ Toolbar:
   them.
 - `Flow` toggles the animated flow overlay on active links (preference is
   remembered).
-- `Auto-Layout` re-lays out the map and persists positions (hidden when a floor
-  plan background image is set). `Reset Zoom` restores the default view; the
-  viewport position itself is remembered between visits.
+- `Auto-Layout` re-lays out the map and persists positions (hidden when the
+  active floor has a floor plan background image). `Reset Zoom` restores the
+  default view; the viewport position itself is remembered between visits, per
+  floor.
 - `Off` clears the logical layer.
 
 Logical layers (top-left legend explains the colors while a layer is active):
@@ -200,8 +201,36 @@ Rack side panel (open a rack box):
 - The cable map lists inter-rack connections `local port -> remote : port` with
   speed.
 
-Background image: configure a floor plan under `Settings > Map` (see
-[Settings](#settings-settings)).
+#### Buildings, floors and portals
+
+A site can be modelled as buildings with floors (`Settings > Buildings &
+floors`). Each floor has its own floor plan background, opacity, zoom and
+canvas color. Once at least one floor exists:
+
+- The map shows exactly one floor at a time. A floor switcher sits at the top
+  left of the canvas: a building select (only with more than one building) and
+  one tab per floor, ordered as in the settings, each with its device count.
+  Use the arrow keys to move between tabs.
+- The active floor is remembered in the browser and reflected in the URL
+  (`/map?floor=<id>`), so a link opens the same floor; a floor in the URL wins
+  over the remembered one. Without either, the first floor of the first
+  building is shown.
+- Racks are assigned to floors in `Settings > Racks` or in the rack inspector;
+  devices outside racks in the device inspector (`Floor`) or in bulk via
+  `Move to floor...` on the Network page. Racked devices always follow their
+  rack's floor.
+- Racks and devices without a floor (for example devices found by a new scan)
+  appear on the `Unassigned` tab, which is only shown while something is
+  unassigned; its badge shows how many devices are waiting for a floor.
+- Links to a rack or device on another floor are drawn as dashed edges to a
+  portal node labelled `<floor> / <rack or device>` (with the building name
+  when it is in another building). Click a portal to switch to that floor and
+  focus the remote device.
+- `Show on map`, the toolbar search and port deep links switch to the target
+  floor first and then focus the device.
+
+Without any floors the map works as before: one canvas, all racks and devices,
+no background image.
 
 ### Devices (`/devices`)
 
@@ -330,7 +359,8 @@ when the community is `public`.
 #### `Racks`
 
 Rack definitions: `Label` (required), `Room`, `Description`, `Height (U)`
-(default `42`, allowed `6`-`60`). `Create rack`, `Edit`, `Delete`, and
+(default `42`, allowed `6`-`60`), and `Floor` (once floors exist; each rack
+card shows its `Building / Floor`). `Create rack`, `Edit`, `Delete`, and
 `Open elevation` jumps to `/racks`. Deleting a rack unassigns its switches.
 
 #### `Classes`
@@ -380,13 +410,20 @@ models, `Description`. Assign devices per model; `Delete` unassigns them.
 during scans - one per line. `Save DNS Settings` applies; leaving it empty
 uses the system/default DNS resolver.
 
-#### `Map`
+#### `Buildings & floors`
 
-Topology map background (floor plan): `Upload image` / `Replace image` /
-`Remove` (PNG, JPG, GIF, WEBP or SVG, max 20 MB), `Opacity` (`0.05`-`1`,
-default `0.3`), `Image Zoom` (`0.1`-`5`), and the background color - `Follow
-theme` or `White`/custom color. Setting a background hides `Auto-Layout` on
-the map.
+Buildings and their floors for the topology map (replaces the former global
+`Map` background settings; `/settings/map` redirects here). `Add building` and
+`Add floor` create entries; names are edited inline (Enter or leaving the field
+saves) and the arrow buttons change the order. Deleting a building or floor
+(admin only, with confirmation) never deletes racks or devices: they become
+unassigned and show up on the map's `Unassigned` tab.
+
+`Background` on a floor opens its floor plan settings: `Upload image` /
+`Replace image` / `Remove image` (PNG, JPG, GIF, WEBP or SVG, max 20 MB),
+`Opacity` (`0.05`-`1`, default `0.3`), `Image zoom` (`0.1`-`5`), and the canvas
+color - `Follow theme` or `White`/custom color. A floor with a floor plan hides
+`Auto-Layout` while it is the active floor. Viewers see the settings read-only.
 
 #### `Backup & Restore`
 
