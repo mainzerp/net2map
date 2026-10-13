@@ -18,6 +18,27 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
+- Attention card ignores allow_outside_rack (released v3.5.0) · priority: P2 · area: frontend
+  "N switches not assigned to a rack" counted every unracked device; now skips devices
+  whose switch class has `allow_outside_rack` (classless unracked devices still count).
+  Passed: AttentionCard tests, typecheck.
+  User to verify: dashboard on the live stack after the next release.
+
+- Buildings and floors on the topology map (released v3.5.0, migration 026) · priority: P2 · area: full-stack
+  Buildings > floors (`/buildings`, `/floors/{id}`, per-floor background
+  `/floors/{id}/background`, public GET); `floor_id` on racks and unracked devices;
+  map floor switcher (`?floor=`), portal nodes for cross-floor links, "Unassigned"
+  tab, per-floor viewport; Settings "Buildings & floors" replaces the Map tab; legacy
+  `/map-background` + `/map-settings` deprecated (act on the first floor).
+  Passed: ruff, 859 backend tests (7 snmp_driver local only), typecheck, 288 frontend
+  tests; PostgreSQL upgrade smoke v3.4.0 -> local (025 -> 026): default building/floor
+  created, rack assigned, background moved to `floor-1-background.png`, public GET 200.
+  Open: config export still carries the unused `map_*` app_settings and no floors;
+  portals use a fixed offset and can overlap; palette has no direct map focus.
+  User to verify: smoke stack http://localhost:3300 (token login), create floors,
+  upload plans, assign racks, check portals; then `docker compose -p net2map-smoke
+  down -v` to remove it.
+
 - Devices lose switch class membership (released v3.4.0) · priority: P1 · area: frontend
   Cause: `DeviceTable.submitEdit` always PATCHed `class_id` from a stale cache snapshot;
   `/meta` treats explicit null as unassign. Fix: only changed fields are sent.

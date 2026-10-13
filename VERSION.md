@@ -1,5 +1,47 @@
 # Version History
 
+## v3.5.0 -- Buildings and floors on the topology map
+
+**Type:** MINOR
+
+Released on 2026-10-13 as tag `v3.5.0` (images under
+`ghcr.io/mainzerp/net2map/backend` and `/frontend`, also tagged `latest`).
+Commit `1035ef6`. Migration 026 runs automatically when the backend starts: it
+creates the building "Main building" with the floor "Ground floor", assigns all racks
+and unracked devices to it, copies the map background settings and moves
+`/data/map-background.<ext>` to `/data/floor-<id>-background.<ext>`.
+
+### Features
+
+- Buildings and floors: the topology map shows exactly one floor at a time, each
+  with its own background image, opacity, scale and canvas color. Floor switcher at
+  the top left (building select plus floor tabs), active floor in the URL
+  (`?floor=`) and per-floor viewport.
+- Racks and devices outside racks are assigned to floors (rack settings, rack and
+  device inspector, bulk "Move to floor" in the device table); racked devices follow
+  their rack. Devices without a floor (e.g. new scan results) appear on an
+  "Unassigned" tab with a count badge.
+- Links to devices on another floor are shown as portal nodes; clicking a portal
+  switches to that floor and focuses the device. "Show on map" and the map search
+  switch floors automatically.
+- Settings "Buildings & floors" replaces the former "Map" tab: create, rename,
+  reorder and delete buildings and floors, upload a floor plan per floor.
+- API: `GET/POST /buildings`, `PATCH/DELETE /buildings/{id}`,
+  `POST /buildings/{id}/floors`, `PATCH/DELETE /floors/{id}`,
+  `POST/GET/DELETE /floors/{id}/background` (GET is public); `floor_id` on racks and
+  devices, `floor_id`/`clear_floor` in bulk-meta, `buildings` in `GET /topology`.
+
+### Fixes
+
+- Dashboard "Attention needed" no longer reports unracked devices whose switch class
+  allows placement outside a rack.
+
+### Deprecated
+
+- `/map-background` and `/map-settings` keep working but act on the first floor; use
+  the per-floor endpoints. The `map_*` app settings in the configuration export are
+  no longer read; buildings and floors are not part of the configuration export yet.
+
 ## v3.4.0 -- Rack items, UPS/server health, rack fixes
 
 **Type:** MINOR
