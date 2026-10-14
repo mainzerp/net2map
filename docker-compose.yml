@@ -80,11 +80,11 @@ services:
       UVICORN_FORWARDED_ALLOW_IPS: "${UVICORN_FORWARDED_ALLOW_IPS:-*}"
       # uvicorn worker processes; >1 is safe because REDIS_URL is set.
       UVICORN_WORKERS: "${UVICORN_WORKERS:-1}"
-      SECRET_TOKEN: "${SECRET_TOKEN:?Set SECRET_TOKEN in .env}"
-      JWT_SECRET: "${JWT_SECRET:-}"
+      JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET in .env}"
       JWT_EXPIRY_HOURS: "${JWT_EXPIRY_HOURS:-24}"
+      JWT_MAX_SESSION_HOURS: "${JWT_MAX_SESSION_HOURS:-168}"
       DEFAULT_ADMIN_PASSWORD: "${DEFAULT_ADMIN_PASSWORD:?Set DEFAULT_ADMIN_PASSWORD in .env}"
-      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-}"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:?Set ENCRYPTION_KEY in .env}"
       LOG_LEVEL: "${LOG_LEVEL:-INFO}"
       REQUEST_LOG_ENABLED: "${REQUEST_LOG_ENABLED:-false}"
       AUDIT_RETENTION_DAYS: "${AUDIT_RETENTION_DAYS:-90}"
@@ -121,9 +121,8 @@ services:
     environment:
       DATABASE_URL: "postgresql://net2map:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres/net2map"
       REDIS_URL: "redis://redis:6379/0"
-      SECRET_TOKEN: "${SECRET_TOKEN:?Set SECRET_TOKEN in .env}"
-      JWT_SECRET: "${JWT_SECRET:-}"
-      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-}"
+      JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET in .env}"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:?Set ENCRYPTION_KEY in .env}"
       # Fallback retention for the audit purge task (DB setting wins when set).
       AUDIT_RETENTION_DAYS: "${AUDIT_RETENTION_DAYS:-90}"
       RUN_MIGRATIONS: "false"
@@ -158,9 +157,8 @@ services:
     environment:
       DATABASE_URL: "postgresql://net2map:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres/net2map"
       REDIS_URL: "redis://redis:6379/0"
-      SECRET_TOKEN: "${SECRET_TOKEN:?Set SECRET_TOKEN in .env}"
-      JWT_SECRET: "${JWT_SECRET:-}"
-      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-}"
+      JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET in .env}"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:?Set ENCRYPTION_KEY in .env}"
       RUN_MIGRATIONS: "false"
     networks:
       - net2map
@@ -189,9 +187,8 @@ services:
     environment:
       DATABASE_URL: "postgresql://net2map:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres/net2map"
       REDIS_URL: "redis://redis:6379/0"
-      SECRET_TOKEN: "${SECRET_TOKEN:?Set SECRET_TOKEN in .env}"
-      JWT_SECRET: "${JWT_SECRET:-}"
-      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-}"
+      JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET in .env}"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:?Set ENCRYPTION_KEY in .env}"
       LOG_LEVEL: "${LOG_LEVEL:-INFO}"
       RUN_MIGRATIONS: "false"
     networks:

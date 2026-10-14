@@ -184,16 +184,56 @@ def get_scan_job(job_id: str) -> Optional[dict]:
     if r:
         try:
             raw = r.hget("net2map:scan_jobs", job_id)
-            if not raw:
-                return None
-            data = json.loads(raw)
-            local = _LOCAL_JOB_META.get(job_id, {})
-            data.update(local)
-            return data
+            if raw:
+                data = json.loads(raw)
+                local = _LOCAL_JOB_META.get(job_id, {})
+                data.update(local)
+                return data
+            # Miss: the job may have been stored in memory while Redis was
+            # unreachable (set_scan_job fallback).
         except Exception:
             pass
     with SCAN_JOBS_LOCK:
         return SCAN_JOBS.get(job_id)
+
+
+# Optimistic-locking retries for read-modify-write updates of a job entry.
+_JOB_UPDATE_RETRIES = 10
+
+
+def _merge_scan_job_atomic(r, job_id: str, mutate) -> bool:
+    """Atomically apply ``mutate(data)`` to the JSON blob of a job entry.
+
+    Uses WATCH/MULTI on the jobs hash so concurrent writers (worker progress
+    updates, API cancel requests) never overwrite each other's fields.
+    ``mutate`` may return False to skip the write (conditional update).
+    Returns False when the job does not exist in Redis or the write was
+    skipped. Raises when the update keeps conflicting or Redis fails (callers
+    fall back like for any Redis error).
+    """
+    try:
+        from redis.exceptions import WatchError
+    except ImportError:  # pragma: no cover - redis is a hard dependency when configured
+        WatchError = ()
+    for _ in range(_JOB_UPDATE_RETRIES):
+        with r.pipeline() as pipe:
+            try:
+                pipe.watch(_SCAN_JOBS_KEY)
+                raw = pipe.hget(_SCAN_JOBS_KEY, job_id)
+                if not raw:
+                    pipe.unwatch()
+                    return False
+                data = json.loads(raw)
+                if mutate(data) is False:
+                    pipe.unwatch()
+                    return False
+                pipe.multi()
+                pipe.hset(_SCAN_JOBS_KEY, job_id, json.dumps(data, default=str))
+                pipe.execute()
+                return True
+            except WatchError:
+                continue
+    raise RuntimeError("scan job %s update kept conflicting" % job_id)
 
 
 def update_scan_job(job_id: str, updates: dict) -> None:
@@ -201,16 +241,12 @@ def update_scan_job(job_id: str, updates: dict) -> None:
     r = get_redis()
     if r:
         try:
-            raw = r.hget("net2map:scan_jobs", job_id)
-            if not raw:
-                return
-            data = json.loads(raw)
             serializable = {
                 k: v for k, v in updates.items()
                 if k not in ("cancel_event", "thread")
             }
-            data.update(serializable)
-            r.hset("net2map:scan_jobs", job_id, json.dumps(data, default=str))
+            if not _merge_scan_job_atomic(r, job_id, lambda data: data.update(serializable)):
+                return
             local_updates = {k: v for k, v in updates.items() if k in ("cancel_event", "thread")}
             if local_updates:
                 meta = _LOCAL_JOB_META.setdefault(job_id, {})
@@ -222,6 +258,37 @@ def update_scan_job(job_id: str, updates: dict) -> None:
         state = SCAN_JOBS.get(job_id)
         if state:
             state.update(updates)
+
+
+def update_scan_job_if_status(job_id: str, expected_statuses, updates: dict) -> bool:
+    """Atomically merge ``updates`` only while the job status is one of ``expected_statuses``.
+
+    Returns True when the update was applied. Used by the stale job reaper so
+    a job that a worker just picked up is never overwritten.
+    """
+    expected = set(expected_statuses)
+    serializable = {k: v for k, v in updates.items() if k not in ("cancel_event", "thread")}
+
+    def _mutate(data):
+        if data.get("status") not in expected:
+            return False
+        data.update(serializable)
+        return True
+
+    r = get_redis()
+    if r:
+        try:
+            if _merge_scan_job_atomic(r, job_id, _mutate):
+                return True
+            # Not in Redis (or status changed): the job may live in memory.
+        except Exception:
+            pass
+    with SCAN_JOBS_LOCK:
+        state = SCAN_JOBS.get(job_id)
+        if state and state.get("status") in expected:
+            state.update(updates)
+            return True
+    return False
 
 
 def delete_scan_job(job_id: str) -> None:
@@ -263,11 +330,7 @@ def request_scan_cancel(job_id: str) -> bool:
     r = get_redis()
     if r:
         try:
-            raw = r.hget("net2map:scan_jobs", job_id)
-            if raw:
-                data = json.loads(raw)
-                data["cancel_requested"] = True
-                r.hset("net2map:scan_jobs", job_id, json.dumps(data, default=str))
+            if _merge_scan_job_atomic(r, job_id, lambda data: data.update(cancel_requested=True)):
                 found = True
         except Exception:
             pass
@@ -331,6 +394,24 @@ _SCAN_LOCK_TTL = 600  # seconds -- safety TTL for crash recovery; renewed during
 SCAN_LOCK_FENCE_NAME = "scan:lock"
 _SCAN_LOCK_FENCE_KEY = "net2map:fence:" + SCAN_LOCK_FENCE_NAME
 
+# Redis keys of the scan lock. They intentionally keep their historic,
+# unprefixed names: renaming them would let not-yet-upgraded workers (old
+# names) and upgraded workers (new names) hold two different locks during a
+# rolling upgrade and run scans concurrently.
+_SCAN_LOCK_KEY = "scan:lock"
+_SCAN_ACTIVE_TYPE_KEY = "scan:active_type"
+_SCAN_WAITING_KEY = "scan:waiting"
+
+# Waiting set entries: member "<scan_type>:<registered unix ts>:<owner id>",
+# score = priority (unchanged, so priority comparisons by score keep working
+# for workers of the previous release that registered the plain scan type).
+# Entries older than _WAITING_STALE_SEC (twice the longest lock wait used by
+# the callers) are left-overs of crashed waiters and are pruned on read;
+# legacy members without a timestamp are pruned as well because their age is
+# unknown and the waiting set is only advisory.
+_SCAN_LOCK_MAX_WAIT_SEC = 300
+_WAITING_STALE_SEC = 2 * _SCAN_LOCK_MAX_WAIT_SEC
+
 # In-memory fallback when Redis is unavailable
 _LOCAL_SCAN_LOCK = threading.Lock()
 _LOCAL_ACTIVE_SCAN: Optional[str] = None
@@ -384,6 +465,41 @@ return 0
 """
 
 
+def _waiting_member(scan_type: str, owner_id: str, now: float) -> str:
+    return "%s:%.3f:%s" % (scan_type, now, owner_id)
+
+
+def _parse_waiting_member(member) -> tuple:
+    """Return ``(scan_type, registered_ts or None)`` of a waiting set member."""
+    if isinstance(member, bytes):
+        member = member.decode()
+    parts = str(member).split(":")
+    if len(parts) >= 3:
+        try:
+            return parts[0], float(parts[1])
+        except ValueError:
+            pass
+    return parts[0], None
+
+
+def _live_waiting(r, now: float) -> list:
+    """Return ``[(member, scan_type, priority)]`` of live waiters, pruning stale ones."""
+    live = []
+    stale = []
+    for member, score in r.zrange(_SCAN_WAITING_KEY, 0, -1, withscores=True):
+        scan_type, ts = _parse_waiting_member(member)
+        if ts is None or now - ts > _WAITING_STALE_SEC:
+            stale.append(member)
+            continue
+        live.append((member, scan_type, SCAN_PRIORITY.get(scan_type, int(score))))
+    if stale:
+        try:
+            r.zrem(_SCAN_WAITING_KEY, *stale)
+        except Exception as exc:
+            log.debug("scan waiting set pruning failed: %s", exc)
+    return live
+
+
 def _next_local_fence() -> int:
     """Return the next process-local fencing token (Redis disabled).
 
@@ -424,7 +540,7 @@ def acquire_scan_lock(scan_type: str, timeout: int = 300) -> Optional[str]:
     Redis keys used:
       - ``scan:lock``          -- simple mutex (NX, TTL), value = owner token
       - ``scan:active_type``   -- which scan type currently holds the lock
-      - ``scan:waiting``       -- sorted set of waiting scan types (score = priority)
+      - ``scan:waiting``       -- sorted set of waiters (member = type:ts:owner, score = priority)
       - ``net2map:fence:scan:lock`` -- fencing token counter (INCR on acquire)
     """
     global _LOCAL_ACTIVE_SCAN, _LOCAL_LOCK_TOKEN
@@ -445,40 +561,50 @@ def acquire_scan_lock(scan_type: str, timeout: int = 300) -> Optional[str]:
             return token
         return None
 
-    # Register ourselves as waiting so lower-priority dispatches can see us
+    # Register ourselves as waiting so lower-priority dispatches can see us.
+    # The member is unique per waiter, so two waiters of the same scan type
+    # never remove each other's registration.
+    registered_at = time.time()
+    member = _waiting_member(scan_type, owner_id, registered_at)
     try:
-        r.zadd("scan:waiting", {scan_type: priority})
+        r.zadd(_SCAN_WAITING_KEY, {member: priority})
     except Exception:
         pass
+
+    def _unregister(name):
+        try:
+            r.zrem(_SCAN_WAITING_KEY, name)
+        except Exception:
+            pass
 
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
+            now = time.time()
+            if now - registered_at > _WAITING_STALE_SEC / 2:
+                # Long waits refresh the registration before it counts as stale.
+                _unregister(member)
+                registered_at = now
+                member = _waiting_member(scan_type, owner_id, registered_at)
+                r.zadd(_SCAN_WAITING_KEY, {member: priority})
+
             # Check if a higher-priority scan is waiting (we should yield)
-            waiting = r.zrevrange("scan:waiting", 0, 0, withscores=True)
-            if waiting:
-                top_type, top_prio = waiting[0]
-                if isinstance(top_type, bytes):
-                    top_type = top_type.decode()
-                if int(top_prio) > priority:
-                    # A higher-priority scan is waiting -- give up
-                    r.zrem("scan:waiting", scan_type)
-                    return None
+            if any(prio > priority for _, _, prio in _live_waiting(r, now)):
+                # A higher-priority scan is waiting -- give up
+                _unregister(member)
+                return None
 
             # Try to acquire the mutex together with a new fencing token.
             # Any Redis error (including a failed INCR) fails this attempt.
             token = r.eval(
                 _ACQUIRE_LOCK_LUA, 3,
-                "scan:lock", "scan:active_type", _SCAN_LOCK_FENCE_KEY,
+                _SCAN_LOCK_KEY, _SCAN_ACTIVE_TYPE_KEY, _SCAN_LOCK_FENCE_KEY,
                 owner_id, scan_type, _SCAN_LOCK_TTL,
             )
             if token:
                 if isinstance(token, bytes):
                     token = token.decode()
-                try:
-                    r.zrem("scan:waiting", scan_type)
-                except Exception:
-                    pass
+                _unregister(member)
                 return token
 
         except Exception:
@@ -487,10 +613,7 @@ def acquire_scan_lock(scan_type: str, timeout: int = 300) -> Optional[str]:
         time.sleep(2)
 
     # Timed out -- remove ourselves from waiting set
-    try:
-        r.zrem("scan:waiting", scan_type)
-    except Exception:
-        pass
+    _unregister(member)
     return None
 
 
@@ -518,10 +641,11 @@ def release_scan_lock(token: str, scan_type: str = "") -> None:
         return
 
     try:
-        r.eval(_RELEASE_LOCK_LUA, 2, "scan:lock", "scan:active_type", token)
-        # Clean up waiting set just in case (keyed by scan type, harmless)
+        r.eval(_RELEASE_LOCK_LUA, 2, _SCAN_LOCK_KEY, _SCAN_ACTIVE_TYPE_KEY, token)
+        # Waiting set entries are removed by acquire_scan_lock itself (unique
+        # members); a legacy plain-type member is cleaned up just in case.
         if scan_type:
-            r.zrem("scan:waiting", scan_type)
+            r.zrem(_SCAN_WAITING_KEY, scan_type)
     except Exception:
         # Best-effort: never delete anything on error
         pass
@@ -540,7 +664,7 @@ def renew_scan_lock(token: str, ttl: int = _SCAN_LOCK_TTL) -> bool:
         # In-memory fallback has no TTL -- nothing to renew
         return _LOCAL_LOCK_TOKEN == token
     try:
-        return bool(r.eval(_RENEW_LOCK_LUA, 2, "scan:lock", "scan:active_type", token, ttl))
+        return bool(r.eval(_RENEW_LOCK_LUA, 2, _SCAN_LOCK_KEY, _SCAN_ACTIVE_TYPE_KEY, token, ttl))
     except Exception:
         return False
 
@@ -550,7 +674,7 @@ def get_active_scan_type() -> Optional[str]:
     r = get_redis()
     if r:
         try:
-            return r.get("scan:active_type")
+            return r.get(_SCAN_ACTIVE_TYPE_KEY)
         except Exception:
             pass
     return _LOCAL_ACTIVE_SCAN
@@ -575,18 +699,16 @@ def can_dispatch_scan(scan_type: str) -> bool:
 
     try:
         # Check active scan
-        active = r.get("scan:active_type")
+        active = r.get(_SCAN_ACTIVE_TYPE_KEY)
         if active:
             active_prio = SCAN_PRIORITY.get(active, 1)
             if active_prio >= priority:
                 return False
 
-        # Check waiting scans -- if anything with higher priority is waiting, skip
-        waiting = r.zrevrange("scan:waiting", 0, 0, withscores=True)
-        if waiting:
-            _, top_prio = waiting[0]
-            if int(top_prio) > priority:
-                return False
+        # Check waiting scans -- if anything with higher priority is waiting,
+        # skip. Stale entries of crashed waiters are pruned while reading.
+        if any(prio > priority for _, _, prio in _live_waiting(r, time.time())):
+            return False
 
     except Exception:
         return False
@@ -607,7 +729,8 @@ _LOCAL_DISPATCH_LOCK = threading.Lock()
 # when no dispatch happened within ARGV[1] seconds. Using the server clock
 # keeps workers with skewed local clocks consistent. ARGV[2] is the key TTL
 # (garbage collection only; the comparison is authoritative, so changed
-# intervals take effect on the next tick).
+# intervals take effect on the next tick). On success the stored value is
+# returned as the claim token (see release_scheduled_dispatch).
 _CLAIM_DISPATCH_LUA = """
 local now = redis.call("time")
 local ts = tonumber(now[1]) + tonumber(now[2]) / 1000000
@@ -615,8 +738,19 @@ local last = tonumber(redis.call("get", KEYS[1]))
 if last and ts - last < tonumber(ARGV[1]) then
     return 0
 end
-redis.call("set", KEYS[1], string.format("%.6f", ts), "EX", ARGV[2])
-return 1
+local value = string.format("%.6f", ts)
+redis.call("set", KEYS[1], value, "EX", ARGV[2])
+return value
+"""
+
+# Compare-and-delete rollback of a claim: only removes the stored timestamp
+# while it is still the caller's own claim token.
+_RELEASE_DISPATCH_LUA = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    redis.call("del", KEYS[1])
+    return 1
+end
+return 0
 """
 
 
@@ -626,28 +760,76 @@ def _dispatch_claim_ttl(interval: int) -> int:
     return max(60, min(int(interval) * 2, 7 * 86400))
 
 
-def claim_scheduled_dispatch(kind: str, interval: int) -> bool:
+def claim_scheduled_dispatch_token(kind: str, interval: int) -> Optional[str]:
     """Claim the scheduler dispatch of ``kind`` for the current interval.
 
-    Returns True for exactly one caller per interval across all processes
-    sharing Redis (key ``net2map:sched:last_dispatch:<kind>``), so multiple
-    Celery workers or a restarted beat cannot dispatch duplicates. Falls back
-    to process-local timestamps when Redis is unavailable.
+    Returns an opaque claim token for exactly one caller per interval across
+    all processes sharing Redis (key ``net2map:sched:last_dispatch:<kind>``),
+    so multiple Celery workers or a restarted beat cannot dispatch
+    duplicates; None when the interval is already claimed. Pass the token to
+    release_scheduled_dispatch when the dispatch was refused so the next tick
+    can retry. Uses process-local timestamps only when Redis is not
+    configured at all; with a configured but failing Redis the claim fails
+    closed (no dispatch, retried on the next tick) because per-process
+    timestamps cannot deduplicate across workers.
     """
     if interval <= 0:
-        return False
+        return None
     r = get_redis()
     if r:
         try:
-            return bool(r.eval(
+            token = r.eval(
                 _CLAIM_DISPATCH_LUA, 1, _SCHED_DISPATCH_KEY_PREFIX + kind,
                 int(interval), _dispatch_claim_ttl(interval),
-            ))
+            )
         except Exception as exc:
             log.warning("scheduler dispatch claim via Redis failed for %s: %s", kind, exc)
+            return None
+        if not token or token == "0":
+            return None
+        return token.decode() if isinstance(token, bytes) else str(token)
+    if redis_client.REDIS_URL:
+        log.warning("scheduler dispatch claim for %s skipped: Redis configured but unavailable", kind)
+        return None
     now = time.time()
     with _LOCAL_DISPATCH_LOCK:
         if now - _LOCAL_LAST_DISPATCH.get(kind, 0.0) < interval:
-            return False
+            return None
         _LOCAL_LAST_DISPATCH[kind] = now
-        return True
+        return "local:%r" % now
+
+
+def claim_scheduled_dispatch(kind: str, interval: int) -> bool:
+    """Boolean form of claim_scheduled_dispatch_token."""
+    return claim_scheduled_dispatch_token(kind, interval) is not None
+
+
+def release_scheduled_dispatch(kind: str, token: Optional[str]) -> bool:
+    """Roll back a dispatch claim whose dispatch was refused.
+
+    Race-free: only the caller's own claim is removed (compare-and-delete on
+    the claim token); while the claim exists no other worker can claim the
+    same interval, so a concurrent dispatch can never be undone. Returns True
+    when the claim was removed. On Redis errors the claim stays (the interval
+    is consumed, the previous behavior).
+    """
+    if not token:
+        return False
+    if token.startswith("local:"):
+        try:
+            ts = float(token[len("local:"):])
+        except ValueError:
+            return False
+        with _LOCAL_DISPATCH_LOCK:
+            if _LOCAL_LAST_DISPATCH.get(kind) == ts:
+                del _LOCAL_LAST_DISPATCH[kind]
+                return True
+        return False
+    r = get_redis()
+    if not r:
+        return False
+    try:
+        return bool(r.eval(_RELEASE_DISPATCH_LUA, 1, _SCHED_DISPATCH_KEY_PREFIX + kind, token))
+    except Exception as exc:
+        log.warning("scheduler dispatch claim release failed for %s: %s", kind, exc)
+        return False

@@ -77,6 +77,9 @@ class FakeRedis:
     def zrevrange(self, *args, **kwargs):
         return []
 
+    def zrange(self, *args, **kwargs):
+        return []
+
     def flushall(self):
         self.data.clear()
         self.expiry.clear()
@@ -459,8 +462,8 @@ def test_migration_020_upgrade_downgrade_sqlite():
         assert "lease_fences" not in sa.inspect(conn).get_table_names()
 
 
-def test_alembic_head_is_028():
+def test_alembic_head_is_029():
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory(str(BACKEND / "alembic"))
-    assert script.get_heads() == ["028"]
+    assert script.get_heads() == ["029"]

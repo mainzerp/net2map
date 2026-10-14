@@ -19,6 +19,53 @@ _scheduler_wake = threading.Event()
 _shutdown_requested = threading.Event()
 
 
+# Scan types whose last dispatch attempt was refused (another scan active or
+# waiting, lock not acquired). Refused dispatches are retried on every tick;
+# to keep the log readable only the first refusal of such a streak and the
+# eventual dispatch are logged.
+_blocked_kinds: set = set()
+_blocked_lock = threading.Lock()
+
+
+def _mark_blocked(scan_type: str) -> bool:
+    """Record a refused dispatch; True when this starts a new blocked streak."""
+    with _blocked_lock:
+        if scan_type in _blocked_kinds:
+            return False
+        _blocked_kinds.add(scan_type)
+        return True
+
+
+def _clear_blocked(scan_type: str) -> None:
+    """End a blocked streak; logs once that the dispatch went through."""
+    with _blocked_lock:
+        was_blocked = scan_type in _blocked_kinds
+        _blocked_kinds.discard(scan_type)
+    if was_blocked:
+        _log_event(logging.INFO, "scheduler.%s.resumed" % scan_type)
+
+
+def _log_dispatch_start(scan_type: str) -> None:
+    """Log a dispatch attempt unless the type is in a blocked streak (retries)."""
+    with _blocked_lock:
+        blocked = scan_type in _blocked_kinds
+    if not blocked:
+        _log_event(logging.INFO, "scheduler.%s.start" % scan_type)
+
+
+def _scan_blocked(scan_type: str) -> bool:
+    """True when a higher-priority scan is running or waiting (can_dispatch_scan).
+
+    Logs the skip once per blocked streak instead of on every retry tick.
+    """
+    if can_dispatch_scan(scan_type):
+        return False
+    if _mark_blocked(scan_type):
+        _log_event(logging.INFO, "scheduler.%s.skipped" % scan_type,
+                   reason="higher_priority_scan_active_or_waiting", retry="next_tick")
+    return True
+
+
 def shutdown_scheduler():
     """Signal the background scheduler to exit its loop."""
     _shutdown_requested.set()
@@ -44,16 +91,19 @@ def _read_scheduler_intervals(db) -> dict:
     return {"discovery": discovery_interval, "links": links_interval, "macs": macs_interval}
 
 
-def _dispatch_scheduled_scan(scan_type: str):
+def _dispatch_scheduled_scan(scan_type: str) -> bool:
     """Run a scheduled scan, using Celery if available, otherwise directly.
 
     Checks the distributed scan lock before dispatching: if a higher-priority
     scan is running or waiting, this scan is skipped.
+
+    Returns True when the scan was dispatched (queued or started) and False
+    when it was not (another scan active/waiting, lock not acquired), so the
+    thread-based scheduler retries on its next tick instead of waiting a
+    full interval.
     """
-    if not can_dispatch_scan(scan_type):
-        _log_event(logging.INFO, "scheduler.%s.skipped" % scan_type,
-                   reason="higher_priority_scan_active_or_waiting")
-        return
+    if _scan_blocked(scan_type):
+        return False
 
     from shared.redis_client import get_redis
     if get_redis():
@@ -70,8 +120,9 @@ def _dispatch_scheduled_scan(scan_type: str):
                 "cancel_requested": False,
             })
             run_scan_task.delay(job_id, False, scan_type)
+            _clear_blocked(scan_type)
             _log_event(logging.INFO, "scheduler.%s.dispatched" % scan_type, backend="celery")
-            return
+            return True
         except Exception as exc:
             if job_id is not None:
                 update_scan_job(job_id, {
@@ -88,8 +139,10 @@ def _dispatch_scheduled_scan(scan_type: str):
     from shared.state import acquire_scan_lock, release_scan_lock
     lock_token = acquire_scan_lock(scan_type, timeout=60)
     if not lock_token:
-        _log_event(logging.INFO, "scheduler.%s.lock_timeout" % scan_type)
-        return
+        if _mark_blocked(scan_type):
+            _log_event(logging.INFO, "scheduler.%s.lock_timeout" % scan_type, retry="next_tick")
+        return False
+    _clear_blocked(scan_type)
 
     db = SessionLocal()
     loop = _get_bg_loop()
@@ -107,6 +160,7 @@ def _dispatch_scheduled_scan(scan_type: str):
             db.close()
 
     future.add_done_callback(_on_done)
+    return True
 
 
 def _background_scheduler():
@@ -134,20 +188,22 @@ def _background_scheduler():
             # Dispatch in priority order: macs > links > discovery
             # Higher-priority scans are dispatched first so they register
             # in the waiting set before lower-priority checks run.
+            # The last_* timestamps only advance when the scan was actually
+            # dispatched; otherwise the next tick retries.
             if intervals["macs"] > 0 and (now - last_macs) >= intervals["macs"]:
-                _log_event(logging.INFO, "scheduler.macs.start")
-                _dispatch_scheduled_scan("macs")
-                last_macs = time.time()
+                _log_dispatch_start("macs")
+                if _dispatch_scheduled_scan("macs"):
+                    last_macs = time.time()
 
             if intervals["links"] > 0 and (now - last_links) >= intervals["links"]:
-                _log_event(logging.INFO, "scheduler.links.start")
-                _dispatch_scheduled_scan("links")
-                last_links = time.time()
+                _log_dispatch_start("links")
+                if _dispatch_scheduled_scan("links"):
+                    last_links = time.time()
 
             if intervals["discovery"] > 0 and (now - last_discovery) >= intervals["discovery"]:
-                _log_event(logging.INFO, "scheduler.discovery.start")
-                _dispatch_scheduled_scan("discovery")
-                last_discovery = time.time()
+                _log_dispatch_start("discovery")
+                if _dispatch_scheduled_scan("discovery"):
+                    last_discovery = time.time()
 
         except Exception as e:
             _log_event(logging.ERROR, "scheduler.error", error=str(e))

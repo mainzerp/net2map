@@ -7,12 +7,34 @@ _log = logging.getLogger(__name__)
 
 
 def log_audit(request: Request, action: str, resource: str,
-              resource_id: str = "", details: dict = None, db=None):
+              resource_id: str = "", details: dict = None, db=None, strict: bool = False):
     """Record an audit log entry. Uses the provided db session if given,
-    otherwise creates an independent session."""
+    otherwise creates an independent session.
+
+    Lenient (default): failures are logged and swallowed.
+
+    ``strict=True`` is for security-critical changes (users, credentials,
+    SNMP profiles, config/bulk imports): the entry is added to the caller's
+    session ``db`` (required) WITHOUT committing, so it is persisted by the
+    caller's commit in the same transaction as the change itself. Any failure
+    propagates: the request fails with 500 and the change is rolled back
+    together with the audit record. Call it before ``db.commit()``.
+    """
     from database import AuditLog, SessionLocal
 
-    user = getattr(request.state, "user", {})
+    user = getattr(request.state, "user", None) or {}
+    if strict:
+        if db is None:
+            raise ValueError("log_audit(strict=True) requires the caller's db session")
+        db.add(AuditLog(
+            user_id=user.get("id"),
+            username=user.get("username", ""),
+            action=action,
+            resource=resource,
+            resource_id=str(resource_id),
+            details=details or {},
+        ))
+        return
     own_session = db is None
     if own_session:
         db = SessionLocal()

@@ -5,30 +5,14 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from database import Credential, SnmpProfile, get_db
-from schemas import MASK_SENTINELS, SnmpProfileCreate, SnmpProfileOut, SnmpProfileUpdate
+from schemas import SnmpProfileCreate, SnmpProfileOut, SnmpProfileUpdate
 from shared.audit import log_audit
 from shared.auth import require_role
 from shared.crypto import encrypt
 from shared.errors import api_error
+from shared.secrets import normalize_mask_sentinels, strip_mask_sentinels
 
 router = APIRouter()
-
-_SECRET_FIELDS = ("community", "v3_auth_password", "v3_priv_password")
-
-
-def _strip_mask_sentinels(data: dict) -> None:
-    """Remove fields whose value is a mask sentinel (treated as 'unchanged')."""
-    for field in _SECRET_FIELDS:
-        if data.get(field) in MASK_SENTINELS:
-            del data[field]
-
-
-def _normalize_mask_sentinels(data: dict) -> None:
-    """Normalize mask sentinels to empty strings before insert."""
-    for field in _SECRET_FIELDS:
-        if data.get(field) in MASK_SENTINELS:
-            data[field] = ""
-
 
 @router.get("/snmp-profiles", response_model=List[SnmpProfileOut])
 def list_snmp_profiles(db: Session = Depends(get_db)):
@@ -39,7 +23,7 @@ def list_snmp_profiles(db: Session = Depends(get_db)):
              dependencies=[require_role("admin", "operator")])
 def create_snmp_profile(body: SnmpProfileCreate, request: Request, db: Session = Depends(get_db)):
     payload = body.model_dump()
-    _normalize_mask_sentinels(payload)
+    normalize_mask_sentinels(payload)
     if payload.get("community"):
         payload["community"] = encrypt(payload["community"])
     if payload.get("v3_auth_password"):
@@ -48,9 +32,10 @@ def create_snmp_profile(body: SnmpProfileCreate, request: Request, db: Session =
         payload["v3_priv_password"] = encrypt(payload["v3_priv_password"])
     profile = SnmpProfile(**payload)
     db.add(profile)
+    db.flush()
+    log_audit(request, "create", "snmp_profile", str(profile.id), {"label": profile.label}, db=db, strict=True)
     db.commit()
     db.refresh(profile)
-    log_audit(request, "create", "snmp_profile", str(profile.id), {"label": profile.label})
     return profile
 
 
@@ -61,7 +46,7 @@ def update_snmp_profile(profile_id: int, body: SnmpProfileUpdate, request: Reque
     if not profile:
         api_error(404, "PROFILE_NOT_FOUND", "Profile not found")
     payload = body.model_dump(exclude_none=True)
-    _strip_mask_sentinels(payload)
+    strip_mask_sentinels(payload)
 
     if "community" in payload and payload["community"]:
         payload["community"] = encrypt(payload["community"])
@@ -76,9 +61,10 @@ def update_snmp_profile(profile_id: int, body: SnmpProfileUpdate, request: Reque
     # Credentials with profile_id inherit SNMP settings directly from the profile at scan time.
     # No need to copy fields to linked credentials.
 
+    log_audit(request, "update", "snmp_profile", str(profile_id), {"fields": list(payload.keys())},
+              db=db, strict=True)
     db.commit()
     db.refresh(profile)
-    log_audit(request, "update", "snmp_profile", str(profile_id), {"fields": list(payload.keys())})
     return profile
 
 
@@ -90,6 +76,6 @@ def delete_snmp_profile(profile_id: int, request: Request, db: Session = Depends
         api_error(404, "PROFILE_NOT_FOUND", "Profile not found")
     # Detach credentials that use this profile before deleting
     db.query(Credential).filter(Credential.profile_id == profile_id).update({"profile_id": None})
-    log_audit(request, "delete", "snmp_profile", str(profile_id), {"label": profile.label})
+    log_audit(request, "delete", "snmp_profile", str(profile_id), {"label": profile.label}, db=db, strict=True)
     db.delete(profile)
     db.commit()

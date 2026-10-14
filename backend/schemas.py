@@ -30,9 +30,25 @@ class APIError(BaseModel):
 
 UserRole = Literal["admin", "operator", "viewer"]
 
+# bcrypt only uses the first 72 bytes of a password and newer bcrypt releases
+# reject longer input; new passwords must fit.
+PASSWORD_MAX_BYTES = 72
+# Login input bound: longer values are rejected with 422 before hashing work.
+# Values between PASSWORD_MAX_BYTES and this bound fail like a wrong password.
+LOGIN_FIELD_MAX_LENGTH = 1024
+
+
+def _validate_new_password(v: str) -> str:
+    if len(v) < 8:
+        raise ValueError("Password must be at least 8 characters long")
+    if len(v.encode()) > PASSWORD_MAX_BYTES:
+        raise ValueError(f"Password must not exceed {PASSWORD_MAX_BYTES} bytes")
+    return v
+
+
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(..., max_length=LOGIN_FIELD_MAX_LENGTH)
+    password: str = Field(..., max_length=LOGIN_FIELD_MAX_LENGTH)
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -49,9 +65,7 @@ class UserCreate(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password(cls, v):
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters long")
-        return v
+        return _validate_new_password(v)
 
 class UserUpdate(BaseModel):
     email: Optional[str] = None
@@ -62,9 +76,7 @@ class UserUpdate(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password(cls, v):
-        if v is not None and len(v) < 8:
-            raise ValueError("Password must be at least 8 characters long")
-        return v
+        return v if v is None else _validate_new_password(v)
 
 class UserOut(BaseModel):
     id: int
@@ -940,9 +952,13 @@ class DryRunPreviewItem(BaseModel):
     already_exists: bool = False
 
 
+# Upper bound for import payloads (bulk and global config import).
+IMPORT_DATA_MAX_LENGTH = 10 * 1024 * 1024
+
+
 class BulkImportRequest(BaseModel):
     format: Literal["json", "csv"] = "json"
-    data: str
+    data: str = Field(..., max_length=IMPORT_DATA_MAX_LENGTH)
     dry_run: bool = True
 
 
@@ -973,7 +989,7 @@ class GlobalConfigExportOut(BaseModel):
 
 
 class GlobalConfigImportRequest(BaseModel):
-    data: str
+    data: str = Field(..., max_length=IMPORT_DATA_MAX_LENGTH)
     dry_run: bool = True
 
 
@@ -984,6 +1000,8 @@ class ScanSettingsUpdate(BaseModel):
     snmp_timeout: Optional[int] = None
     snmp_retries: Optional[int] = None
     snmp_bulk_size: Optional[int] = None
+    # Days after which unseen endpoints are pruned; 0 disables pruning.
+    endpoint_retention_days: Optional[int] = None
 
     @model_validator(mode="after")
     def _clamp_values(self):
@@ -995,6 +1013,8 @@ class ScanSettingsUpdate(BaseModel):
             self.snmp_retries = max(0, min(10, self.snmp_retries))
         if self.snmp_bulk_size is not None:
             self.snmp_bulk_size = max(5, min(100, self.snmp_bulk_size))
+        if self.endpoint_retention_days is not None:
+            self.endpoint_retention_days = max(0, min(3650, self.endpoint_retention_days))
         return self
 
 class ScanSettingsOut(BaseModel):
@@ -1002,6 +1022,7 @@ class ScanSettingsOut(BaseModel):
     snmp_timeout: int
     snmp_retries: int
     snmp_bulk_size: int = 25
+    endpoint_retention_days: int = 30
 
 
 # ─── DNS Settings ─────────────────────────────────────────────────────────────

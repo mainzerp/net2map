@@ -25,11 +25,11 @@ def test_health_degraded_when_redis_fails(client):
     with patch("routers.health.get_redis", return_value=mock_redis):
         r = client.get("/health")
         data = r.json()
-        assert data["checks"]["redis"].startswith("error")
+        assert data["checks"]["redis"] == "error"
         assert data["status"] == "degraded"
 
 
-def test_health_redis_not_configured(client):
+def test_health_redis_not_configured(client, auth_headers):
     """Health reports redis as not_configured when get_redis returns None."""
     with patch("routers.health.get_redis", return_value=None):
         r = client.get("/health")
@@ -37,7 +37,7 @@ def test_health_redis_not_configured(client):
         assert data["checks"]["redis"] == "not_configured"
         assert "celery" not in data["checks"]
 
-        r = client.get("/health?deep=1")
+        r = client.get("/health?deep=1", headers=auth_headers)
         data = r.json()
         assert r.status_code == 200
         assert data["checks"]["celery"] == "not_configured"
@@ -65,12 +65,12 @@ def test_health_liveness_ignores_missing_celery_worker(client):
     mock_celery.control.ping.assert_not_called()
 
 
-def test_health_deep_reports_no_workers_as_503(client):
+def test_health_deep_reports_no_workers_as_503(client, auth_headers):
     mock_celery = MagicMock()
     mock_celery.control.ping.return_value = []
     with patch("routers.health.get_redis", return_value=_healthy_redis()), \
          patch("celery_app.celery_app", mock_celery):
-        r = client.get("/health?deep=1")
+        r = client.get("/health?deep=1", headers=auth_headers)
     assert r.status_code == 503
     data = r.json()
     assert data["status"] == "degraded"
@@ -78,22 +78,22 @@ def test_health_deep_reports_no_workers_as_503(client):
     assert data["checks"]["celery"] == "none"
 
 
-def test_health_deep_ok_with_worker(client):
+def test_health_deep_ok_with_worker(client, auth_headers):
     mock_celery = MagicMock()
     mock_celery.control.ping.return_value = [{"celery@worker": {"ok": "pong"}}]
     with patch("routers.health.get_redis", return_value=_healthy_redis()), \
          patch("celery_app.celery_app", mock_celery):
-        r = client.get("/health?deep=1")
+        r = client.get("/health?deep=1", headers=auth_headers)
     assert r.status_code == 200
     assert r.json()["workers"] == "ok"
 
 
-def test_health_deep_reports_unreachable_broker(client):
+def test_health_deep_reports_unreachable_broker(client, auth_headers):
     mock_celery = MagicMock()
     mock_celery.control.ping.side_effect = OSError("broker down")
     with patch("routers.health.get_redis", return_value=_healthy_redis()), \
          patch("celery_app.celery_app", mock_celery):
-        r = client.get("/health?deep=1")
+        r = client.get("/health?deep=1", headers=auth_headers)
     assert r.status_code == 503
     assert r.json()["workers"] == "unreachable"
 
@@ -157,3 +157,23 @@ class TestRequestLogging:
         assert "/health" in _SKIP_LOG_PATHS
         assert "/metrics" in _SKIP_LOG_PATHS
         assert "/ws" in _SKIP_LOG_PATHS
+
+
+def test_health_never_returns_exception_text(client):
+    """Component errors are logged; the response only says "error"."""
+    mock_redis = MagicMock()
+    mock_redis.ping.side_effect = ConnectionError("secret-host:6379 refused")
+    with patch("routers.health.get_redis", return_value=mock_redis), \
+         patch("routers.health.SessionLocal", side_effect=RuntimeError("password=hunter2")):
+        r = client.get("/health")
+    assert r.status_code == 503
+    assert r.json()["checks"] == {"database": "error", "redis": "error"}
+    assert "hunter2" not in r.text and "secret-host" not in r.text
+
+
+def test_health_deep_requires_authentication(client):
+    with patch("routers.health.get_redis", return_value=None):
+        assert client.get("/health").status_code == 200
+        r = client.get("/health?deep=1")
+    assert r.status_code == 401
+    assert r.json()["error"]["code"] == "AUTH_REQUIRED"

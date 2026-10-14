@@ -43,7 +43,14 @@ ALLOWED_SETTING_KEYS = {
     "map_scale",
     "map_bg_color",
     "audit_retention_days",
+    "endpoint_retention_days",
     *LATENCY_SETTING_KEYS,
+}
+
+# Integer settings validated here: key -> (min, max).
+_INT_SETTING_RANGES = {
+    # Days after which unseen endpoints are pruned; 0 disables pruning.
+    "endpoint_retention_days": (0, 3650),
 }
 
 
@@ -56,6 +63,15 @@ def _validated_value(key: str, value: str, key_field: str = "key", value_field: 
             return validate_setting_value(key, value)
         except ValueError as exc:
             api_error(400, "INVALID_SETTING_VALUE", str(exc), field=value_field)
+    if key in _INT_SETTING_RANGES:
+        low, high = _INT_SETTING_RANGES[key]
+        try:
+            number = int(str(value).strip())
+        except ValueError:
+            api_error(400, "INVALID_SETTING_VALUE", f"{key} must be an integer", field=value_field)
+        if not low <= number <= high:
+            api_error(400, "INVALID_SETTING_VALUE", f"{key} must be between {low} and {high}", field=value_field)
+        return str(number)
     return value
 
 

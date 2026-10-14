@@ -19,18 +19,9 @@ _VIRTUAL_CISCO = (
 
 
 class CiscoScanner(VendorScanner, vendor_id="cisco"):
-
-    def extract_model(self, sys_descr: str) -> str:
-        m = _MODEL_CISCO.search(sys_descr or "")
-        return m.group(1) if m else ""
-
-    def extract_version(self, sys_descr: str | None) -> str:
-        m = _VERSION_CISCO.search(sys_descr or "")
-        return m.group(1) if m else ""
-
-    def is_virtual_port(self, if_descr: str) -> bool:
-        d = if_descr.lower()
-        return any(p in d for p in _VIRTUAL_CISCO)
+    MODEL_PATTERN = _MODEL_CISCO
+    VERSION_PATTERN = _VERSION_CISCO
+    VIRTUAL_PORT_PATTERNS = _VIRTUAL_CISCO
 
     def fdb_strategy(self) -> str:
         return "dot1d"

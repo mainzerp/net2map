@@ -227,12 +227,18 @@ def test_lost_heartbeat_cancels_ping_and_reaps_process(db, executor_mod, monkeyp
     db.commit()
     monkeypatch.setattr(executor_mod, "_read_discovery_ranges", lambda db: [])
     monkeypatch.setattr(executor_mod, "_LOCK_RENEW_INTERVAL_SEC", 0.001)
-    monkeypatch.setattr(executor_mod, "renew_scan_lock", Mock(side_effect=[True, False]))
+    # The setup phase and lease checks run in worker threads, so the first
+    # renewal can fire before the ping starts. Lose the lease only once the
+    # ping is in flight; this is the situation the test is about.
+    ping_started = threading.Event()
+    renewal = Mock(side_effect=lambda token: not ping_started.is_set())
+    monkeypatch.setattr(executor_mod, "renew_scan_lock", renewal)
     finalizer = Mock()
     monkeypatch.setattr(executor_mod, "_finalize_scan_db", finalizer)
     proc = Mock(returncode=None)
 
     async def blocked_communicate():
+        ping_started.set()
         await asyncio.sleep(30)
 
     proc.communicate = AsyncMock(side_effect=blocked_communicate)
@@ -240,6 +246,7 @@ def test_lost_heartbeat_cancels_ping_and_reaps_process(db, executor_mod, monkeyp
     monkeypatch.setattr(asyncio, "create_subprocess_exec", AsyncMock(return_value=proc))
     with pytest.raises(executor_mod.ScanOwnershipLost):
         asyncio.run(executor_mod._execute_scan(db, lock_token="owner"))
+    assert ping_started.is_set()
     proc.kill.assert_called_once()
     proc.wait.assert_awaited_once()
     finalizer.assert_not_called()

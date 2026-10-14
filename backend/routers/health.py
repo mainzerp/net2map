@@ -8,14 +8,23 @@ Contract (``GET /health``, unversioned, auth-exempt):
 - ``?deep=1`` (readiness): additionally pings the Celery workers (up to 2 s)
   and reports the result as ``workers`` (``ok`` | ``none`` | ``unreachable`` |
   ``not_configured``) and ``checks.celery``. ``503`` when no worker answers
-  while Redis is configured.
+  while Redis is configured. Requires a valid bearer token (any role); the
+  path stays auth-exempt for liveness, so the token is checked here (401
+  otherwise).
+- Failed checks report ``"error"`` only; the exception is logged, never
+  returned.
 """
-from fastapi import APIRouter
+import logging
+
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from database import SessionLocal
+from shared.errors import api_error
 from shared.redis_client import get_redis
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -33,7 +42,9 @@ def _worker_status(redis_client) -> str:
 
 
 @router.get("/health", include_in_schema=False)
-def health(deep: bool = False):
+def health(request: Request, deep: bool = False):
+    if deep and not getattr(request.state, "user", None):
+        api_error(401, "AUTH_REQUIRED", "Authentication required for deep health checks")
     checks = {}
     healthy = True
 
@@ -45,8 +56,9 @@ def health(deep: bool = False):
             checks["database"] = "ok"
         finally:
             db.close()
-    except Exception as e:
-        checks["database"] = f"error: {e}"
+    except Exception:
+        _log.exception("Health check: database unavailable")
+        checks["database"] = "error"
         healthy = False
 
     # Redis connectivity
@@ -55,8 +67,9 @@ def health(deep: bool = False):
         try:
             r.ping()
             checks["redis"] = "ok"
-        except Exception as e:
-            checks["redis"] = f"error: {e}"
+        except Exception:
+            _log.exception("Health check: Redis unavailable")
+            checks["redis"] = "error"
             healthy = False
     else:
         checks["redis"] = "not_configured"

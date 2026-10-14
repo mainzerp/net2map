@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 from database import Credential, Device, PingCandidate, get_db
 from routers.topology import _bump_topo_version
 from schemas import (
-    MASK_SENTINELS,
     CredentialCreate,
     CredentialOut,
     CredentialUpdate,
@@ -22,26 +21,10 @@ from shared.auth import require_role
 from shared.crypto import encrypt
 from shared.errors import api_error
 from shared.ping_only import upsert_ping_only_device
+from shared.secrets import normalize_mask_sentinels, strip_mask_sentinels
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
-
-_SECRET_FIELDS = ("community", "v3_auth_password", "v3_priv_password")
-
-
-def _strip_mask_sentinels(data: dict) -> None:
-    """Remove fields whose value is a mask sentinel (treated as 'unchanged')."""
-    for field in _SECRET_FIELDS:
-        if data.get(field) in MASK_SENTINELS:
-            del data[field]
-
-
-def _normalize_mask_sentinels(data: dict) -> None:
-    """Normalize mask sentinels to empty strings before insert."""
-    for field in _SECRET_FIELDS:
-        if data.get(field) in MASK_SENTINELS:
-            data[field] = ""
-
 
 @router.get("/credentials", response_model=List[CredentialOut])
 def list_credentials(db: Session = Depends(get_db)):
@@ -60,7 +43,7 @@ def create_credential(body: CredentialCreate, request: Request, db: Session = De
                   f"IP {body.ip} with priority {body.priority} already exists",
                   field="ip")
     data = body.model_dump()
-    _normalize_mask_sentinels(data)
+    normalize_mask_sentinels(data)
     if data.get("community"):
         data["community"] = encrypt(data["community"])
     if data.get("v3_auth_password"):
@@ -76,11 +59,12 @@ def create_credential(body: CredentialCreate, request: Request, db: Session = De
         if device:
             cred.device_id = device.id
 
+    db.flush()
+    log_audit(request, "create", "credential", str(cred.id),
+              {"ip": cred.ip, "label": cred.label, "snmp_enabled": bool(cred.snmp_enabled)}, db=db, strict=True)
     db.commit()
     db.refresh(cred)
     _bump_topo_version()
-    log_audit(request, "create", "credential", str(cred.id),
-              {"ip": cred.ip, "label": cred.label, "snmp_enabled": bool(cred.snmp_enabled)})
     return cred
 
 
@@ -128,7 +112,7 @@ def create_ping_only_credentials(body: PingOnlyAdoptRequest, request: Request, d
         )
         db.query(PingCandidate).filter(PingCandidate.ip == ip).delete(synchronize_session=False)
         log_audit(request, "create", "credential", str(cred.id),
-                  {"ip": ip, "label": label, "snmp_enabled": False, "ping_only": True}, db=db)
+                  {"ip": ip, "label": label, "snmp_enabled": False, "ping_only": True}, db=db, strict=True)
         created.append({"ip": ip, "credential_id": cred.id, "device_id": device.id})
     db.commit()
     if created:
@@ -144,7 +128,7 @@ def update_credential(cred_id: int, body: CredentialUpdate, request: Request, db
     if not cred:
         api_error(404, "CREDENTIAL_NOT_FOUND", "Credential not found")
     updates = body.model_dump(exclude_unset=True)
-    _strip_mask_sentinels(updates)
+    strip_mask_sentinels(updates)
     if updates.get("snmp_enabled", True) is None:
         # NOT NULL column: an explicit null leaves the flag unchanged
         del updates["snmp_enabled"]
@@ -158,10 +142,10 @@ def update_credential(cred_id: int, body: CredentialUpdate, request: Request, db
     for k, v in updates.items():
         setattr(cred, k, v)
 
+    log_audit(request, "update", "credential", str(cred_id), {"fields": list(updates.keys())}, db=db, strict=True)
     db.commit()
     db.refresh(cred)
     _bump_topo_version()
-    log_audit(request, "update", "credential", str(cred_id), {"fields": list(updates.keys())})
     return cred
 
 
@@ -172,7 +156,7 @@ def delete_credential(cred_id: int, request: Request, db: Session = Depends(get_
     cred = db.query(Credential).filter(Credential.id == cred_id).first()
     if not cred:
         api_error(404, "CREDENTIAL_NOT_FOUND", "Credential not found")
-    log_audit(request, "delete", "credential", str(cred_id), {"ip": cred.ip, "label": cred.label})
+    log_audit(request, "delete", "credential", str(cred_id), {"ip": cred.ip, "label": cred.label}, db=db, strict=True)
     db.delete(cred)
     db.commit()
     _bump_topo_version()

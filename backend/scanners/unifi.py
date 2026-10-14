@@ -16,18 +16,9 @@ _VIRTUAL_UNIFI = ("loopback", "vlan", "bridge", "cpu", "mgmt")
 
 
 class UniFiScanner(VendorScanner, vendor_id="unifi"):
-
-    def extract_model(self, sys_descr: str) -> str:
-        m = _MODEL_UNIFI.search(sys_descr or "")
-        return m.group(1) if m else ""
-
-    def extract_version(self, sys_descr: str | None) -> str:
-        m = _VERSION_UNIFI.search(sys_descr or "")
-        return m.group(1) if m else ""
-
-    def is_virtual_port(self, if_descr: str) -> bool:
-        d = if_descr.lower()
-        return any(p in d for p in _VIRTUAL_UNIFI)
+    MODEL_PATTERN = _MODEL_UNIFI
+    VERSION_PATTERN = _VERSION_UNIFI
+    VIRTUAL_PORT_PATTERNS = _VIRTUAL_UNIFI
 
     def fdb_strategy(self) -> str:
         return "qbridge"

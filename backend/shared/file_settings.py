@@ -225,12 +225,32 @@ def _normalize_scan_settings(value: dict | None):
     }
 
 
+# Endpoint pruning: days after which unseen endpoints are removed (0 = off).
+# Stored under app_settings key "endpoint_retention_days", shared with the
+# generic /settings API and the scan pruning.
+ENDPOINT_RETENTION_DEFAULT_DAYS = 30
+ENDPOINT_RETENTION_MIN_DAYS, ENDPOINT_RETENTION_MAX_DAYS = 0, 3650
+
+
+def _clamp_endpoint_retention(days: int) -> int:
+    return max(ENDPOINT_RETENTION_MIN_DAYS, min(ENDPOINT_RETENTION_MAX_DAYS, int(days)))
+
+
+def _read_endpoint_retention_days() -> int:
+    raw = _read_db_setting("endpoint_retention_days", str(ENDPOINT_RETENTION_DEFAULT_DAYS))
+    try:
+        return _clamp_endpoint_retention(int(str(raw).strip()))
+    except ValueError:
+        return ENDPOINT_RETENTION_DEFAULT_DAYS
+
+
 def _read_scan_settings():
     return {
         "max_workers": max(1, min(128, int(_read_db_setting("scan_max_workers", "12")))),
         "snmp_timeout": max(1, min(30, int(_read_db_setting("scan_snmp_timeout", "3")))),
         "snmp_retries": max(0, min(10, int(_read_db_setting("scan_snmp_retries", "1")))),
         "snmp_bulk_size": max(_BULK_SIZE_MIN, min(_BULK_SIZE_MAX, int(_read_db_setting("scan_snmp_bulk_size", "25")))),
+        "endpoint_retention_days": _read_endpoint_retention_days(),
     }
 
 
@@ -240,6 +260,16 @@ def _write_scan_settings(value: dict | None):
     _write_db_setting("scan_snmp_timeout", str(payload["snmp_timeout"]))
     _write_db_setting("scan_snmp_retries", str(payload["snmp_retries"]))
     _write_db_setting("scan_snmp_bulk_size", str(payload["snmp_bulk_size"]))
+    # Only written when given, so an older client that omits the field does
+    # not reset a value set via /settings.
+    retention = (value or {}).get("endpoint_retention_days")
+    if retention is not None:
+        try:
+            retention = _clamp_endpoint_retention(int(retention))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Settings must be integers")
+        _write_db_setting("endpoint_retention_days", str(retention))
+    payload["endpoint_retention_days"] = _read_endpoint_retention_days()
     return payload
 
 

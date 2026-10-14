@@ -42,7 +42,13 @@ from pysnmp.proto.rfc1905 import EndOfMibView, NoSuchInstance, NoSuchObject
 # they stay unit-testable without pysnmp.
 from scanners.detection import detect_vendor
 from scanners.health import OID_UPS_IDENT_MANUFACTURER, collect_ups_health
-from scanners.parsing import _hex_to_mac, build_stp_info, parse_vlan_names, resolve_fdb_candidates
+from scanners.parsing import (
+    build_stp_info,
+    mac_from_octets,
+    map_lldp_local_ports,
+    parse_vlan_names,
+    resolve_fdb_candidates,
+)
 
 log = logging.getLogger(__name__)
 
@@ -129,11 +135,18 @@ OID_IF_DESCR       = "1.3.6.1.2.1.2.2.1.2"     # ifDescr
 OID_IF_OPER_STATUS = "1.3.6.1.2.1.2.2.1.8"     # 1=up, 2=down
 OID_IF_HIGH_SPEED  = "1.3.6.1.2.1.31.1.1.1.15" # ifHighSpeed Mbps
 OID_IF_ALIAS       = "1.3.6.1.2.1.31.1.1.1.18" # ifAlias
+OID_IF_NAME        = "1.3.6.1.2.1.31.1.1.1.1"  # ifName
 
 # LLDP remote table
 OID_LLDP_REM_SYS_NAME  = "1.0.8802.1.1.2.1.4.1.1.9"
 OID_LLDP_REM_PORT_ID   = "1.0.8802.1.1.2.1.4.1.1.7"
 OID_LLDP_REM_PORT_DESC = "1.0.8802.1.1.2.1.4.1.1.8"
+
+# LLDP local port table (index = lldpLocPortNum, which lldpRemLocalPortNum
+# refers to; not necessarily the ifIndex)
+OID_LLDP_LOC_PORT_ID_SUBTYPE = "1.0.8802.1.1.2.1.3.7.1.2"
+OID_LLDP_LOC_PORT_ID         = "1.0.8802.1.1.2.1.3.7.1.3"
+OID_LLDP_LOC_PORT_DESC       = "1.0.8802.1.1.2.1.3.7.1.4"
 
 # ARP table
 OID_ARP_MAC = "1.3.6.1.2.1.4.22.1.2"
@@ -883,6 +896,43 @@ async def _collect_stp_and_vlan_names(
         log.debug("STP walk failed for %s (BRIDGE-MIB dot1dStp not supported)", ip)
 
 
+# --- LLDP local port mapping ---------------------------------------------------
+
+async def _map_lldp_local_ports(sw: SwitchData, walk) -> Tuple[Dict[int, int], Dict[int, str], Dict[int, str]]:
+    """Walk lldpLocPortTable (+ ifName) and map lldpLocPortNum -> ifIndex.
+
+    Returns ``(port_map, port_ids, port_descs)``; the latter two are keyed by
+    lldpLocPortNum and serve as local port name fallbacks. Best effort: any
+    failure yields empty maps so callers keep the legacy 1:1 interpretation.
+    """
+    try:
+        subtype_rows, id_rows, desc_rows, name_rows = await asyncio.gather(
+            walk(OID_LLDP_LOC_PORT_ID_SUBTYPE), walk(OID_LLDP_LOC_PORT_ID),
+            walk(OID_LLDP_LOC_PORT_DESC), walk(OID_IF_NAME),
+        )
+    except Exception as exc:
+        log.debug("LLDP local port table walk failed for %s: %s", sw.ip, exc)
+        return {}, {}, {}
+
+    def _by_num(rows) -> Dict[int, str]:
+        out: Dict[int, str] = {}
+        for oid_s, val in rows:
+            try:
+                out[int(_last_n(oid_s, 1)[0])] = (val or "").strip()
+            except ValueError:
+                continue
+        return out
+
+    if_name = {i: n for i, n in _by_num(name_rows).items() if i in sw.interfaces}
+    port_map = map_lldp_local_ports(
+        subtype_rows, id_rows, desc_rows,
+        {i: iface.descr for i, iface in sw.interfaces.items()},
+        if_name,
+        {i: iface.alias for i, iface in sw.interfaces.items()},
+    )
+    return port_map, _by_num(id_rows), _by_num(desc_rows)
+
+
 # --- Main async scan function -------------------------------------------------
 
 
@@ -1083,12 +1133,17 @@ async def _scan_switch_inner(
     bridge_to_ifindex: Dict[int, int] = {}
 
     if wants_links:
-        # -- 4. LLDP neighbor table (all three walks in parallel) -------------
+        # -- 4. LLDP neighbor table (all walks in parallel) -------------------
         sys_rows, port_rows, pdesc_rows = await asyncio.gather(
             snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_SYS_NAME, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
             snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_PORT_ID, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
             snmp_bulk_walk(ip, snmp_port, auth, OID_LLDP_REM_PORT_DESC, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
         )
+        local_port_map: Dict[int, int] = {}
+        loc_ids: Dict[int, str] = {}
+        loc_descs: Dict[int, str] = {}
+        if sys_rows:
+            local_port_map, loc_ids, loc_descs = await _map_lldp_local_ports(sw, _walk)
 
         nbr_map: Dict[Tuple[int, int], LldpNeighbor] = {}
 
@@ -1104,7 +1159,10 @@ async def _scan_switch_inner(
             if k is None:
                 continue
             local_port, _ = k
-            nbr_map.setdefault(k, LldpNeighbor(local_port_idx=local_port)).remote_sys = val
+            # lldpRemLocalPortNum is an lldpLocPortNum; translate it to the
+            # ifIndex when the local port table allows it (else legacy 1:1).
+            local_idx = local_port_map.get(local_port, local_port)
+            nbr_map.setdefault(k, LldpNeighbor(local_port_idx=local_idx)).remote_sys = val
 
         for oid_s, val in port_rows:
             k = _lldp_key(oid_s)
@@ -1115,14 +1173,21 @@ async def _scan_switch_inner(
         for oid_s, val in pdesc_rows:
             k = _lldp_key(oid_s)
             if k and k in nbr_map:
-                local_port = k[0]
                 # Always prefer lldpRemPortDesc (human-readable interface name) over
                 # lldpRemPortId which can be a binary-encoded MAC (subtype 3) or
                 # other non-printable value.
                 if val:
                     nbr_map[k].remote_port = val
-                if local_port in sw.interfaces:
-                    nbr_map[k].local_port_desc = sw.interfaces[local_port].descr
+
+        for (local_port, _), nbr in nbr_map.items():
+            # Local port name: the resolved interface, else the LLDP local
+            # port description / id (independent of lldpRemPortDesc rows).
+            iface = sw.interfaces.get(nbr.local_port_idx)
+            nbr.local_port_desc = (
+                (iface.descr if iface else "")
+                or loc_descs.get(local_port, "")
+                or loc_ids.get(local_port, "")
+            )
 
         sw.lldp_neighbors = list(nbr_map.values())
 
@@ -1141,7 +1206,9 @@ async def _scan_switch_inner(
 
         (arp_mac_rows, arp_ip_rows,
          base_port_rows, fdb_rows) = await asyncio.gather(
-            snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_MAC, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
+            # MAC-typed column: walked raw so a 6-byte MAC whose bytes happen
+            # to be printable is never decoded as text.
+            snmp_bulk_walk_raw(ip, snmp_port, auth, OID_ARP_MAC, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
             snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_IP, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
             snmp_bulk_walk(ip, snmp_port, auth, OID_DOT1D_BASE_PORT_IF_INDEX, timeout=snmp_timeout, retries=snmp_retries, engine=engine)
             if wants_fdb else _no_rows(),
@@ -1176,7 +1243,7 @@ async def _scan_switch_inner(
         for oid_s, mac_val in arp_mac_rows:
             suffix = ".".join(oid_s.split(".")[-5:])
             arp_ip = ip_by_suffix.get(suffix, "")
-            mac = _hex_to_mac(mac_val)
+            mac = mac_from_octets(mac_val)
             if mac and arp_ip:
                 sw.arp_table[mac] = arp_ip
 
@@ -1198,13 +1265,13 @@ async def _scan_switch_inner(
         # IP-MIB unified fallback when legacy ARP table is empty
         if not sw.arp_table:
             log.info("Legacy ARP empty for %s, trying IP-MIB unified neighbor table", ip)
-            unified_rows = await snmp_bulk_walk(
+            unified_rows = await snmp_bulk_walk_raw(
                 ip, snmp_port, auth, OID_IP_NET_TO_PHYSICAL_MAC,
                 timeout=snmp_timeout, retries=snmp_retries, engine=engine,
             )
             log.info("IP-MIB unified walk for %s: %d rows", ip, len(unified_rows))
             for oid_s, mac_val in unified_rows:
-                mac = _hex_to_mac(mac_val)
+                mac = mac_from_octets(mac_val)
                 if not mac:
                     continue
                 parts = oid_s.split(".")

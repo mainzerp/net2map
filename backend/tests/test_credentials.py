@@ -1,6 +1,8 @@
 """Tests for the credentials CRUD endpoints."""
 import pytest
 
+from shared.crypto import decrypt
+
 
 # Disable slowapi rate-limiting during tests by resetting limiter storage
 @pytest.fixture(autouse=True)
@@ -109,9 +111,9 @@ def test_update_credential_mask_sentinels_keep_stored_values(client, auth_header
     db.expire_all()
     cred = db.query(Credential).filter(Credential.id == cred_id).first()
     assert cred.label == "Renamed"
-    assert cred.community == "topsecret"
-    assert cred.v3_auth_password == "authpw"
-    assert cred.v3_priv_password == "privpw"
+    assert decrypt(cred.community) == "topsecret"
+    assert decrypt(cred.v3_auth_password) == "authpw"
+    assert decrypt(cred.v3_priv_password) == "privpw"
 
 
 def test_update_credential_applies_real_secret_values(client, auth_headers, db):
@@ -127,7 +129,7 @@ def test_update_credential_applies_real_secret_values(client, auth_headers, db):
 
     db.expire_all()
     cred = db.query(Credential).filter(Credential.id == cred_id).first()
-    assert cred.community == "newcomm"
+    assert decrypt(cred.community) == "newcomm"
 
 
 def test_create_credential_normalizes_mask_sentinels(client, auth_headers, db):

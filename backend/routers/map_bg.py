@@ -5,6 +5,7 @@ settings (see routers/floors.py). These endpoints keep working and operate on
 the default floor (first floor by building and floor order).
 """
 from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
@@ -37,9 +38,15 @@ def _floor_map_settings(floor) -> dict:
 async def upload_map_background(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Upload or replace the map background image."""
     ext, contents = await read_validated_background(file)
-    floor = ensure_default_floor(db)
-    store_floor_background(db, floor, ext, contents)
-    log_audit(request, "settings_change", "map_background", "", {"filename": file.filename, "size": len(contents)})
+
+    def _store():
+        # Sync DB and file I/O: run off the event loop.
+        floor = ensure_default_floor(db)
+        store_floor_background(db, floor, ext, contents)
+        log_audit(request, "settings_change", "map_background", "",
+                  {"filename": file.filename, "size": len(contents)})
+
+    await run_in_threadpool(_store)
     return {"ok": True, "filename": file.filename, "size": len(contents)}
 
 

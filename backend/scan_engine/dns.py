@@ -1,8 +1,35 @@
 """DNS resolution helpers with per-scan caching."""
 import logging
 import socket
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 
 from shared.state import _log_event
+
+# Upper bound for a single system resolver call (gethostbyname/gethostbyaddr).
+# The stdlib resolver has no timeout parameter and socket.setdefaulttimeout
+# would affect every other socket in the process, so lookups run on a small
+# shared pool and the caller stops waiting after this many seconds. A hung
+# lookup keeps its worker thread busy until the OS resolver gives up.
+_SYSTEM_DNS_TIMEOUT_SEC = 3.0
+_DNS_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="net2map-dns")
+
+
+def _call_with_timeout(func, *args, timeout: float | None = None):
+    """Run a blocking resolver call on the DNS pool, bounded by *timeout* seconds
+    (default _SYSTEM_DNS_TIMEOUT_SEC).
+
+    Raises TimeoutError when the call does not finish in time; any exception
+    of the call itself is re-raised.
+    """
+    if timeout is None:
+        timeout = _SYSTEM_DNS_TIMEOUT_SEC
+    future = _DNS_POOL.submit(func, *args)
+    try:
+        return future.result(timeout=timeout)
+    except FutureTimeoutError:
+        future.cancel()
+        raise TimeoutError("DNS lookup timed out after %.1fs" % timeout)
 
 
 def _normalize_name(name: str) -> str:
@@ -35,7 +62,7 @@ def _resolve_ip(sys_name: str, switch_data: dict) -> str:
             return ip
 
     try:
-        return socket.gethostbyname(sys_name)
+        return _call_with_timeout(socket.gethostbyname, sys_name)
     except Exception:
         return ""
 
@@ -101,7 +128,7 @@ def _resolve_host(
 
     try:
         _evict_dns_cache(cache)
-        cache[ip] = socket.gethostbyaddr(ip)[0]
+        cache[ip] = _call_with_timeout(socket.gethostbyaddr, ip)[0]
         _log_event(
             logging.INFO,
             "dns.lookup",

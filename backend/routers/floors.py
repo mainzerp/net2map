@@ -2,6 +2,7 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
@@ -214,11 +215,17 @@ async def upload_floor_background(
     floor_id: int, request: Request, file: UploadFile = File(...), db: Session = Depends(get_db),
 ):
     """Upload or replace the background image of a floor."""
-    floor = get_floor_or_404(db, floor_id)
+    # Sync DB and file I/O runs in the threadpool, off the event loop.
+    floor = await run_in_threadpool(get_floor_or_404, db, floor_id)
     ext, contents = await file_settings.read_validated_background(file)
-    store_floor_background(db, floor, ext, contents)
-    log_audit(request, "update", "floor_background", str(floor_id), {"filename": file.filename, "size": len(contents)})
-    return floor
+
+    def _store():
+        store_floor_background(db, floor, ext, contents)
+        log_audit(request, "update", "floor_background", str(floor_id),
+                  {"filename": file.filename, "size": len(contents)})
+        return FloorOut.model_validate(floor)
+
+    return await run_in_threadpool(_store)
 
 
 @router.get("/floors/{floor_id}/background")

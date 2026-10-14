@@ -12,10 +12,67 @@ from schemas import ScanResult
 from shared.state import (
     _log_event,
     acquire_scan_lock,
+    list_scan_jobs,
     release_scan_lock,
     set_scan_job,
     update_scan_job,
+    update_scan_job_if_status,
 )
+
+# Jobs waiting for a Celery worker longer than this are marked failed: no
+# worker consumed the task (worker down, broker/queue misconfiguration).
+STALE_QUEUED_JOB_TIMEOUT_SEC = 15 * 60
+_STALE_JOB_STATUSES = ("queued", "retrying")
+STALE_QUEUED_JOB_ERROR = (
+    "Scan job was not picked up by a Celery worker within %d minutes; "
+    "check that the worker is running and consuming the queue"
+)
+
+
+def _parse_iso(value) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def reap_stale_queued_jobs(now: datetime | None = None,
+                           timeout_sec: int = STALE_QUEUED_JOB_TIMEOUT_SEC) -> list:
+    """Mark jobs stuck in "queued"/"retrying" longer than ``timeout_sec`` as failed.
+
+    The age is measured from ``status_at`` (set when a job enters "retrying")
+    or else ``started_at`` (the enqueue time). The update is conditional on
+    the status still being queued/retrying, so a job a worker just picked up
+    is never overwritten. Returns the reaped job ids. Never raises.
+    """
+    now = now or datetime.now(timezone.utc)
+    reaped = []
+    try:
+        jobs = list_scan_jobs()
+    except Exception as exc:
+        _log_event(logging.WARNING, "scan.job.reaper_failed", error=str(exc))
+        return reaped
+    for job_id, job in jobs.items():
+        if not isinstance(job, dict) or job.get("status") not in _STALE_JOB_STATUSES:
+            continue
+        since = _parse_iso(job.get("status_at")) or _parse_iso(job.get("started_at"))
+        if since is None or (now - since).total_seconds() < timeout_sec:
+            continue
+        message = STALE_QUEUED_JOB_ERROR % (timeout_sec // 60)
+        applied = update_scan_job_if_status(job_id, _STALE_JOB_STATUSES, {
+            "status": "failed",
+            "finished_at": now.isoformat(),
+            "result": {"errors": [message]},
+            "reaped": True,
+        })
+        if applied:
+            reaped.append(job_id)
+            _log_event(logging.WARNING, "scan.job.reaped", correlation_id=job_id, job_id=job_id,
+                       previous_status=job.get("status"), error=message)
+    return reaped
 
 
 def _run_scan_job(job_id: str, cancel_event: threading.Event, dry_run: bool = False, scan_type: str = "full"):

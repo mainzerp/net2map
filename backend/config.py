@@ -16,12 +16,14 @@ class Settings(BaseSettings):
 
     # Authentication
     jwt_secret: str = ""
-    secret_token: str = ""  # legacy single-token auth
     jwt_expiry_hours: int = 24
+    # Absolute session lifetime: /auth/refresh rejects a token chain once this
+    # much time has passed since the original login (auth_time claim).
+    jwt_max_session_hours: int = 168
     encryption_key: str = ""
 
     # Seed data
-    default_admin_password: str = "changeme"
+    default_admin_password: str = ""
 
     # Logging
     log_level: str = "INFO"
@@ -35,10 +37,40 @@ class Settings(BaseSettings):
     # API documentation: Swagger UI (/docs), ReDoc (/redoc), schema (/openapi.json)
     openapi_enabled: bool = True
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    # extra="ignore": a stale .env (e.g. the removed SECRET_TOKEN) must not abort startup.
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()
+
+# Admin passwords that must never be accepted as DEFAULT_ADMIN_PASSWORD.
+_FORBIDDEN_ADMIN_PASSWORDS = {"", "changeme"}
+
+
+def validate_required_settings(s: Settings | None = None) -> None:
+    """Abort startup when a mandatory secret is missing or insecure.
+
+    Raises RuntimeError listing every problem so an operator can fix them in
+    one go. Called from the FastAPI lifespan before anything else runs.
+    """
+    s = settings if s is None else s
+    problems = []
+    if not s.jwt_secret:
+        problems.append('JWT_SECRET is not set. Generate one with: python -c "import secrets; '
+                        'print(secrets.token_hex(32))"')
+    if not s.encryption_key:
+        problems.append('ENCRYPTION_KEY is not set. Generate one with: python -c "from cryptography.fernet '
+                        'import Fernet; print(Fernet.generate_key().decode())"')
+    else:
+        try:
+            from cryptography.fernet import Fernet
+            Fernet(s.encryption_key.encode())
+        except Exception:
+            problems.append("ENCRYPTION_KEY is not a valid Fernet key (32 url-safe base64-encoded bytes)")
+    if s.default_admin_password.strip().lower() in _FORBIDDEN_ADMIN_PASSWORDS:
+        problems.append('DEFAULT_ADMIN_PASSWORD is empty or the insecure default "changeme"; set a strong password')
+    if problems:
+        raise RuntimeError("Refusing to start, insecure configuration:\n- " + "\n- ".join(problems))
 
 
 def rate_limit_storage_uri(redis_url: str | None = None) -> str:

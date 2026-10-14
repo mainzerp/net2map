@@ -17,7 +17,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from config import rate_limit_storage_uri
+from config import rate_limit_storage_uri, validate_required_settings
 from config import settings as app_settings
 from database import create_tables
 from routers import (
@@ -78,27 +78,38 @@ limiter = Limiter(
 )
 
 
+def _encrypt_legacy_plaintext_secrets() -> None:
+    """Encrypt SNMP secrets stored in plaintext before ENCRYPTION_KEY was mandatory (idempotent)."""
+    import database
+    from shared.secrets import encrypt_plaintext_secrets
+
+    db = database.SessionLocal()
+    try:
+        encrypt_plaintext_secrets(db)
+    except Exception:
+        db.rollback()
+        _log.exception("Failed to encrypt plaintext SNMP secrets; they stay readable but unencrypted")
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from shared.redis_client import get_redis
     from shared.state import migrate_legacy_redis_keys
+    try:
+        # JWT_SECRET, ENCRYPTION_KEY and a non-default admin password are mandatory.
+        validate_required_settings()
+    except RuntimeError as exc:
+        _log.critical("%s", exc)
+        raise
     if get_redis():
         _log.info("Starting backend with Redis state store (multi-worker capable)")
         migrate_legacy_redis_keys()
     else:
         _log.info("Starting single-worker backend (in-process state requires workers=1)")
     create_tables()
-    if not app_settings.jwt_secret and not app_settings.secret_token:
-        _log.critical(
-            "SECURITY: No authentication configured (JWT_SECRET and SECRET_TOKEN are both unset). "
-            "All API endpoints are accessible without authentication. "
-            "Set JWT_SECRET or SECRET_TOKEN before deploying to production."
-        )
-    if not app_settings.encryption_key:
-        _log.critical(
-            "SECURITY: ENCRYPTION_KEY is not set. SNMP passwords will be stored in PLAINTEXT. "
-            'Generate a key with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
-        )
+    _encrypt_legacy_plaintext_secrets()
     if not get_redis():
         threading.Thread(target=_background_scheduler, daemon=True).start()
     else:

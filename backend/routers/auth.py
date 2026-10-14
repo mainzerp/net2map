@@ -1,6 +1,8 @@
 """Authentication endpoints: login, current user, user management."""
 import json
+import logging
 import secrets
+import time
 from typing import List, Optional
 
 import jwt as pyjwt
@@ -17,18 +19,24 @@ from shared.auth import (
     DUMMY_PASSWORD_HASH,
     JWT_ALGORITHM,
     JWT_SECRET,
+    MAX_SESSION_SECONDS,
     REFRESH_GRACE_SECONDS,
     _is_user_revoked,
     blacklist_all_user_tokens,
     blacklist_token,
+    clear_revocation_cache,
     create_token,
     hash_password,
     is_token_blacklisted,
+    mark_user_tokens_revoked,
     require_role,
+    user_tokens_revoked_committed,
     verify_password,
 )
 from shared.errors import api_error
 from shared.redis_client import get_redis
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
@@ -54,7 +62,7 @@ def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
 
 @router.get("/auth/me")
 def get_current_user(request: Request):
-    return getattr(request.state, "user", {"role": "viewer", "username": "anonymous"})
+    return request.state.user
 
 
 @router.post("/auth/ws-ticket")
@@ -88,48 +96,53 @@ def refresh_token(request: Request, db: Session = Depends(get_db)):
     """Refresh a valid (or recently-expired) JWT token.
 
     Accepts the current token via Authorization header. If the token is
-    valid or expired within the last 60 minutes, issues a new token.
-    The user must still exist and be active in the database.
+    valid or expired within the last REFRESH_GRACE_SECONDS, issues a new
+    token. The user must still exist and be active in the database.
+
+    The consumed token is blacklisted (when Redis is available) so it cannot
+    be refreshed twice, and the original login time (``auth_time`` claim,
+    falling back to ``iat`` for older tokens) is carried into the new token:
+    once JWT_MAX_SESSION_HOURS have passed since the login, the chain ends
+    and the user must log in again.
     """
-    user_info = getattr(request.state, "user", None)
-    if not user_info:
-        auth_header = request.headers.get("authorization", "")
-        if not auth_header.startswith("Bearer "):
-            api_error(401, "AUTH_REQUIRED", "Authentication required")
-        token = auth_header[7:]
-        try:
-            payload = pyjwt.decode(
-                token, JWT_SECRET, algorithms=[JWT_ALGORITHM],
-                options={"verify_exp": False},
-            )
-            from datetime import datetime, timezone
-            exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
-            now = datetime.now(timezone.utc)
-            if (now - exp).total_seconds() > REFRESH_GRACE_SECONDS:
-                api_error(401, "AUTH_EXPIRED", "Token expired beyond refresh window")
-            jti = payload.get("jti")
-            if jti and is_token_blacklisted(jti):
-                api_error(401, "AUTH_REVOKED", "Token has been revoked")
-            user_id = int(payload["sub"])
-            if _is_user_revoked(user_id, payload.get("iat", 0)):
-                api_error(401, "AUTH_REVOKED", "All sessions have been revoked")
-            user_info = {
-                "id": user_id,
-                "username": payload["username"],
-                "role": payload["role"],
-            }
-        except HTTPException:
-            raise  # keep the specific api_error raised above
-        except Exception:
-            api_error(401, "AUTH_INVALID", "Invalid token")
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.startswith("Bearer "):
+        api_error(401, "AUTH_REQUIRED", "Authentication required")
+    token = auth_header[7:].strip()
+    now = int(time.time())
+    try:
+        payload = pyjwt.decode(
+            token, JWT_SECRET, algorithms=[JWT_ALGORITHM],
+            options={"verify_exp": False},
+        )
+        exp = int(payload["exp"])
+        if now - exp > REFRESH_GRACE_SECONDS:
+            api_error(401, "AUTH_EXPIRED", "Token expired beyond refresh window")
+        jti = payload.get("jti")
+        if jti and is_token_blacklisted(jti):
+            api_error(401, "AUTH_REVOKED", "Token has been revoked")
+        user_id = int(payload["sub"])
+        if _is_user_revoked(user_id, payload.get("iat", 0), payload.get("iat_ms"), db):
+            api_error(401, "AUTH_REVOKED", "All sessions have been revoked")
+        auth_time = int(payload.get("auth_time", payload.get("iat", 0)))
+    except HTTPException:
+        raise  # keep the specific api_error raised above
+    except Exception:
+        api_error(401, "AUTH_INVALID", "Invalid token")
+    if now - auth_time > MAX_SESSION_SECONDS:
+        api_error(401, "AUTH_SESSION_EXPIRED", "Maximum session lifetime exceeded; please log in again")
 
     user = db.query(User).filter(
-        User.id == user_info["id"], User.is_active.is_(True)
+        User.id == user_id, User.is_active.is_(True)
     ).first()
     if not user:
         api_error(401, "AUTH_USER_INACTIVE", "User account is inactive or deleted")
 
-    new_token = create_token(user.id, user.username, user.role)
+    if jti:
+        # Best effort: without Redis the consumed token stays usable until its
+        # exp, but the refresh chain is still bounded by auth_time.
+        blacklist_token(jti, exp - now)
+    new_token = create_token(user.id, user.username, user.role, auth_time=auth_time)
     return TokenResponse(access_token=new_token, role=user.role, username=user.username)
 
 
@@ -148,12 +161,16 @@ def create_user(body: UserCreate, request: Request, db: Session = Depends(get_db
     )
     db.add(user)
     try:
+        db.flush()
+        # Same transaction as the new user: committed together or not at all.
+        log_audit(request, "create", "user", str(user.id), {"username": user.username, "role": user.role},
+                  db=db, strict=True)
         db.commit()
     except IntegrityError:
         db.rollback()  # concurrent create hit the unique username constraint
         api_error(409, "USER_EXISTS", f"Username '{body.username}' already exists", field="username")
     db.refresh(user)
-    log_audit(request, "create", "user", str(user.id), {"username": user.username, "role": user.role})
+    clear_revocation_cache(user.id)
     return user
 
 
@@ -198,19 +215,26 @@ def update_user(user_id: int, body: UserUpdate, request: Request, db: Session = 
     details = {"fields": list(body.model_dump(exclude_none=True).keys())}
     # Security-relevant changes must kill existing sessions: a deactivated
     # user, a changed role (stale role claim), or a new password.
-    if (
+    revoke = (
         ("is_active" in updates and updates["is_active"] is False)
         or ("role" in updates and updates["role"] != old_role)
         or password_changed
-    ):
-        if not blacklist_all_user_tokens(user.id):
-            api_error(503, "AUTH_UNAVAILABLE", "Session revocation service unavailable; user was not changed")
-        details["sessions_revoked"] = True
+    )
     for k, v in updates.items():
         setattr(user, k, v)
+    if revoke:
+        # Revocation, change and audit record share one transaction: the
+        # change is committed first (together with the revocation), then the
+        # revocation is propagated to the cache and Redis.
+        mark_user_tokens_revoked(db, user.id)
+        details["sessions_revoked"] = True
+    log_audit(request, "update", "user", str(user_id), details, db=db, strict=True)
     db.commit()
+    if revoke:
+        user_tokens_revoked_committed(user.id)
+    else:
+        clear_revocation_cache(user.id)
     db.refresh(user)
-    log_audit(request, "update", "user", str(user_id), details)
     return user
 
 
@@ -223,17 +247,17 @@ def delete_user(user_id: int, request: Request, db: Session = Depends(get_db)):
         api_error(404, "USER_NOT_FOUND", "User not found")
     _guard_admin_lockout(request, db, user, removes_admin=True)
     username = user.username
-    # Revoke before committing the deletion, and never claim success on failure.
-    if not blacklist_all_user_tokens(user_id):
-        api_error(503, "AUTH_UNAVAILABLE", "Session revocation service unavailable; user was not deleted")
+    log_audit(request, "delete", "user", str(user_id),
+              {"username": username, "sessions_revoked": True}, db=db, strict=True)
     db.delete(user)
     db.commit()
-    log_audit(request, "delete", "user", str(user_id),
-              {"username": username, "sessions_revoked": True})
+    # Tokens of a deleted user are rejected by the database check (no user
+    # row); this drops the cached state and mirrors the revocation to Redis.
+    user_tokens_revoked_committed(user_id)
 
 
 @router.post("/auth/logout")
-def logout_token(request: Request):
+def logout_token(request: Request, db: Session = Depends(get_db)):
     """Blacklist the current token so it can no longer be used.
 
     Idempotent for genuine tokens: a valid, expired or already-revoked token
@@ -241,24 +265,18 @@ def logout_token(request: Request):
     malformed or wrongly signed bearer token is rejected with 401 instead of
     pretending a successful logout. The path is exempt from the app-wide auth
     dependency (shared/auth.py), so this handler validates the token itself.
+
+    Without Redis the per-token blacklist cannot be stored; logout then
+    revokes ALL sessions of the user in the database (``"revoked":
+    "all_sessions"``) instead of leaving the token usable. 503 is returned
+    only when neither revocation could be recorded.
     """
-    import time
-
-    import shared.auth as shared_auth
-
     auth_header = request.headers.get("authorization", "")
     if not auth_header.startswith("Bearer "):
         api_error(401, "AUTH_REQUIRED", "Authentication required")
     token = auth_header[7:].strip()
     if not token:
         api_error(401, "AUTH_REQUIRED", "Authentication required")
-    legacy = shared_auth._LEGACY_TOKEN
-    if legacy and secrets.compare_digest(token.encode(), legacy.encode()):
-        return {"status": "ok"}  # Static legacy token cannot be revoked per session
-    if not JWT_SECRET:
-        if legacy:
-            api_error(401, "AUTH_INVALID", "Invalid token")
-        return {"status": "ok"}  # Authentication disabled -- no sessions exist
     try:
         payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
     except pyjwt.ExpiredSignatureError:
@@ -266,23 +284,39 @@ def logout_token(request: Request):
     except pyjwt.InvalidTokenError:
         api_error(401, "AUTH_INVALID", "Invalid token")
     jti = payload.get("jti")
-    if jti:
-        remaining = max(0, int(payload.get("exp", 0)) - int(time.time()))
-        if not blacklist_token(jti, remaining):
-            api_error(503, "AUTH_UNAVAILABLE", "Session revocation service unavailable")
-    return {"status": "ok"}
+    remaining = max(0, int(payload.get("exp", 0)) - int(time.time()))
+    if jti and blacklist_token(jti, remaining):
+        return {"status": "ok"}
+    try:
+        user_id = int(payload.get("sub", 0) or 0)
+    except (TypeError, ValueError):
+        user_id = 0
+    if not user_id:
+        api_error(503, "AUTH_UNAVAILABLE", "Session revocation service unavailable")
+    try:
+        revoked = blacklist_all_user_tokens(user_id, db)
+    except Exception:
+        _log.exception("Logout fallback revocation failed for user %s", user_id)
+        api_error(503, "AUTH_UNAVAILABLE", "Session revocation service unavailable")
+    if not revoked:
+        return {"status": "ok", "revoked": "none"}  # User deleted -- its tokens are already rejected
+    return {"status": "ok", "revoked": "all_sessions"}
 
 
 @router.post("/auth/revoke-all", dependencies=[require_role("admin")])
-def revoke_all_sessions(request: Request, user_id: Optional[int] = Body(None, embed=True)):
+def revoke_all_sessions(request: Request, user_id: Optional[int] = Body(None, embed=True),
+                        db: Session = Depends(get_db)):
     """Revoke all active sessions for a user (admin only).
 
     Accepts optional JSON body with user_id to revoke another user's sessions.
     If no body or no user_id, revokes sessions for the requesting user.
     """
-    user = getattr(request.state, "user", {})
+    user = getattr(request.state, "user", None) or {}
     target_id = user_id if user_id is not None else user.get("id", 0)
-    if not blacklist_all_user_tokens(target_id):
-        api_error(503, "AUTH_UNAVAILABLE", "Session revocation service unavailable")
-    log_audit(request, "revoke_all_tokens", "user", str(target_id), {})
+    # Added to the session first so blacklist_all_user_tokens commits the
+    # audit record together with the revocation.
+    log_audit(request, "revoke_all_tokens", "user", str(target_id), {}, db=db, strict=True)
+    if not blacklist_all_user_tokens(target_id, db):
+        db.rollback()
+        api_error(404, "USER_NOT_FOUND", "User not found")
     return {"status": "ok", "user_id": target_id}

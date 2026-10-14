@@ -5,14 +5,137 @@ environments without pysnmp.
 """
 from typing import Dict, List, Optional, Tuple
 
+_HEX_DIGITS = frozenset("0123456789abcdef")
+
 
 def _hex_to_mac(hex_str: str) -> str:
-    clean = hex_str.replace("0x", "").replace(" ", "").replace(":", "")
+    """Normalize a hex MAC rendering to "aa:bb:cc:dd:ee:ff".
+
+    Accepts an optional "0x" prefix and ":", "-", "." or space separators.
+    Returns "" unless exactly 12 hex digits remain, so decoded text (e.g. an
+    OCTET STRING rendered as ASCII) never turns into a pseudo-MAC.
+    """
+    if not isinstance(hex_str, str):
+        return ""
+    clean = hex_str.strip().lower()
+    if clean.startswith("0x"):
+        clean = clean[2:]
+    for sep in (":", "-", ".", " "):
+        clean = clean.replace(sep, "")
+    if len(clean) != 12 or not set(clean) <= _HEX_DIGITS:
+        return ""
+    return ":".join(clean[i:i + 2] for i in range(0, 12, 2))
+
+
+def mac_from_octets(value) -> str:
+    """Convert a MAC-typed SNMP value (PhysAddress / MacAddress) to "aa:bb:cc:dd:ee:ff".
+
+    Raw 6-byte values always decode from the bytes, even when every byte is
+    printable ASCII. Other byte lengths are treated as a textual hex rendering
+    (some agents return "00:11:22:33:44:55" as text); strings go through
+    _hex_to_mac. Returns "" when no valid MAC can be derived.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return _hex_to_mac(value)
     try:
-        pairs = [clean[i:i+2] for i in range(0, len(clean), 2)]
-        return ":".join(pairs).lower()
+        raw = bytes(value)
     except Exception:
-        return hex_str
+        return ""
+    if len(raw) == 6:
+        return ":".join(f"{b:02x}" for b in raw)
+    try:
+        return _hex_to_mac(raw.decode("ascii"))
+    except UnicodeDecodeError:
+        return ""
+
+
+# LLDP-MIB LldpPortIdSubtype values used for local port mapping
+_LLDP_PORT_ID_INTERFACE_ALIAS = 1
+_LLDP_PORT_ID_INTERFACE_NAME = 5
+_LLDP_PORT_ID_LOCAL = 7
+
+
+def _last_index(oid_str: str) -> Optional[int]:
+    try:
+        return int(oid_str.rstrip(".").split(".")[-1])
+    except (ValueError, IndexError):
+        return None
+
+
+def _unique_name_index(names: Dict[int, str]) -> Dict[str, int]:
+    """Build {normalized name: ifIndex}, dropping empty and ambiguous names."""
+    seen: Dict[str, int] = {}
+    ambiguous: set = set()
+    for idx, name in names.items():
+        key = (name or "").strip().lower()
+        if not key:
+            continue
+        if key in seen and seen[key] != idx:
+            ambiguous.add(key)
+        seen[key] = idx
+    return {k: v for k, v in seen.items() if k not in ambiguous}
+
+
+def map_lldp_local_ports(
+    subtype_rows: List[Tuple[str, str]],
+    port_id_rows: List[Tuple[str, str]],
+    port_desc_rows: List[Tuple[str, str]],
+    if_descr: Dict[int, str],
+    if_name: Optional[Dict[int, str]] = None,
+    if_alias: Optional[Dict[int, str]] = None,
+) -> Dict[int, int]:
+    """Map lldpLocPortNum -> ifIndex from the lldpLocPortTable walks.
+
+    lldpRemLocalPortNum refers to lldpLocPortNum, which is not necessarily
+    the ifIndex. Resolution order per local port:
+      1. subtype local(7) with a numeric port id equal to a known ifIndex;
+      2. port id matched against ifName, then ifDescr (ifAlias only for
+         subtype interfaceAlias(1));
+      3. lldpLocPortDesc matched against ifDescr, then ifName.
+    Names that are empty or shared by several interfaces never match. Ports
+    without a match are omitted; callers fall back to treating the port
+    number as the ifIndex (legacy behavior).
+    """
+    if_name = if_name or {}
+    if_alias = if_alias or {}
+    known = set(if_descr) | set(if_name) | set(if_alias)
+    by_descr = _unique_name_index(if_descr)
+    by_name = _unique_name_index(if_name)
+    by_alias = _unique_name_index(if_alias)
+
+    subtypes: Dict[int, int] = {}
+    for oid_s, val in subtype_rows:
+        num = _last_index(oid_s)
+        sub = _to_int(val)
+        if num is not None and sub is not None:
+            subtypes[num] = sub
+    port_ids = {n: (v or "").strip() for n, v in ((_last_index(o), v) for o, v in port_id_rows) if n is not None}
+    port_descs = {n: (v or "").strip() for n, v in ((_last_index(o), v) for o, v in port_desc_rows) if n is not None}
+
+    result: Dict[int, int] = {}
+    for num in set(subtypes) | set(port_ids) | set(port_descs):
+        subtype = subtypes.get(num)
+        port_id = port_ids.get(num, "")
+        port_desc = port_descs.get(num, "")
+        key_id = port_id.lower()
+        key_desc = port_desc.lower()
+
+        if subtype == _LLDP_PORT_ID_LOCAL and port_id.isdigit() and int(port_id) in known:
+            result[num] = int(port_id)
+            continue
+        candidates = []
+        if key_id:
+            if subtype == _LLDP_PORT_ID_INTERFACE_ALIAS:
+                candidates.append(by_alias.get(key_id))
+            candidates.extend((by_name.get(key_id), by_descr.get(key_id)))
+        if key_desc:
+            candidates.extend((by_descr.get(key_desc), by_name.get(key_desc)))
+        match = next((c for c in candidates if c is not None), None)
+        if match is not None:
+            result[num] = match
+    return result
 
 
 def _oid_to_mac(oid_str: str) -> str:

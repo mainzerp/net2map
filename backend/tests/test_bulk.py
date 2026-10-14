@@ -2,6 +2,7 @@
 import json
 
 from database import Credential, Device, SnmpProfile
+from shared.crypto import decrypt
 
 # -- Bulk export tests ---------------------------------------------------------
 
@@ -204,9 +205,9 @@ def test_bulk_import_mask_keeps_values_on_update(client, auth_headers, db):
 
     db.expire_all()
     cred = db.query(Credential).filter(Credential.ip == "10.4.0.2").first()
-    assert cred.community == "keepme"
-    assert cred.v3_auth_password == "keepauth"
-    assert cred.v3_priv_password == "keeppriv"
+    assert decrypt(cred.community) == "keepme"
+    assert decrypt(cred.v3_auth_password) == "keepauth"
+    assert decrypt(cred.v3_priv_password) == "keeppriv"
 
 
 def test_bulk_import_profiles_mask_not_stored_on_insert(client, auth_headers, db):
@@ -263,9 +264,9 @@ def test_bulk_import_matches_credential_by_ip_and_priority(client, auth_headers,
     prio0 = db.query(Credential).filter(Credential.ip == "10.5.0.2", Credential.priority == 0).first()
     prio1 = db.query(Credential).filter(Credential.ip == "10.5.0.2", Credential.priority == 1).first()
     assert prio0.label == "Prio0"
-    assert prio0.community == "c0"
+    assert decrypt(prio0.community) == "c0"
     assert prio1.label == "Prio1-Updated"
-    assert prio1.community == "c1-new"
+    assert decrypt(prio1.community) == "c1-new"
 
 
 def test_bulk_import_without_priority_falls_back_to_zero(client, auth_headers, db):

@@ -271,6 +271,12 @@ class _ClaimRedis:
     def eval(self, script, numkeys, *args):
         if self.fail:
             raise ConnectionError("Redis unavailable")
+        if script is _st._RELEASE_DISPATCH_LUA:
+            key, token = args[0], args[1]
+            if key in self.data and "%.6f" % self.data[key] == token:
+                del self.data[key]
+                return 1
+            return 0
         assert script is _st._CLAIM_DISPATCH_LUA
         key, interval, ttl = args[0], float(args[1]), int(args[2])
         exp = self.expiry.get(key)
@@ -281,7 +287,7 @@ class _ClaimRedis:
             return 0
         self.data[key] = self.now
         self.expiry[key] = self.now + ttl
-        return 1
+        return "%.6f" % self.now
 
 
 @pytest.fixture()
@@ -327,10 +333,25 @@ def test_dispatch_claim_falls_back_to_memory(monkeypatch):
     assert _st.claim_scheduled_dispatch("macs", 0) is False
 
 
-def test_dispatch_claim_falls_back_on_redis_error(claim_redis):
+def test_dispatch_claim_fails_closed_on_redis_error(claim_redis):
+    # Per-process timestamps cannot deduplicate across workers: a configured
+    # but failing Redis never dispatches (the next tick retries).
     claim_redis.fail = True
-    assert _st.claim_scheduled_dispatch("links", 30) is True
     assert _st.claim_scheduled_dispatch("links", 30) is False
+    assert _st.claim_scheduled_dispatch("links", 30) is False
+    assert _st._LOCAL_LAST_DISPATCH == {}
+    claim_redis.fail = False
+    assert _st.claim_scheduled_dispatch("links", 30) is True
+
+
+def test_dispatch_claim_fails_closed_when_configured_redis_unavailable(monkeypatch):
+    import shared.redis_client
+
+    monkeypatch.setattr(_st, "get_redis", lambda: None)
+    monkeypatch.setattr(shared.redis_client, "REDIS_URL", "redis://configured-test")
+    monkeypatch.setattr(_st, "_LOCAL_LAST_DISPATCH", {})
+    assert _st.claim_scheduled_dispatch("macs", 30) is False
+    assert _st._LOCAL_LAST_DISPATCH == {}
 
 
 def test_scheduler_tick_two_workers_dispatch_once(claim_redis, executor_mod, monkeypatch):
@@ -340,7 +361,8 @@ def test_scheduler_tick_two_workers_dispatch_once(claim_redis, executor_mod, mon
     monkeypatch.setattr(tasks, "SessionLocal", lambda: MagicMock())
     monkeypatch.setattr(scheduler, "_read_scheduler_intervals",
                         lambda db: {"discovery": 1800, "links": 60, "macs": 30})
-    monkeypatch.setattr(scheduler, "_dispatch_scheduled_scan", dispatched.append)
+    monkeypatch.setattr(scheduler, "can_dispatch_scan", lambda kind: True)
+    monkeypatch.setattr(scheduler, "_dispatch_scheduled_scan", lambda kind: dispatched.append(kind) or True)
 
     tasks.scheduler_tick.run()  # worker A
     tasks.scheduler_tick.run()  # worker B, same interval
@@ -349,6 +371,118 @@ def test_scheduler_tick_two_workers_dispatch_once(claim_redis, executor_mod, mon
     claim_redis.now += 30
     tasks.scheduler_tick.run()
     assert dispatched[3:] == ["macs"]
+
+
+@pytest.fixture()
+def tick_env(claim_redis, executor_mod, monkeypatch):
+    tasks = importlib.import_module("tasks")
+    scheduler = importlib.import_module("scan_engine.scheduler")
+    env = types.SimpleNamespace(tasks=tasks, scheduler=scheduler, redis=claim_redis,
+                                attempts=[], dispatchable=True, accept=True)
+    monkeypatch.setattr(tasks, "SessionLocal", lambda: MagicMock())
+    monkeypatch.setattr(tasks, "_maybe_reap_stale_jobs", lambda: None)
+    monkeypatch.setattr(scheduler, "_blocked_kinds", set())
+    monkeypatch.setattr(scheduler, "_read_scheduler_intervals",
+                        lambda db: {"discovery": 0, "links": 0, "macs": 300})
+    monkeypatch.setattr(scheduler, "can_dispatch_scan", lambda kind: env.dispatchable)
+
+    def dispatch(kind):
+        env.attempts.append(kind)
+        return env.accept
+
+    monkeypatch.setattr(scheduler, "_dispatch_scheduled_scan", dispatch)
+    return env
+
+
+def test_scheduler_tick_refused_dispatch_does_not_consume_interval(tick_env):
+    key = "net2map:sched:last_dispatch:macs"
+    tick_env.accept = False  # e.g. lock state changed between check and dispatch
+    tick_env.tasks.scheduler_tick.run()
+    assert tick_env.attempts == ["macs"]
+    assert key not in tick_env.redis.data  # claim rolled back
+    tick_env.redis.now += 5
+    tick_env.accept = True
+    tick_env.tasks.scheduler_tick.run()  # next tick retries
+    assert tick_env.attempts == ["macs", "macs"]
+    assert key in tick_env.redis.data
+    tick_env.redis.now += 5
+    tick_env.tasks.scheduler_tick.run()  # interval now consumed
+    assert tick_env.attempts == ["macs", "macs"]
+
+
+def test_scheduler_tick_blocked_scan_never_claims(tick_env):
+    tick_env.dispatchable = False  # long manual scan holds the lock
+    for _ in range(3):
+        tick_env.tasks.scheduler_tick.run()
+        tick_env.redis.now += 5
+    assert tick_env.attempts == []
+    assert tick_env.redis.data == {}
+    tick_env.dispatchable = True
+    tick_env.tasks.scheduler_tick.run()
+    assert tick_env.attempts == ["macs"]
+
+
+def test_scheduler_tick_dedup_across_workers_after_rollback(tick_env):
+    tick_env.accept = False
+    tick_env.tasks.scheduler_tick.run()  # worker A: refused, rolled back
+    tick_env.accept = True
+    tick_env.tasks.scheduler_tick.run()  # worker B: dispatches
+    tick_env.tasks.scheduler_tick.run()  # worker C, same interval: nothing
+    assert tick_env.attempts == ["macs", "macs"]
+
+
+def test_release_dispatch_claim_only_removes_own_claim(claim_redis):
+    token = _st.claim_scheduled_dispatch_token("macs", 30)
+    assert token
+    assert _st.release_scheduled_dispatch("macs", "123.000000") is False
+    assert "net2map:sched:last_dispatch:macs" in claim_redis.data
+    assert _st.release_scheduled_dispatch("macs", token) is True
+    assert _st.release_scheduled_dispatch("macs", token) is False
+    assert _st.release_scheduled_dispatch("macs", None) is False
+    claim_redis.fail = True
+    assert _st.release_scheduled_dispatch("macs", token) is False
+
+
+def test_release_dispatch_claim_local_mode(monkeypatch):
+    monkeypatch.setattr(_st, "get_redis", lambda: None)
+    monkeypatch.setattr(_st, "_LOCAL_LAST_DISPATCH", {})
+    token = _st.claim_scheduled_dispatch_token("links", 30)
+    assert token and token.startswith("local:")
+    assert _st.claim_scheduled_dispatch("links", 30) is False
+    assert _st.release_scheduled_dispatch("links", token) is True
+    assert _st.claim_scheduled_dispatch("links", 30) is True
+
+
+def test_blocked_dispatch_logs_once_per_streak(executor_mod, monkeypatch):
+    scheduler = importlib.import_module("scan_engine.scheduler")
+    events = []
+    monkeypatch.setattr(scheduler, "_log_event", lambda level, event, **kw: events.append(event))
+    monkeypatch.setattr(scheduler, "_blocked_kinds", set())
+    allowed = {"value": False}
+    monkeypatch.setattr(scheduler, "can_dispatch_scan", lambda kind: allowed["value"])
+    for _ in range(5):
+        scheduler._log_dispatch_start("macs")
+        assert scheduler._dispatch_scheduled_scan("macs") is False
+    assert events == ["scheduler.macs.start", "scheduler.macs.skipped"]
+    # Dispatch goes through: the streak ends with one "resumed" entry.
+    allowed["value"] = True
+    import shared.redis_client
+    import shared.state
+
+    monkeypatch.setattr(shared.redis_client, "get_redis", lambda: None)
+    monkeypatch.setattr(shared.state, "acquire_scan_lock", lambda *a, **k: None)
+    assert scheduler._dispatch_scheduled_scan("macs") is False  # lock not acquired: still blocked
+    assert events[-1] == "scheduler.macs.skipped"
+    monkeypatch.setattr(shared.state, "acquire_scan_lock", lambda *a, **k: "owner:1")
+    monkeypatch.setattr(shared.state, "release_scan_lock", lambda *a, **k: None)
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: MagicMock())
+    monkeypatch.setattr(scheduler, "_get_bg_loop", lambda: MagicMock())
+    monkeypatch.setattr(scheduler.asyncio, "run_coroutine_threadsafe",
+                        lambda coro, loop: (coro.close(), MagicMock())[1])
+    assert scheduler._dispatch_scheduled_scan("macs") is True
+    assert events[-1] == "scheduler.macs.resumed"
+    scheduler._log_dispatch_start("macs")
+    assert events[-1] == "scheduler.macs.start"
 
 
 # ---------------------------------------------------------------------------

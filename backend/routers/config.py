@@ -12,7 +12,6 @@ from database import AppSetting, Credential, Device, SnmpProfile, get_db
 from routers.bulk import _normalize_bool, _normalize_optional_int, normalize_snmp_enabled
 from schemas import (
     MASK_EXPORT,
-    MASK_SENTINELS,
     CredentialCreate,
     GlobalConfigExportOut,
     GlobalConfigImportRequest,
@@ -22,6 +21,7 @@ from shared.audit import log_audit
 from shared.auth import require_role
 from shared.crypto import encrypt
 from shared.errors import api_error
+from shared.secrets import SECRET_FIELDS, masked_secret_fields
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
@@ -152,10 +152,9 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
                 db.add(AppSetting(**row))
                 inserted["settings"] += 1
 
-        _MASKED_SECRET_FIELDS = ("v3_auth_password", "v3_priv_password", "community")
         for row in valid_profiles:
-            masked_fields = {f for f in _MASKED_SECRET_FIELDS if row.get(f) in MASK_SENTINELS}
-            for pwd_field in _MASKED_SECRET_FIELDS:
+            masked_fields = masked_secret_fields(row)
+            for pwd_field in SECRET_FIELDS:
                 if row.get(pwd_field) and pwd_field not in masked_fields:
                     row[pwd_field] = encrypt(row[pwd_field])
             existing = db.query(SnmpProfile).filter(SnmpProfile.label == row["label"]).first()
@@ -178,8 +177,8 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
         for row in valid_credentials:
             profile_label = row.pop("profile_label", None)
             device_ip = row.pop("device_ip", None)
-            masked_fields = {f for f in _MASKED_SECRET_FIELDS if row.get(f) in MASK_SENTINELS}
-            for pwd_field in _MASKED_SECRET_FIELDS:
+            masked_fields = masked_secret_fields(row)
+            for pwd_field in SECRET_FIELDS:
                 if row.get(pwd_field) and pwd_field not in masked_fields:
                     row[pwd_field] = encrypt(row[pwd_field])
             if profile_label is not None and str(profile_label).strip():
@@ -204,16 +203,15 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
                 db.add(Credential(**row))
                 inserted["credentials"] += 1
 
+        # Written in the import transaction: no import without its audit record.
+        log_audit(request, "import", "global_config", "", {
+            "inserted": inserted, "updated": updated,
+        }, db=db, strict=True)
         try:
             db.commit()
         except IntegrityError:
             db.rollback()
             api_error(400, "IMPORT_INTEGRITY", "Import violated a database constraint (e.g. duplicate or dangling reference)")
-
-    if not body.dry_run and not errors:
-        log_audit(request, "import", "global_config", "", {
-            "inserted": inserted, "updated": updated,
-        })
 
     return {
         "dry_run": bool(body.dry_run),

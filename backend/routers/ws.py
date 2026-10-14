@@ -181,7 +181,7 @@ def _update_subscriber_thread(loop: asyncio.AbstractEventLoop) -> None:
 async def scan_progress_ws(ws: WebSocket, token: str = Query(default="")):
     global _main_loop
 
-    # Validate token if auth is enabled
+    # Validate the ticket or token
     try:
         credential_token = await asyncio.wait_for(
             asyncio.to_thread(_authenticate_ws, token), timeout=AUTH_CHECK_TIMEOUT_SECONDS
@@ -241,16 +241,8 @@ def _authenticate_ws(token: str) -> str:
     Accepts either a single-use ticket (preferred) or a raw JWT (fallback).
     Tickets are looked up in Redis and consumed atomically (GETDEL) after use
     to prevent replay. Raw JWTs go through the same blacklist / revocation
-    checks as HTTP requests. If auth is disabled on the server, this is a
-    no-op.
+    checks as HTTP requests.
     """
-    # Same module-level values as the HTTP path: the legacy SECRET_TOKEN is
-    # only honored when JWT_SECRET is NOT configured (see shared.auth).
-    from shared.auth import _LEGACY_TOKEN, JWT_SECRET
-
-    if not JWT_SECRET and not _LEGACY_TOKEN:
-        return ""  # auth disabled
-
     if not token:
         raise WebSocketException(code=1008, reason="Authentication required")
 
@@ -280,15 +272,7 @@ def _authenticate_ws(token: str) -> str:
 
 def _validate_ws_credential(token: str) -> None:
     """Check the originating credential without consuming a WebSocket ticket."""
-    from shared.auth import _LEGACY_TOKEN, JWT_SECRET
-
-    if not JWT_SECRET and not _LEGACY_TOKEN:
-        return
-
-    # Legacy single-token -- empty unless JWT_SECRET is unset, so it is never
-    # an accepted credential once JWT auth is configured.
-    if _LEGACY_TOKEN and token == _LEGACY_TOKEN:
-        return
+    from shared.auth import JWT_SECRET
 
     # Fallback: raw JWT (for clients that haven't migrated)
     try:
@@ -305,7 +289,8 @@ def _validate_ws_credential(token: str) -> None:
             user_id = int(payload.get("sub", 0) or 0)
         except (TypeError, ValueError):
             user_id = 0
-        if user_id and _is_user_revoked(user_id, payload.get("iat", 0)):
+        # iat_ms gives millisecond precision like the HTTP path (shared.auth).
+        if user_id and _is_user_revoked(user_id, payload.get("iat", 0), payload.get("iat_ms")):
             raise WebSocketException(code=1008, reason="All sessions have been revoked")
     except WebSocketException:
         raise

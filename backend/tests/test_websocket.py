@@ -9,68 +9,59 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import WebSocketException
 
+from database import User
 from routers.ws import _authenticate_ws
+from shared.auth import DUMMY_PASSWORD_HASH, create_token
+
+
+@pytest.fixture(autouse=True)
+def _ws_user(db):
+    """User id 1: tokens of missing users count as revoked (DB-backed revocation)."""
+    db.add(User(id=1, username="ws-user", email="", hashed_pw=DUMMY_PASSWORD_HASH, role="viewer", is_active=True))
+    db.commit()
 
 # ---------------------------------------------------------------------------
 # T3c: WebSocket Tests (7 tests)
 # ---------------------------------------------------------------------------
 
-def _patch_cfg(jwt_secret="", secret_token=""):
-    """Patch the shared.auth module constants for a (jwt_secret, secret_token) pair.
-
-    Mirrors shared.auth semantics: JWT_SECRET falls back to SECRET_TOKEN, and
-    the legacy token is only honored when JWT_SECRET is unset.
-    """
-    return patch.multiple(
-        "shared.auth",
-        JWT_SECRET=jwt_secret or secret_token,
-        _LEGACY_TOKEN="" if jwt_secret else secret_token,
-    )
+def _patch_cfg(jwt_secret="test-jwt-secret"):
+    """Patch the JWT signing key used by shared.auth."""
+    return patch("shared.auth.JWT_SECRET", jwt_secret)
 
 
 class TestAuthenticateWs:
     """Unit tests for _authenticate_ws() helper."""
 
-    def test_no_auth_configured_allows_empty_token(self):
-        """When both jwt_secret and secret_token are empty, auth is disabled."""
-        with _patch_cfg(jwt_secret="", secret_token=""):
-            _authenticate_ws("")
-
-    def test_empty_token_raises_when_auth_enabled(self):
-        """When auth is configured, empty token must be rejected."""
-        with _patch_cfg(jwt_secret="secret", secret_token="tok123"):
+    def test_empty_token_raises(self):
+        """An empty token must be rejected."""
+        with _patch_cfg(jwt_secret="secret"):
             with pytest.raises(WebSocketException) as exc:
                 _authenticate_ws("")
             assert exc.value.code == 1008
 
-    def test_legacy_token_accepted(self):
-        """The legacy single-token auth should be accepted."""
-        with _patch_cfg(jwt_secret="", secret_token="my-legacy-token"), \
-             patch("shared.redis_client.get_redis", return_value=None):
-            _authenticate_ws("my-legacy-token")
-
-    def test_legacy_token_rejected_when_jwt_secret_set(self):
-        """With JWT_SECRET configured, the legacy SECRET_TOKEN is not accepted."""
-        with _patch_cfg(jwt_secret="jwt-secret", secret_token="legacy-tok"), \
-             patch("shared.redis_client.get_redis", return_value=None):
-            with pytest.raises(WebSocketException) as exc:
-                _authenticate_ws("legacy-tok")
-            assert exc.value.code == 1008
-
     def test_invalid_token_raises(self):
         """A completely invalid token should raise WebSocketException."""
-        with _patch_cfg(jwt_secret="secret", secret_token="tok123"), \
+        with _patch_cfg(jwt_secret="secret"), \
              patch("shared.redis_client.get_redis", return_value=None):
             with pytest.raises(WebSocketException) as exc:
                 _authenticate_ws("bad-token")
             assert exc.value.code == 1008
 
+    def test_raw_jwt_secret_as_token_rejected(self):
+        """A static non-JWT bearer value (even the signing key itself) is never a credential."""
+        with _patch_cfg(jwt_secret="jwt-secret"), \
+             patch("shared.redis_client.get_redis", return_value=None):
+            with pytest.raises(WebSocketException) as exc:
+                _authenticate_ws("jwt-secret")
+            assert exc.value.code == 1008
+
     def test_ticket_based_auth_accepted(self):
         """A valid Redis-backed ticket should be consumed atomically (GETDEL)."""
         mock_redis = MagicMock()
-        mock_redis.getdel.return_value = '{"token": "legacy-ticket-source"}'
-        with _patch_cfg(secret_token="legacy-ticket-source"), \
-             patch("shared.redis_client.get_redis", return_value=mock_redis):
+        mock_redis.getdel.return_value = json.dumps({"token": create_token(1, "ws-user", "viewer")})
+        mock_redis.exists.return_value = 0
+        mock_redis.get.return_value = None
+        with patch("shared.redis_client.get_redis", return_value=mock_redis):
             _authenticate_ws("valid-ticket-token")
         mock_redis.getdel.assert_called_once_with("ws_ticket:valid-ticket-token")
 
@@ -94,7 +85,7 @@ class TestAuthenticateWs:
         mock_redis = MagicMock()
         mock_redis.getdel.return_value = None
         mock_redis.get.return_value = None  # no revocation markers
-        with _patch_cfg(jwt_secret=secret, secret_token=""), \
+        with _patch_cfg(jwt_secret=secret), \
              patch("shared.redis_client.get_redis", return_value=mock_redis):
             _authenticate_ws(token)
 
@@ -109,7 +100,7 @@ class TestAuthenticateWs:
         )
         mock_redis = MagicMock()
         mock_redis.getdel.return_value = None
-        with _patch_cfg(jwt_secret=secret, secret_token=""), \
+        with _patch_cfg(jwt_secret=secret), \
              patch("shared.redis_client.get_redis", return_value=mock_redis):
             with pytest.raises(WebSocketException) as exc:
                 _authenticate_ws(token)
@@ -125,7 +116,7 @@ class TestAuthenticateWs:
         mock_redis = MagicMock()
         mock_redis.getdel.return_value = None
         mock_redis.exists.return_value = 1  # jti blacklisted
-        with _patch_cfg(jwt_secret=secret, secret_token=""), \
+        with _patch_cfg(jwt_secret=secret), \
              patch("shared.redis_client.get_redis", return_value=mock_redis):
             with pytest.raises(WebSocketException) as exc:
                 _authenticate_ws(token)
@@ -145,7 +136,7 @@ class TestAuthenticateWs:
         mock_redis.getdel.return_value = None
         mock_redis.exists.return_value = 0
         mock_redis.get.return_value = str(now)  # revoke_all marker after iat
-        with _patch_cfg(jwt_secret=secret, secret_token=""), \
+        with _patch_cfg(jwt_secret=secret), \
              patch("shared.redis_client.get_redis", return_value=mock_redis):
             with pytest.raises(WebSocketException) as exc:
                 _authenticate_ws(token)
@@ -154,7 +145,9 @@ class TestAuthenticateWs:
 
 def test_websocket_route_accepts_ticket_with_global_auth_dependency(client):
     mock_redis = MagicMock()
-    mock_redis.getdel.return_value = '{"token": "test-token"}'
+    mock_redis.getdel.return_value = json.dumps({"token": create_token(1, "ws-user", "viewer")})
+    mock_redis.exists.return_value = 0
+    mock_redis.get.return_value = None
     with patch("shared.redis_client.get_redis", return_value=mock_redis), \
             patch("routers.ws._ensure_update_subscriber"):
         with client.websocket_connect("/ws/scan-progress?token=single-use-ticket") as websocket:

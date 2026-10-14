@@ -1,5 +1,6 @@
 """Tests for the SNMP profiles CRUD endpoints, focused on secret masking."""
 from database import SnmpProfile
+from shared.crypto import decrypt
 
 
 def test_create_and_list_snmp_profiles(client, auth_headers):
@@ -49,9 +50,9 @@ def test_update_snmp_profile_mask_sentinels_keep_stored_values(client, auth_head
     db.expire_all()
     profile = db.query(SnmpProfile).filter(SnmpProfile.id == profile_id).first()
     assert profile.label == "RenamedProf"
-    assert profile.community == "topsecret"
-    assert profile.v3_auth_password == "authpw"
-    assert profile.v3_priv_password == "privpw"
+    assert decrypt(profile.community) == "topsecret"
+    assert decrypt(profile.v3_auth_password) == "authpw"
+    assert decrypt(profile.v3_priv_password) == "privpw"
 
 
 def test_update_snmp_profile_applies_real_secret_values(client, auth_headers, db):
@@ -66,7 +67,7 @@ def test_update_snmp_profile_applies_real_secret_values(client, auth_headers, db
 
     db.expire_all()
     profile = db.query(SnmpProfile).filter(SnmpProfile.id == profile_id).first()
-    assert profile.community == "newcomm"
+    assert decrypt(profile.community) == "newcomm"
 
 
 def test_create_snmp_profile_normalizes_mask_sentinels(client, auth_headers, db):

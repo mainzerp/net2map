@@ -26,7 +26,7 @@ from database import (
     SnmpProfile,
     TopologyLink,
 )
-from scan_engine.broadcast import _broadcast_progress, _broadcast_scan_complete
+from scan_engine.broadcast import _broadcast_progress, _broadcast_scan_complete, broadcast_nowait
 from scan_engine.db_helpers import (
     _canonical_link_key,
     _expand_ranges_to_ips,
@@ -223,12 +223,13 @@ async def _execute_scan(
     async def renew_lock():
         while True:
             await asyncio.sleep(_LOCK_RENEW_INTERVAL_SEC)
-            lease.check()
+            # Renewal is a sync Redis round trip: keep it off the event loop.
+            await asyncio.to_thread(lease.check)
 
     # Renew independently of target completion, including a single slow SNMP walk.
     renew_task = asyncio.create_task(renew_lock()) if lock_token else None
     try:
-        lease.check()
+        await asyncio.to_thread(lease.check)
         body_task = asyncio.create_task(
             _execute_scan_body(db, cancel_event, corr, scan_mode, dry_run, lock_token, scan_started, lease)
         )
@@ -256,16 +257,24 @@ async def _execute_scan(
         SCAN_TOTAL.labels(scan_type=scan_mode, status=final_status).inc()
 
 
-async def _execute_scan_body(
-    db: Session,
-    cancel_event,
-    corr: str,
-    scan_mode: str,
-    dry_run: bool,
-    lock_token: Optional[str],
-    scan_started: float,
-    lease: _ScanLease,
-) -> ScanResult:
+def _prepare_scan_setup(scan_mode: str, corr: str) -> dict:
+    """Synchronous scan setup: credential/device/profile queries, scan
+    settings and secret decryption -- runs in a worker thread via
+    asyncio.to_thread so the shared event loop never blocks on the database.
+
+    Uses its own session, created and closed in the calling thread; only
+    plain data (target dicts, counters) leaves this function.
+    """
+    import database
+
+    db = database.SessionLocal()
+    try:
+        return _build_scan_setup(db, scan_mode, corr)
+    finally:
+        db.close()
+
+
+def _build_scan_setup(db: Session, scan_mode: str, corr: str) -> dict:
     ignored_ips = {d.ip for d in db.query(Device.ip).filter(Device.ignored.is_(True)).all()}
     if scan_mode in {"ports", "links", "macs"}:
         # Only scan credentials that are already in the Device table and not ignored
@@ -383,38 +392,6 @@ async def _execute_scan_body(
                 profiles=len(all_profiles),
             )
 
-    _log_event(
-        logging.INFO,
-        "scan.start",
-        correlation_id=corr,
-        scan_type=scan_mode,
-        enabled_credentials=len(credentials),
-        range_probes=len(range_targets),
-        configured_max_workers=configured_max_workers,
-    )
-
-    if not credentials and not range_targets:
-        result = ScanResult(
-            scanned=0,
-            found=0,
-            links=0,
-            errors=["No enabled credentials and no discovery ranges configured"],
-            max_workers=configured_max_workers,
-            total_duration_ms=0,
-            switch_metrics=[],
-            status="finished",
-        )
-        _log_event(logging.INFO, "scan.end", correlation_id=corr, status=result.status, scanned=0, found=0, links=0, total_duration_ms=0)
-        return result
-
-    errors: List[str] = []
-    switch_data: Dict[str, SwitchData] = {}
-    ping_by_ip: Dict[str, tuple[bool, int]] = {}
-    switch_metrics: List[ScanSwitchMetric] = []
-    range_found_ips: List[str] = []  # IPs from ranges that responded to SNMP
-    # IP -> id of the credential (primary or fallback) whose scan succeeded
-    working_cred_by_ip: Dict[str, int] = {}
-
     scan_targets = []
 
     def _cred_to_snmp_dict(cred):
@@ -465,6 +442,78 @@ async def _execute_scan_body(
         })
 
     scan_targets.extend(range_targets)
+
+    return {
+        "credential_count": len(credentials),
+        "range_target_count": len(range_targets),
+        "ping_only_targets": ping_only_targets,
+        "scan_targets": scan_targets,
+        "configured_max_workers": configured_max_workers,
+        "bulk_size": bulk_size,
+        "if_names_by_ip": if_names_by_ip,
+        "vlan_stp_plan": vlan_stp_plan,
+    }
+
+
+async def _execute_scan_body(
+    db: Session,
+    cancel_event,
+    corr: str,
+    scan_mode: str,
+    dry_run: bool,
+    lock_token: Optional[str],
+    scan_started: float,
+    lease: _ScanLease,
+) -> ScanResult:
+    # The synchronous setup phase (DB queries, settings, decryption) runs in
+    # a worker thread; shield + drain keeps the thread from outliving a
+    # cancelled scan unnoticed.
+    setup_task = asyncio.ensure_future(asyncio.to_thread(_prepare_scan_setup, scan_mode, corr))
+    try:
+        setup = await asyncio.shield(setup_task)
+    except asyncio.CancelledError:
+        await _drain_scan_task(setup_task)
+        raise
+    credential_count = setup["credential_count"]
+    range_target_count = setup["range_target_count"]
+    ping_only_targets: Dict[str, dict] = setup["ping_only_targets"]
+    scan_targets = setup["scan_targets"]
+    configured_max_workers = setup["configured_max_workers"]
+    bulk_size = setup["bulk_size"]
+    if_names_by_ip = setup["if_names_by_ip"]
+    vlan_stp_plan = setup["vlan_stp_plan"]
+
+    _log_event(
+        logging.INFO,
+        "scan.start",
+        correlation_id=corr,
+        scan_type=scan_mode,
+        enabled_credentials=credential_count,
+        range_probes=range_target_count,
+        configured_max_workers=configured_max_workers,
+    )
+
+    if not credential_count and not range_target_count:
+        result = ScanResult(
+            scanned=0,
+            found=0,
+            links=0,
+            errors=["No enabled credentials and no discovery ranges configured"],
+            max_workers=configured_max_workers,
+            total_duration_ms=0,
+            switch_metrics=[],
+            status="finished",
+        )
+        _log_event(logging.INFO, "scan.end", correlation_id=corr, status=result.status, scanned=0, found=0, links=0, total_duration_ms=0)
+        return result
+
+    errors: List[str] = []
+    switch_data: Dict[str, SwitchData] = {}
+    ping_by_ip: Dict[str, tuple[bool, int]] = {}
+    switch_metrics: List[ScanSwitchMetric] = []
+    range_found_ips: List[str] = []  # IPs from ranges that responded to SNMP
+    # IP -> id of the credential (primary or fallback) whose scan succeeded
+    working_cred_by_ip: Dict[str, int] = {}
 
     async def _ping_host_async(ip: str, timeout_sec: int = 1) -> tuple[bool, int]:
         """Non-blocking ICMP ping via asyncio subprocess."""
@@ -683,7 +732,7 @@ async def _execute_scan_body(
                     ))
 
             # Broadcast progress to WebSocket clients
-            _broadcast_progress(scanned_count, total_targets, ip, bool(data), corr)
+            broadcast_nowait(_broadcast_progress, scanned_count, total_targets, ip, bool(data), corr)
 
     finally:
         for task in target_tasks:
@@ -695,7 +744,7 @@ async def _execute_scan_body(
     switch_metrics.sort(key=lambda m: m.duration_ms, reverse=True)
     status = "cancelled" if (cancel_event and cancel_event.is_set()) else "finished"
 
-    lease.check()
+    await asyncio.to_thread(lease.check)
 
     # The synchronous SQLAlchemy rebuild phase runs in a worker thread so the
     # shared background event loop stays responsive for WebSocket broadcasts
@@ -732,16 +781,16 @@ async def _execute_scan_body(
         await _drain_scan_task(finalization_task)
         raise
 
-    lease.check()
+    await asyncio.to_thread(lease.check)
     if dry_run:
         attach_dry_run_preview(result, dry_run_preview)
         return result
 
-    _broadcast_scan_complete(corr, result.status, result.found, result.links, result.total_duration_ms)
+    broadcast_nowait(_broadcast_scan_complete, corr, result.status, result.found, result.links, result.total_duration_ms)
 
     # Bump topology version so clients refetch updated data
     from routers.topology import _bump_topo_version
-    _bump_topo_version()
+    await asyncio.to_thread(_bump_topo_version)
 
     return result
 
@@ -944,6 +993,63 @@ def _upsert_ping_candidates(db: Session, probe_ips: List[str], ping_by_ip: Dict[
         else:
             cand.rtt_ms = rtt
             cand.last_seen = now
+
+
+ENDPOINT_RETENTION_DEFAULT_DAYS = 30
+ENDPOINT_RETENTION_MAX_DAYS = 3650
+_ENDPOINT_PRUNE_BATCH = 500
+
+
+def _read_endpoint_retention_days() -> int:
+    """Endpoint retention in days from the ``endpoint_retention_days`` app
+    setting (default 30, clamped to 0-3650; 0 disables expiry)."""
+    try:
+        days = int(_read_db_setting("endpoint_retention_days", str(ENDPOINT_RETENTION_DEFAULT_DAYS)))
+    except (TypeError, ValueError):
+        days = ENDPOINT_RETENTION_DEFAULT_DAYS
+    return max(0, min(ENDPOINT_RETENTION_MAX_DAYS, days))
+
+
+def _prune_stale_endpoints(db: Session, corr: str) -> int:
+    """Delete endpoints not seen for longer than the retention period.
+
+    Endpoint.last_seen is refreshed whenever a scan observes the MAC on a
+    port (see the port rebuild in _finalize_scan_db). Endpoints the user
+    marked as ignored or annotated with notes are kept, so manual decisions
+    are never lost. Associations are deleted explicitly first (bulk deletes
+    bypass the ORM cascade and SQLite does not enforce FK cascades). Commits
+    (lease-guarded by the caller's transaction guard). Returns the number of
+    deleted endpoints.
+    """
+    days = _read_endpoint_retention_days()
+    if days <= 0:
+        return 0
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+    stale_ids = [
+        row[0] for row in db.query(Endpoint.id).filter(
+            Endpoint.last_seen.isnot(None),
+            Endpoint.last_seen < cutoff,
+            Endpoint.ignored.is_(False),
+            (Endpoint.notes.is_(None)) | (Endpoint.notes == ""),
+        ).all()
+    ]
+    if not stale_ids:
+        return 0
+    for start in range(0, len(stale_ids), _ENDPOINT_PRUNE_BATCH):
+        chunk = stale_ids[start:start + _ENDPOINT_PRUNE_BATCH]
+        db.query(EndpointPortAssociation).filter(
+            EndpointPortAssociation.endpoint_id.in_(chunk)
+        ).delete(synchronize_session=False)
+        db.query(Endpoint).filter(Endpoint.id.in_(chunk)).delete(synchronize_session=False)
+    db.commit()
+    _log_event(
+        logging.INFO,
+        "scan.endpoints.expired",
+        correlation_id=corr,
+        deleted=len(stale_ids),
+        retention_days=days,
+    )
+    return len(stale_ids)
 
 
 @_guard_scan_transactions
@@ -1266,6 +1372,7 @@ def _finalize_scan_db(
     # ── Port / endpoint rebuild ───────────────────────────────────────────────
     link_count = 0
     ports_committed = False
+    port_update_failed = False
     update_ports = scan_mode in {"full", "ports", "macs"}
     update_links = scan_mode in {"full", "ports", "links"}
     if update_ports:
@@ -1437,6 +1544,7 @@ def _finalize_scan_db(
                 raise
             except Exception:
                 db.rollback()
+                port_update_failed = True
                 log.exception("Error during port update, rolled back")
                 errors.append("Port update failed (rolled back)")
 
@@ -1543,6 +1651,19 @@ def _finalize_scan_db(
                 db.rollback()
                 log.exception("Error during link update, rolled back")
                 errors.append("Link update failed (rolled back)")
+
+    # ── Endpoint expiry: only after a successful full scan ─────────────────────
+    if (
+        scan_mode == "full" and status == "finished" and ports_committed and not port_update_failed
+        and not (cancel_event and cancel_event.is_set())
+    ):
+        try:
+            _prune_stale_endpoints(db, corr)
+        except (ScanOwnershipLost, ScanFinalizationAborted):
+            raise
+        except Exception:
+            db.rollback()
+            log.exception("Error during endpoint expiry, rolled back")
 
     if status == "cancelled" and ports_committed:
         # See docstring: cancellation can leave already-committed devices with

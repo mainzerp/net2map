@@ -271,6 +271,8 @@ def _install(mod, monkeypatch, sys_descr, sys_oid, values=None, walks=None):
         return list((walks or {}).get(oid, []))
 
     async def fake_walk_raw(ip, port, auth, oid, **kw):
+        # MAC-typed columns (ARP) are walked raw
+        calls["walked"].append(oid)
         return []
 
     monkeypatch.setattr(mod, "snmp_get", fake_get)

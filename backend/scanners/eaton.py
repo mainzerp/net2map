@@ -11,13 +11,10 @@ _MODEL_EATON = re.compile(
 
 
 class EatonScanner(VendorScanner, vendor_id="eaton"):
-
-    def extract_model(self, sys_descr: str) -> str:
-        m = _MODEL_EATON.search(sys_descr or "")
-        return m.group(1).strip() if m else ""
-
-    def is_virtual_port(self, if_descr: str) -> bool:
-        return (if_descr or "").lower().startswith(("lo", "loopback"))
+    MODEL_PATTERN = _MODEL_EATON
+    MODEL_STRIP = True
+    VIRTUAL_PORT_PATTERNS = ("lo", "loopback")
+    VIRTUAL_PORT_MATCH = "prefix"
 
     def fdb_strategy(self) -> str:
         return "dot1d"

@@ -2,6 +2,7 @@
 import json
 
 from database import AppSetting, Credential, Device, SnmpProfile
+from shared.crypto import decrypt
 
 # -- Config export tests -------------------------------------------------------
 
@@ -237,9 +238,9 @@ def test_config_import_matches_credential_by_ip_and_priority(client, auth_header
     prio0 = db.query(Credential).filter(Credential.ip == "10.6.0.3", Credential.priority == 0).first()
     prio1 = db.query(Credential).filter(Credential.ip == "10.6.0.3", Credential.priority == 1).first()
     assert prio0.label == "Prio0"
-    assert prio0.community == "c0"
+    assert decrypt(prio0.community) == "c0"
     assert prio1.label == "Prio1-Updated"
-    assert prio1.community == "c1-new"
+    assert decrypt(prio1.community) == "c1-new"
 
 
 def test_config_import_mask_keeps_values_on_update(client, auth_headers, db):
@@ -267,9 +268,9 @@ def test_config_import_mask_keeps_values_on_update(client, auth_headers, db):
     db.expire_all()
     cred = db.query(Credential).filter(Credential.ip == "10.6.0.4").first()
     assert cred.label == "KeepCred-Renamed"
-    assert cred.community == "keepme"
-    assert cred.v3_auth_password == "keepauth"
-    assert cred.v3_priv_password == "keeppriv"
+    assert decrypt(cred.community) == "keepme"
+    assert decrypt(cred.v3_auth_password) == "keepauth"
+    assert decrypt(cred.v3_priv_password) == "keeppriv"
 
 
 # -- Role guard and FK reference resolution ------------------------------------

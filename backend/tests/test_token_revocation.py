@@ -54,14 +54,26 @@ def test_logout_endpoint_returns_ok(client, jwt_headers):
 
 
 @pytest.mark.parametrize("path", ["/api/auth/logout", "/api/auth/revoke-all"])
-def test_revocation_without_redis_reports_failure(client, jwt_headers, path):
+def test_revocation_without_redis_uses_database(client, jwt_headers, path):
+    """Without Redis, logout and revoke-all revoke all sessions via users.revoked_before_ms."""
     with patch("shared.redis_client.get_redis", return_value=None):
         response = client.post(path, headers=jwt_headers)
+        assert response.status_code == 200
+        if path.endswith("logout"):
+            assert response.json() == {"status": "ok", "revoked": "all_sessions"}
+        assert client.get("/api/auth/me", headers=jwt_headers).status_code == 401
+
+
+def test_logout_without_any_revocation_store_reports_failure(client, jwt_headers):
+    """Never report a successful logout when nothing could be revoked."""
+    with patch("shared.redis_client.get_redis", return_value=None), \
+            patch("routers.auth.blacklist_all_user_tokens", side_effect=RuntimeError("db down")):
+        response = client.post("/api/auth/logout", headers=jwt_headers)
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "AUTH_UNAVAILABLE"
 
 
-@pytest.mark.parametrize("operation", ["exists", "get"])
+@pytest.mark.parametrize("operation", ["exists"])
 @pytest.mark.parametrize("path", ["/api/auth/me", "/api/auth/refresh"])
 def test_redis_read_failure_blocks_token_authentication(client, jwt_headers, operation, path):
     from unittest.mock import MagicMock
@@ -85,25 +97,38 @@ def test_configured_redis_missing_client_blocks_authentication(client, jwt_heade
     assert response.status_code == 503
 
 
+def test_redis_get_failure_does_not_block_current_tokens(client, jwt_headers):
+    """The legacy Redis revoke-all key is only read for tokens without iat_ms."""
+    from unittest.mock import MagicMock
+
+    fake = MagicMock()
+    fake.exists.return_value = 0
+    fake.get.side_effect = ConnectionError("Redis unavailable")
+    with patch("shared.redis_client.get_redis", return_value=fake):
+        assert client.get("/api/auth/me", headers=jwt_headers).status_code == 200
+
+
 @pytest.mark.parametrize("updates", [{"role": "operator"}, {"is_active": False}, {"password": "Changed123"}])
-def test_failed_revocation_leaves_user_unchanged(client, db, jwt_headers, updates):
-    user = _make_user(db, "unchanged")
-    original_hash = user.hashed_pw
-    with patch("routers.auth.blacklist_all_user_tokens", return_value=False):
+def test_security_change_without_redis_succeeds_and_revokes(client, db, jwt_headers, updates):
+    user = _make_user(db, "changed")
+    user_headers = {"Authorization": f"Bearer {create_token(user.id, user.username, user.role)}"}
+    with patch("shared.redis_client.get_redis", return_value=None):
+        assert client.get("/api/auth/me", headers=user_headers).status_code == 200
         response = client.put(f"/api/users/{user.id}", json=updates, headers=jwt_headers)
-    assert response.status_code == 503
+        assert response.status_code == 200
+        assert client.get("/api/auth/me", headers=user_headers).status_code == 401
     db.refresh(user)
-    assert user.role == "viewer"
-    assert user.is_active is True
-    assert user.hashed_pw == original_hash
+    assert user.revoked_before_ms > 0
 
 
-def test_failed_revocation_keeps_deleted_user(client, db, jwt_headers):
-    user = _make_user(db, "keepme")
-    with patch("routers.auth.blacklist_all_user_tokens", return_value=False):
-        response = client.delete(f"/api/users/{user.id}", headers=jwt_headers)
-    assert response.status_code == 503
-    assert db.get(User, user.id) is not None
+def test_delete_user_without_redis_succeeds_and_revokes(client, db, jwt_headers):
+    user = _make_user(db, "goner")
+    user_headers = {"Authorization": f"Bearer {create_token(user.id, user.username, user.role)}"}
+    with patch("shared.redis_client.get_redis", return_value=None):
+        assert client.get("/api/auth/me", headers=user_headers).status_code == 200
+        assert client.delete(f"/api/users/{user.id}", headers=jwt_headers).status_code == 204
+        assert client.get("/api/auth/me", headers=user_headers).status_code == 401
+    assert db.get(User, user.id) is None
 
 
 def test_ticket_cannot_bypass_logout(client, jwt_headers):

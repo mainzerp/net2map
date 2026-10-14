@@ -33,3 +33,24 @@ def decrypt(value: str) -> str:
         # Do not log the value itself; it may be a legacy plaintext credential.
         _log.warning("Failed to decrypt value -- returning raw value (legacy plaintext?)")
         return value  # legacy unencrypted value
+
+
+# Every Fernet token starts with the version byte 0x80, which url-safe base64
+# encodes as "gAAAAA" (followed by the timestamp's high bytes).
+_FERNET_PREFIX = "gAAAAA"
+
+
+def is_encrypted(value: str) -> bool:
+    """True when ``value`` is a Fernet token that decrypts with the current key."""
+    if not value or not _fernet:
+        return False
+    try:
+        _fernet.decrypt(value.encode())
+        return True
+    except Exception:
+        return False
+
+
+def looks_encrypted(value: str) -> bool:
+    """True when ``value`` has the shape of a Fernet token (regardless of the key)."""
+    return bool(value) and value.startswith(_FERNET_PREFIX)

@@ -1,5 +1,7 @@
 """Tests for authentication, JWT tokens, and role-based access control."""
 
+import pytest
+
 from database import User
 from shared.auth import create_token, hash_password
 
@@ -69,6 +71,16 @@ def test_invalid_jwt_token_returns_401(client):
     r = client.get("/api/credentials", headers={"Authorization": "Bearer bad.token.value"})
     assert r.status_code == 401
     assert r.json()["error"]["code"] == "AUTH_INVALID"
+
+
+@pytest.mark.parametrize("raw", ["static-access-token", "test-jwt-secret"])
+def test_raw_non_jwt_bearer_token_returns_401(client, raw):
+    """A static (non-JWT) bearer value is never accepted, not even the signing key itself."""
+    r = client.get("/api/credentials", headers={"Authorization": f"Bearer {raw}"})
+    assert r.status_code == 401
+    assert r.json()["error"]["code"] == "AUTH_INVALID"
+    r = client.post("/api/auth/logout", headers={"Authorization": f"Bearer {raw}"})
+    assert r.status_code == 401
 
 
 def test_missing_token_returns_401(client):
@@ -383,7 +395,13 @@ def test_admin_cannot_delete_self(client, jwt_headers, db):
 
 
 def test_cannot_deactivate_last_active_admin(client, auth_headers, db):
-    """Deactivating the last active admin is rejected (legacy-token caller)."""
+    """Deactivating the last active admin is rejected.
+
+    The caller is an active admin itself, so the count is patched to model a
+    concurrent demotion of the caller (defensive guard).
+    """
+    from unittest.mock import patch
+
     admin = User(
         username="onlyadmin", email="only@test.com",
         hashed_pw=hash_password("TestPass123"), role="admin", is_active=True,
@@ -391,13 +409,16 @@ def test_cannot_deactivate_last_active_admin(client, auth_headers, db):
     db.add(admin)
     db.commit()
     db.refresh(admin)
-    r = client.put(f"/api/users/{admin.id}", json={"is_active": False}, headers=auth_headers)
+    with patch("routers.auth._count_active_admins", return_value=1):
+        r = client.put(f"/api/users/{admin.id}", json={"is_active": False}, headers=auth_headers)
     assert r.status_code == 400
     assert r.json()["error"]["code"] == "LAST_ADMIN"
 
 
 def test_cannot_delete_last_active_admin(client, auth_headers, db):
-    """Deleting the last active admin is rejected (legacy-token caller)."""
+    """Deleting the last active admin is rejected (count patched, see above)."""
+    from unittest.mock import patch
+
     admin = User(
         username="onlyadmin2", email="only2@test.com",
         hashed_pw=hash_password("TestPass123"), role="admin", is_active=True,
@@ -405,7 +426,8 @@ def test_cannot_delete_last_active_admin(client, auth_headers, db):
     db.add(admin)
     db.commit()
     db.refresh(admin)
-    r = client.delete(f"/api/users/{admin.id}", headers=auth_headers)
+    with patch("routers.auth._count_active_admins", return_value=1):
+        r = client.delete(f"/api/users/{admin.id}", headers=auth_headers)
     assert r.status_code == 400
     assert r.json()["error"]["code"] == "LAST_ADMIN"
 

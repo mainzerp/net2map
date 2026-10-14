@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -187,8 +188,9 @@ class Credential(Base):
 
     id          = Column(Integer, primary_key=True, index=True)
     label       = Column(String, nullable=False)          # friendly name
-    ip          = Column(String, nullable=False, index=True)
-    priority    = Column(Integer, default=0)               # lower = tried first
+    # No single-column index: uq_credential_ip_priority (ip first) serves ip lookups.
+    ip          = Column(String, nullable=False)
+    priority    = Column(Integer, default=0, nullable=False)  # lower = tried first
     snmp_port   = Column(Integer, default=161)
     enabled     = Column(Boolean, default=True)
     # False registers a ping-only host: the scan never tries SNMP for this IP.
@@ -220,7 +222,7 @@ class Credential(Base):
     engine_id_seen_at    = Column(DateTime, nullable=True)
 
     # Optional reference to a shared profile (overrides per-device SNMP fields when set)
-    profile_id = Column(Integer, ForeignKey("snmp_profiles.id"), nullable=True)
+    profile_id = Column(Integer, ForeignKey("snmp_profiles.id", ondelete="SET NULL"), nullable=True)
     profile    = relationship("SnmpProfile", back_populates="credentials")
 
     # FK link to the discovered Device
@@ -231,10 +233,13 @@ class Credential(Base):
 class Device(Base):
     """Discovered switch / router node."""
     __tablename__ = "devices"
+    # As created by the migrations: unique constraint devices_ip_key plus a
+    # plain index ix_devices_ip (not a unique index).
+    __table_args__ = (Index("ix_devices_ip", "ip"),)
 
     id           = Column(Integer, primary_key=True, index=True)
     sys_name     = Column(String, index=True)             # SNMP sysName
-    ip           = Column(String, nullable=False, unique=True, index=True)
+    ip           = Column(String, nullable=False, unique=True)
     sys_descr    = Column(Text, default="")
     model        = Column(String, default="")
     firmware     = Column(String, default="", server_default="")  # entPhysicalSoftwareRev / parsed from sysDescr
@@ -254,9 +259,9 @@ class Device(Base):
     latency_monitored = Column(Boolean, default=False, nullable=False, server_default="false")
 
     # Optional assignment to a managed rack and switch class
-    rack_id      = Column(Integer, ForeignKey("racks.id"), nullable=True)
-    class_id     = Column(Integer, ForeignKey("switch_classes.id"), nullable=True)
-    model_id     = Column(Integer, ForeignKey("switch_models.id"), nullable=True)
+    rack_id      = Column(Integer, ForeignKey("racks.id", ondelete="SET NULL"), nullable=True)
+    class_id     = Column(Integer, ForeignKey("switch_classes.id", ondelete="SET NULL"), nullable=True)
+    model_id     = Column(Integer, ForeignKey("switch_models.id", ondelete="SET NULL"), nullable=True)
     # Floor of an unracked device; a racked device inherits its rack's floor
     floor_id     = Column(Integer, ForeignKey("floors.id", ondelete="SET NULL"), nullable=True, index=True)
 
@@ -273,7 +278,7 @@ class Device(Base):
     ping_only    = Column(Boolean, nullable=False, default=False, server_default="false")
 
     # Consolidation fields (metadata now lives here, not on Credential)
-    label        = Column(String, default="")
+    label        = Column(String, default="", nullable=False)
     enabled      = Column(Boolean, default=True, nullable=False)
 
     # Spanning tree summary (BRIDGE-MIB / RSTP-MIB default instance); NULL
@@ -303,7 +308,9 @@ class Device(Base):
     health            = Column(JSONB, nullable=True)
     health_updated_at = Column(DateTime, nullable=True)
 
-    ports        = relationship("Port", back_populates="device", cascade="all, delete-orphan", lazy="selectin")
+    ports        = relationship(
+        "Port", back_populates="device", cascade="all, delete-orphan", lazy="selectin", passive_deletes=True,
+    )
     rack         = relationship("Rack", back_populates="devices", lazy="joined")
     switch_class = relationship("SwitchClass", back_populates="devices", lazy="joined")
     switch_model = relationship("SwitchModel", back_populates="devices", lazy="joined")
@@ -315,7 +322,7 @@ class Port(Base):
     __tablename__ = "ports"
 
     id           = Column(Integer, primary_key=True, index=True)
-    device_id    = Column(Integer, ForeignKey("devices.id"), nullable=False, index=True)
+    device_id    = Column(Integer, ForeignKey("devices.id", ondelete="CASCADE"), nullable=False, index=True)
     if_index     = Column(Integer, nullable=False)
     if_descr     = Column(String, default="")
     if_alias     = Column(String, default="")
@@ -338,9 +345,12 @@ class Port(Base):
 class Endpoint(Base):
     """Discovered endpoint device (MAC/IP found on a switch port)."""
     __tablename__ = "endpoints"
+    # As created by migration 013: unique constraint endpoints_mac_key plus a
+    # plain index ix_endpoints_mac; no extra index on the primary key.
+    __table_args__ = (Index("ix_endpoints_mac", "mac"),)
 
-    id         = Column(Integer, primary_key=True, index=True)
-    mac        = Column(String, nullable=False, unique=True, index=True)
+    id         = Column(Integer, primary_key=True)
+    mac        = Column(String, nullable=False, unique=True)
     ip         = Column(String, nullable=True, index=True)
     hostname   = Column(String, nullable=True)
     first_seen = Column(DateTime, server_default=func.now())
@@ -359,11 +369,14 @@ class EndpointPortAssociation(Base):
     __tablename__ = "endpoint_port_associations"
     __table_args__ = (
         UniqueConstraint("endpoint_id", "port_id", name="uq_epa_endpoint_port"),
+        # Index names as created by migration 013.
+        Index("ix_epa_endpoint_id", "endpoint_id"),
+        Index("ix_epa_port_id", "port_id"),
     )
 
-    id          = Column(Integer, primary_key=True, index=True)
-    endpoint_id = Column(Integer, ForeignKey("endpoints.id", ondelete="CASCADE"), nullable=False, index=True)
-    port_id     = Column(Integer, ForeignKey("ports.id", ondelete="CASCADE"), nullable=False, index=True)
+    id          = Column(Integer, primary_key=True)
+    endpoint_id = Column(Integer, ForeignKey("endpoints.id", ondelete="CASCADE"), nullable=False)
+    port_id     = Column(Integer, ForeignKey("ports.id", ondelete="CASCADE"), nullable=False)
     vlan_id     = Column(Integer, nullable=True)
     last_seen   = Column(DateTime, server_default=func.now())
 
@@ -403,6 +416,9 @@ class User(Base):
     hashed_pw  = Column(String, nullable=False)
     role       = Column(String, default="viewer")  # "admin" | "operator" | "viewer"
     is_active  = Column(Boolean, default=True)
+    # DB-backed session revocation (migration 029): every token issued at or
+    # before this unix time in milliseconds is invalid (0 = never revoked).
+    revoked_before_ms = Column(BigInteger, nullable=False, default=0, server_default="0")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -441,6 +457,7 @@ class ScanRun(Base):
         "ScanRunSwitchMetric",
         back_populates="scan_run",
         cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
 
@@ -449,7 +466,7 @@ class ScanRunSwitchMetric(Base):
     __tablename__ = "scan_run_switch_metrics"
 
     id           = Column(Integer, primary_key=True, index=True)
-    scan_run_id  = Column(Integer, ForeignKey("scan_runs.id"), nullable=False, index=True)
+    scan_run_id  = Column(Integer, ForeignKey("scan_runs.id", ondelete="CASCADE"), nullable=False, index=True)
     ip           = Column(String, default="")
     label        = Column(String, default="")
     duration_ms  = Column(Integer, default=0)
@@ -533,6 +550,7 @@ def _seed_default_settings():
             ("scan_snmp_timeout", "3"),
             ("scan_snmp_retries", "1"),
             ("scan_snmp_bulk_size", "25"),
+            ("endpoint_retention_days", "30"),
             ("dns_servers", "[]"),
             ("map_opacity", "0.3"),
             ("map_scale", "1.0"),

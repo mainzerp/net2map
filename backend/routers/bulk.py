@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 from database import Credential, Device, SnmpProfile, get_db
 from schemas import (
     MASK_EXPORT,
-    MASK_SENTINELS,
     BulkExportOut,
     BulkImportError,
     BulkImportRequest,
@@ -25,6 +24,7 @@ from shared.audit import log_audit
 from shared.auth import require_role
 from shared.crypto import encrypt
 from shared.errors import api_error
+from shared.secrets import SECRET_FIELDS, masked_secret_fields
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
@@ -246,8 +246,6 @@ def bulk_import(kind: str, body: BulkImportRequest, request: Request, db: Sessio
     inserted = 0
     updated = 0
 
-    _MASKED_SECRET_FIELDS = ("v3_auth_password", "v3_priv_password", "community")
-
     if not body.dry_run:
         if kind == "credentials":
             # Reference maps for resolving exported FK labels/ips; raw ids in
@@ -257,8 +255,8 @@ def bulk_import(kind: str, body: BulkImportRequest, request: Request, db: Sessio
             for payload in valid_rows:
                 profile_label = payload.pop("profile_label", None)
                 device_ip = payload.pop("device_ip", None)
-                masked_fields = {f for f in _MASKED_SECRET_FIELDS if payload.get(f) in MASK_SENTINELS}
-                for pwd_field in _MASKED_SECRET_FIELDS:
+                masked_fields = masked_secret_fields(payload)
+                for pwd_field in SECRET_FIELDS:
                     if payload.get(pwd_field) and pwd_field not in masked_fields:
                         payload[pwd_field] = encrypt(payload[pwd_field])
                 if profile_label is not None and str(profile_label).strip():
@@ -288,8 +286,8 @@ def bulk_import(kind: str, body: BulkImportRequest, request: Request, db: Sessio
                     inserted += 1
         else:
             for payload in valid_rows:
-                masked_fields = {f for f in _MASKED_SECRET_FIELDS if payload.get(f) in MASK_SENTINELS}
-                for pwd_field in _MASKED_SECRET_FIELDS:
+                masked_fields = masked_secret_fields(payload)
+                for pwd_field in SECRET_FIELDS:
                     if payload.get(pwd_field) and pwd_field not in masked_fields:
                         payload[pwd_field] = encrypt(payload[pwd_field])
                 existing = db.query(SnmpProfile).filter(SnmpProfile.label == payload["label"]).first()
@@ -304,16 +302,15 @@ def bulk_import(kind: str, body: BulkImportRequest, request: Request, db: Sessio
                         payload[field] = ""
                     db.add(SnmpProfile(**payload))
                     inserted += 1
+        # Written in the import transaction: no import without its audit record.
+        log_audit(request, "import", f"bulk_{kind}", "", {
+            "inserted": inserted, "updated": updated, "total_rows": len(parsed_rows),
+        }, db=db, strict=True)
         try:
             db.commit()
         except IntegrityError:
             db.rollback()
             api_error(400, "IMPORT_INTEGRITY", "Import violated a database constraint (e.g. duplicate or dangling reference)")
-
-    if not body.dry_run:
-        log_audit(request, "import", f"bulk_{kind}", "", {
-            "inserted": inserted, "updated": updated, "total_rows": len(parsed_rows),
-        })
 
     return BulkImportResult(
         type=kind,

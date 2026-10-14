@@ -8,8 +8,33 @@ in routers/ws.py) that forwards channel messages to its local connections.
 Without Redis, updates are delivered in-process exactly as before.
 """
 import json
+import logging
+from concurrent.futures import ThreadPoolExecutor
 
 SCAN_UPDATES_CHANNEL = "net2map:scan_updates"
+
+_log = logging.getLogger(__name__)
+
+# Single worker: broadcasts submitted from the scan event loop are delivered
+# off the loop (redis-py publish is a blocking round trip) but keep their
+# submission order, so progress updates never arrive after scan_complete.
+_BROADCAST_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="net2map-broadcast")
+
+
+def broadcast_nowait(func, *args) -> None:
+    """Run a broadcast helper on the broadcast thread (fire-and-forget, ordered).
+
+    Safe to call from the asyncio scan loop: it never blocks on Redis. Falls
+    back to a synchronous call when the executor is shut down (interpreter
+    exit).
+    """
+    try:
+        _BROADCAST_EXECUTOR.submit(func, *args)
+    except RuntimeError:
+        try:
+            func(*args)
+        except Exception as exc:
+            _log.debug("broadcast failed: %s", exc)
 
 
 def _broadcast(payload: dict) -> None:

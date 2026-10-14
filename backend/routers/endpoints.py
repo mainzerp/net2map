@@ -1,11 +1,12 @@
 """CRUD endpoints for discovered endpoint devices."""
 import hashlib
 import json
+from typing import Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
 from sqlalchemy import case, func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from database import Endpoint, EndpointPortAssociation, Port, get_db
 from schemas import BulkEndpointUpdate, EndpointOut, EndpointPortInfo, EndpointUpdate
@@ -44,12 +45,14 @@ def _build_endpoint_out(ep: Endpoint) -> EndpointOut:
     )
 
 
-def _endpoint_list_etag(db: Session) -> str:
+def _endpoint_list_etag(db: Session, page: str = "") -> tuple[str, int]:
     """Cheap change indicator for the endpoint list without materializing rows.
 
     Covers endpoint inserts/deletes, scan sightings (last_seen), ignored/notes
     edits, and port-association changes. Does not detect renames of linked
-    ports/devices; those are rare and covered by the next scan.
+    ports/devices; those are rare and covered by the next scan. ``page``
+    (the limit/offset window) is part of the tag so every page validates
+    independently. Returns (etag, total endpoint count).
     """
     ep_count, ep_max_id, ep_max_seen, ep_ignored, ep_notes_len = db.query(
         func.count(Endpoint.id),
@@ -65,30 +68,47 @@ def _endpoint_list_etag(db: Session) -> str:
     ).one()
     raw = (
         f"{ep_count}:{ep_max_id}:{ep_max_seen}:{ep_ignored}:{ep_notes_len}"
-        f":{as_count}:{as_max_id}:{as_max_seen}"
+        f":{as_count}:{as_max_id}:{as_max_seen}:{page}"
     )
-    return f'"{hashlib.sha256(raw.encode()).hexdigest()[:32]}"'
+    return f'"{hashlib.sha256(raw.encode()).hexdigest()[:32]}"', int(ep_count or 0)
 
 
 @router.get("/endpoints")
-def list_endpoints(request: Request, db: Session = Depends(get_db)):
-    etag = _endpoint_list_etag(db)
+def list_endpoints(
+    request: Request,
+    limit: Optional[int] = Query(None, ge=1, le=10000),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """List endpoints ordered by MAC.
+
+    Without ``limit`` the full list is returned (backward compatible). With
+    ``limit``/``offset`` one page is returned and ``X-Total-Count`` carries
+    the total number of endpoints.
+    """
+    paginated = limit is not None or offset > 0
+    etag, total = _endpoint_list_etag(db, f"{limit}:{offset}" if paginated else "")
+    headers = {"ETag": etag, "Cache-Control": "no-cache"}
+    if paginated:
+        headers["X-Total-Count"] = str(total)
     if request.headers.get("if-none-match") == etag:
-        return Response(status_code=304)
-    endpoints = (
+        return Response(status_code=304, headers=headers)
+    query = (
         db.query(Endpoint)
         .options(
-            joinedload(Endpoint.port_associations)
+            selectinload(Endpoint.port_associations)
             .joinedload(EndpointPortAssociation.port)
             .joinedload(Port.device)
         )
-        .order_by(Endpoint.mac)
-        .all()
+        .order_by(Endpoint.mac, Endpoint.id)
     )
-    result = [_build_endpoint_out(ep) for ep in endpoints]
+    if offset:
+        query = query.offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
+    result = [_build_endpoint_out(ep) for ep in query.all()]
     body = json.dumps([e.model_dump() for e in result], default=str)
-    return Response(content=body, media_type="application/json",
-                    headers={"ETag": etag, "Cache-Control": "no-cache"})
+    return Response(content=body, media_type="application/json", headers=headers)
 
 
 @router.get("/endpoints/{endpoint_id}")
