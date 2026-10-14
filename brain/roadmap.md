@@ -18,7 +18,7 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
-- Code review hardening (unreleased, MAJOR v4.0.0, migration 029) · priority: P1 · area: full-stack
+- Code review hardening (released v4.0.0, migration 029) · priority: P1 · area: full-stack
   Fixes from the 2026-10-14 review: mandatory secrets, DB-backed revocation, refresh
   rotation, FK SET NULL, endpoint retention, scan loop off sync Redis/DB, LLDP ifIndex
   mapping, MAC decoding, scheduler/queue fixes, backup/restore, nginx, CI migration job,
@@ -30,7 +30,7 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
   credentials still decrypt after upgrade, scan with LLDP neighbours shows correct
   local ports, map height on mobile, Settings > Scan endpoint retention saves.
 
-- Adopt ping-only devices from endpoints and discovery candidates (unreleased, migration 028) · priority: P2 · area: full-stack
+- Adopt ping-only devices from endpoints and discovery candidates (released v4.0.0, migration 028) · priority: P2 · area: full-stack
   `POST /credentials/ping-only` (bulk, creates credential + device at once); scan
   records range hosts with ping ok / SNMP failed in `ping_candidates`; endpoint
   inspector button, endpoint table bulk action, candidate list in Settings >
@@ -40,23 +40,23 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
   User to verify: local build, adopt an endpoint, set a discovery range, scan,
   candidates appear, adopt/dismiss/restore.
 
-- Ping-only devices via credential flag (unreleased, migration 027) · priority: P2 · area: full-stack
+- Ping-only devices via credential flag (released v4.0.0, migration 027) · priority: P2 · area: full-stack
   `credentials.snmp_enabled=false` -> scan only pings, creates a `ping_only` device
   (type `other`) even if unreachable; SNMP credential on the same IP wins.
   Passed: ruff, 882 backend tests, typecheck, 332 frontend tests.
   Open: "other" devices in a rack still get the port faceplate, not a plain plate.
   User to verify: local build, add a ping-only credential, scan, device appears with
   badge, rack/latency work.
-- Rack front/rear side by side and full-depth (unreleased, migration 027) · priority: P2 · area: full-stack
+- Rack front/rear side by side and full-depth (released v4.0.0, migration 027) · priority: P2 · area: full-stack
   `rack_side` + `full_depth` on devices and rack items; shared rule in
   `backend/shared/rack_space.py`; `/meta` and `bulk-meta` now 409 on overlap.
   Open: bulk "assign to rack" keeps old U positions and may now 409; rack body
   narrowed to 440px; hatch styling not checked in a browser.
   User to verify: /racks, drag devices to Rear, toggle full depth, conflicts refused.
-- Rack item palette with drag and drop (unreleased) · priority: P2 · area: frontend
+- Rack item palette with drag and drop (released v4.0.0) · priority: P2 · area: frontend
   Palette above the tray replaces "+ Add item"; existing items draggable.
   User to verify: drag several patch panels into a rack, move one, click opens dialog.
-- Rename Switches -> Devices, searchable assign picker (unreleased) · priority: P2 · area: frontend
+- Rename Switches -> Devices, searchable assign picker (released v4.0.0) · priority: P2 · area: frontend
   Settings tab "Network Devices"; `Combobox` primitive + `utils/deviceSearch.ts`.
   User to verify: Settings > Racks, type part of an IP, assign several in a row.
 

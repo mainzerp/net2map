@@ -1,10 +1,11 @@
 # Version History
 
-## Unreleased -- Ping-only devices, rack rear view, security hardening
+## v4.0.0 -- Ping-only devices, rack rear view, security hardening
 
-**Type:** MAJOR (planned v4.0.0, not tagged; breaking configuration changes, see
-below). Migration 027 adds `credentials.snmp_enabled`, `devices.ping_only`, and
-`rack_side` / `full_depth` on devices and rack items (defaults: SNMP on, front, not
+**Type:** MAJOR (breaking configuration changes, see below). Commits: 5ca45b8
+(ping-only devices, two-sided racks, item palette), d403cb1 (backend hardening),
+5772ade (frontend), 0383db9 (CI, backup, nginx), 5d68128 (docs). Migration 027
+adds `credentials.snmp_enabled`, `devices.ping_only`, and `rack_side` / `full_depth` on devices and rack items (defaults: SNMP on, front, not
 full depth); migration 028 adds the `ping_candidates` table; migration 029 changes
 `devices.rack_id`, `devices.class_id`, `devices.model_id` and
 `credentials.profile_id` from `ON DELETE CASCADE` (since 003) to `ON DELETE SET
