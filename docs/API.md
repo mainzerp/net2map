@@ -63,18 +63,9 @@ excluded (`include_in_schema=False`).
 
 ### Modes
 
-Authentication is configured by two environment variables (see
-`docs/OPERATIONS.md`). The JWT signing key is `JWT_SECRET or SECRET_TOKEN`
-(`shared/auth.py`).
-
-| `JWT_SECRET` | `SECRET_TOKEN` | Behaviour |
-|---|---|---|
-| set | any | JWT mode. Only JWTs signed with `JWT_SECRET` are accepted. A set `SECRET_TOKEN` is ignored (warning logged). |
-| empty | set | Legacy mode. The raw `SECRET_TOKEN` value is accepted as a bearer token and maps to user `legacy` with role `admin`. Login still works and issues JWTs signed with `SECRET_TOKEN`. |
-| empty | empty | Auth disabled. Every request runs as `anonymous` with role `admin`. A critical warning is logged at startup. |
-
-Note: `docker-compose.yml` requires `SECRET_TOKEN` and defaults `JWT_SECRET` to
-empty, so a stock compose deployment without `JWT_SECRET` runs in legacy mode.
+JWT mode only. `JWT_SECRET` is required (the backend refuses to start without it,
+see `docs/OPERATIONS.md`); only JWTs signed with it are accepted. The legacy
+static `SECRET_TOKEN` bearer and the auth-disabled mode were removed in v4.0.0.
 
 ### Transport
 
@@ -87,21 +78,30 @@ empty, so a stock compose deployment without `JWT_SECRET` runs in legacy mode.
   `/floors/{floor_id}/background` (per-floor background images loaded via `<img>`;
   `POST`/`DELETE` on that path are not exempt). On exempt paths a
   presented valid token is still honored ("soft auth"), so role-guarded methods on
-  those paths (upload/delete of the map background) still require a token.
-- `/metrics` is NOT exempt: with auth enabled it requires a bearer token.
+  those paths (upload/delete of the map background, `/health?deep=1`) still
+  require a token.
+- `/metrics` is NOT exempt: it requires a bearer token.
 
 ### Tokens
 
-- Algorithm HS256. Claims: `sub` (user id), `username`, `role`, `jti`, `iat`, `exp`.
+- Algorithm HS256. Claims: `sub` (user id), `username`, `role`, `jti`, `iat`,
+  `iat_ms` (issue time in ms), `auth_time` (original login, carried over by
+  refresh), `exp`.
 - Lifetime: `JWT_EXPIRY_HOURS` (default 24).
 - Refresh grace: a token may be refreshed up to 3600 s after `exp`
   (`REFRESH_GRACE_SECONDS`).
-- Revocation (requires Redis): per-token blacklist keyed by `jti` (logout) and a
-  per-user "revoke all before timestamp" key (admin revoke, password change, role
-  change, deactivation, deletion). If `REDIS_URL` is configured but Redis is
-  unreachable, token validation fails with `503 AUTH_UNAVAILABLE`. Without
-  `REDIS_URL`, revocation checks are skipped, and operations that must revoke
-  sessions return `503` instead of pretending success.
+- Absolute session lifetime: `JWT_MAX_SESSION_HOURS` (default 168) after
+  `auth_time`; then refresh fails with `401 AUTH_SESSION_EXPIRED`.
+- Per-user revocation (database, migration 029): `users.revoked_before_ms` is set
+  on admin revoke-all, password change, role change, deactivation and on logout
+  without Redis; tokens issued at or before it are rejected (`401 AUTH_REVOKED`).
+  Deleted or inactive users' tokens are always rejected. Works without Redis;
+  other processes see the change within 5 s (per-process cache).
+- Per-token revocation (Redis): blacklist keyed by `jti` (logout, refresh
+  rotation). If `REDIS_URL` is configured but Redis is unreachable, token
+  validation fails with `503 AUTH_UNAVAILABLE`.
+- Passwords: 8 characters to 72 bytes. Longer new passwords -> `422`; at login
+  they fail like a wrong password (login fields above 1024 characters -> `422`).
 
 ### Login and refresh flow
 
@@ -112,8 +112,15 @@ empty, so a stock compose deployment without `JWT_SECRET` runs in legacy mode.
 2. Send `Authorization: Bearer <access_token>` on every request.
 3. Before or shortly after expiry, `POST /api/v1/auth/refresh` with the current token
    in the `Authorization` header -> new `TokenResponse`. Rate limit 10/minute. The
-   user must still exist and be active (`401 AUTH_USER_INACTIVE` otherwise).
-4. `POST /api/v1/auth/logout` blacklists the current token's `jti`.
+   user must still exist and be active (`401 AUTH_USER_INACTIVE` otherwise). The
+   consumed token is blacklisted when Redis is available (a second refresh with it
+   -> `401 AUTH_REVOKED`); `auth_time` is kept, so the chain ends after
+   `JWT_MAX_SESSION_HOURS` (`401 AUTH_SESSION_EXPIRED`).
+4. `POST /api/v1/auth/logout` blacklists the current token's `jti` ->
+   `{"status": "ok"}`. Without Redis (or when the blacklist write fails) it revokes
+   all sessions of the user -> `{"status": "ok", "revoked": "all_sessions"}`
+   (`"revoked": "none"` for a deleted user). `503 AUTH_UNAVAILABLE` only when
+   neither revocation can be recorded.
 
 The initial `admin` user is created by Alembic migration 006 with the password from
 `DEFAULT_ADMIN_PASSWORD` (only used at that first migration; changing the variable
@@ -153,13 +160,13 @@ Ticket flow (preferred, needs Redis):
    Without Redis: `503 REDIS_UNAVAILABLE`.
 2. Connect to `/ws/scan-progress?token=<ticket>`. The ticket is consumed atomically
    (Redis `GETDEL`, Redis >= 6.2), so it is single-use.
-3. Fallback: `token=<raw JWT>` (or the legacy `SECRET_TOKEN`) is also accepted, with
+3. Fallback: `token=<raw JWT>` is also accepted, with
    the same blacklist and revocation checks as HTTP.
 
 After connect, the originating credential is rechecked every 5 s
 (`AUTH_RECHECK_SECONDS`), also without client traffic. Close codes: `1008` for
 missing/invalid/expired/revoked credentials, `1011` when the auth service (Redis)
-is unavailable or times out (5 s). With auth disabled no token is needed.
+is unavailable or times out (5 s).
 
 Server-to-client messages (JSON, `backend/scan_engine/broadcast.py`):
 
@@ -184,7 +191,7 @@ handlers in `main.py` to the `APIError` shape:
 - Unhandled exceptions become `500` with code `INTERNAL_ERROR`.
 - Common auth codes: `AUTH_MISSING`, `AUTH_INVALID`, `AUTH_EXPIRED`, `AUTH_REVOKED`,
   `AUTH_REQUIRED`, `AUTH_FORBIDDEN` (403), `AUTH_UNAVAILABLE` (503),
-  `AUTH_INVALID_CREDENTIALS`, `AUTH_USER_INACTIVE`. 401 responses carry
+  `AUTH_INVALID_CREDENTIALS`, `AUTH_USER_INACTIVE`, `AUTH_SESSION_EXPIRED`. 401 responses carry
   `WWW-Authenticate: Bearer`.
 
 Exceptions to the shape (not normalized by a custom handler):
@@ -342,14 +349,14 @@ Component health for container healthchecks and monitoring.
 
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
-| GET | `/health` (no prefix) | public | Liveness: database (`SELECT 1`) and Redis ping. `200` when both are OK (Redis may be `not_configured`), `503` otherwise. Does not ping Celery, so a missing worker never marks the backend container unhealthy. Used by the compose healthcheck. | `{"status": "ok"\|"degraded", "checks": {database, redis}}` |
-| GET | `/health?deep=1` (no prefix) | public | Readiness: as above plus a Celery worker ping (timeout 2 s). `503` also when no worker answers (`none`) or the broker is unreachable (`unreachable`) while Redis is configured. | `{"status", "checks": {database, redis, celery}, "workers": "ok"\|"none"\|"unreachable"\|"not_configured"}` |
+| GET | `/health` (no prefix) | public | Liveness: database (`SELECT 1`) and Redis ping. `200` when both are OK (Redis may be `not_configured`), `503` otherwise; a failed check reports `"error"` (exception only in the log). Does not ping Celery, so a missing worker never marks the backend container unhealthy. Used by the compose healthcheck. | `{"status": "ok"\|"degraded", "checks": {database, redis}}` |
+| GET | `/health?deep=1` (no prefix) | any (bearer required, else `401 AUTH_REQUIRED`) | Readiness: as above plus a Celery worker ping (timeout 2 s). `503` also when no worker answers (`none`) or the broker is unreachable (`unreachable`) while Redis is configured. | `{"status", "checks": {database, redis, celery}, "workers": "ok"\|"none"\|"unreachable"\|"not_configured"}` |
 
 ### metrics (`main.py`) -- unversioned
 
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
-| GET | `/metrics` (no prefix) | any (bearer required when auth is enabled) | Prometheus exposition format. | text |
+| GET | `/metrics` (no prefix) | any | Prometheus exposition format. | text |
 
 ### ws (`routers/ws.py`) -- unversioned
 
@@ -364,7 +371,7 @@ Generic key/value app settings and dashboard statistics.
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
 | GET | `/settings` | any | List all app settings. | `AppSettingOut[]` |
-| PUT | `/settings/{key}` | op+ | Upsert one setting. Only allowlisted keys (`ALLOWED_SETTING_KEYS`: discovery/link/mac/port/vlan/stp intervals, `discovery_scan_ranges`, `scan_max_workers`, `scan_snmp_timeout`, `scan_snmp_retries`, `scan_snmp_bulk_size`, `dns_servers`, `map_opacity`, `map_scale`, `map_bg_color`, `audit_retention_days`, and the latency keys `latency_enabled` (`true`/`false`), `latency_interval_sec` (5-300), `latency_pings` (1-10), `latency_mode` (`all`/`selected`), `latency_retention_days` (1-365)); others -> `400 UNKNOWN_SETTING_KEY`. Latency keys are validated and normalized; invalid values -> `400 INVALID_SETTING_VALUE`. 10/min. | `AppSettingUpdate` -> `AppSettingOut` |
+| PUT | `/settings/{key}` | op+ | Upsert one setting. Only allowlisted keys (`ALLOWED_SETTING_KEYS`: discovery/link/mac/port/vlan/stp intervals, `discovery_scan_ranges`, `scan_max_workers`, `scan_snmp_timeout`, `scan_snmp_retries`, `scan_snmp_bulk_size`, `dns_servers`, `map_opacity`, `map_scale`, `map_bg_color`, `audit_retention_days`, `endpoint_retention_days` (integer 0-3650), and the latency keys `latency_enabled` (`true`/`false`), `latency_interval_sec` (5-300), `latency_pings` (1-10), `latency_mode` (`all`/`selected`), `latency_retention_days` (1-365)); others -> `400 UNKNOWN_SETTING_KEY`. Latency keys and `endpoint_retention_days` are validated and normalized; invalid values -> `400 INVALID_SETTING_VALUE`. 10/min. | `AppSettingUpdate` -> `AppSettingOut` |
 | PUT | `/settings` | op+ | Atomic multi-key update: JSON object `{key: value}` (string values). Every key and value is validated first with the same rules as `PUT /settings/{key}` (`400 UNKNOWN_SETTING_KEY` / `400 INVALID_SETTING_VALUE`, `field` = offending key; empty object -> `400 EMPTY_SETTINGS`); nothing is written unless all are valid. One audit entry (`details.keys`). Shares the 10/min limit; one call counts once. | `{key: value}` -> `AppSettingOut[]` (all settings, like GET) |
 | GET | `/stats` | any | Counts (devices, ports, ports up, racks, endpoints) and last scan time/status. | ad-hoc object |
 
@@ -375,7 +382,7 @@ SNMP credentials (per IP or device, with priority and optional profile).
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
 | GET | `/credentials` | any | List credentials (secrets masked). | `CredentialOut[]` |
-| POST | `/credentials` | op+ | Create credential; secrets encrypted with `ENCRYPTION_KEY` when set. Optional `snmp_enabled` (default true; false = ping-only host). | `CredentialCreate` -> `CredentialOut` (201) |
+| POST | `/credentials` | op+ | Create credential; secrets encrypted with `ENCRYPTION_KEY`. Optional `snmp_enabled` (default true; false = ping-only host). | `CredentialCreate` -> `CredentialOut` (201) |
 | PUT | `/credentials/{cred_id}` | op+ | Update; mask sentinels mean "unchanged". `snmp_enabled` optional (explicit null leaves it unchanged). | `CredentialUpdate` -> `CredentialOut` |
 | DELETE | `/credentials/{cred_id}` | admin | Delete. | 204 |
 | POST | `/credentials/ping-only` | op+ | Bulk-register ping-only hosts (see [Rack occupancy and ping-only devices](#rack-occupancy-and-ping-only-devices)). Body `{"entries": [{"ip", "label"?}]}`, max 500 entries (more -> 422). Each IP is validated like `CredentialCreate.ip`; skipped with reason `invalid` (bad IP), `exists` (any credential with that IP, enabled or not) or `duplicate` (repeat within the batch). 10/min. | -> `{"created": [{"ip", "credential_id", "device_id"}], "skipped": [{"ip", "reason"}]}` (200) |
@@ -389,7 +396,7 @@ Reusable SNMP parameter sets (v2c community or v3 USM settings).
 | GET | `/snmp-profiles` | any | List profiles (secrets masked). | `SnmpProfileOut[]` |
 | POST | `/snmp-profiles` | op+ | Create. | `SnmpProfileCreate` -> `SnmpProfileOut` (201) |
 | PUT | `/snmp-profiles/{profile_id}` | op+ | Update; mask sentinels mean "unchanged". | `SnmpProfileUpdate` -> `SnmpProfileOut` |
-| DELETE | `/snmp-profiles/{profile_id}` | admin | Delete. | 204 |
+| DELETE | `/snmp-profiles/{profile_id}` | admin | Delete; referencing credentials get `profile_id` null. | 204 |
 
 ### racks (`routers/racks.py`)
 
@@ -469,7 +476,7 @@ Device classes (e.g. core/access) used for map styling and rack rules
 | GET | `/switch-classes` | any | List. | `SwitchClassOut[]` |
 | POST | `/switch-classes` | op+ | Create. | `SwitchClassCreate` -> `SwitchClassOut` (201) |
 | PUT | `/switch-classes/{class_id}` | op+ | Update. | `SwitchClassUpdate` -> `SwitchClassOut` |
-| DELETE | `/switch-classes/{class_id}` | admin | Delete. | 204 |
+| DELETE | `/switch-classes/{class_id}` | admin | Delete; devices get `class_id` null. | 204 |
 
 ### switch_models (`routers/switch_models.py`)
 
@@ -480,7 +487,7 @@ Hardware models; provide `ports_per_row` and `total_ports` for port rendering.
 | GET | `/switch-models` | any | List. | `SwitchModelOut[]` |
 | POST | `/switch-models` | op+ | Create. | `SwitchModelCreate` -> `SwitchModelOut` (201) |
 | PUT | `/switch-models/{model_id}` | op+ | Update. | `SwitchModelUpdate` -> `SwitchModelOut` |
-| DELETE | `/switch-models/{model_id}` | admin | Delete. | 204 |
+| DELETE | `/switch-models/{model_id}` | admin | Delete; devices get `model_id` null. | 204 |
 
 ### scan (`routers/scan.py`)
 
@@ -547,8 +554,8 @@ Scan tuning, discovery ranges and DNS resolvers.
 
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
-| GET | `/scan-settings` | any | Current values. | `ScanSettingsOut` `{max_workers, snmp_timeout, snmp_retries, snmp_bulk_size}` |
-| PUT | `/scan-settings` | op+ | Update (clamped: workers 1..128, timeout 1..30, retries 0..10, bulk size 5..100 = GETBULK rows per request, default 25). | `ScanSettingsUpdate` -> `ScanSettingsOut` |
+| GET | `/scan-settings` | any | Current values. | `ScanSettingsOut` `{max_workers, snmp_timeout, snmp_retries, snmp_bulk_size, endpoint_retention_days}` |
+| PUT | `/scan-settings` | op+ | Update (clamped: workers 1..128, timeout 1..30, retries 0..10, bulk size 5..100 = GETBULK rows per request, default 25; `endpoint_retention_days` 0..3650, default 30, 0 disables). After a successful full scan, endpoints whose `last_seen` is older than `endpoint_retention_days` are deleted; ignored endpoints and endpoints with notes are kept. | `ScanSettingsUpdate` -> `ScanSettingsOut` |
 | GET | `/discovery-ranges` | any | IP/CIDR ranges for discovery. | `DiscoveryRangesOut` `{ranges}` |
 | PUT | `/discovery-ranges` | op+ | Replace ranges (`400 INVALID_IP_RANGE` on bad entries). | `DiscoveryRangesUpdate` -> `DiscoveryRangesOut` |
 | GET | `/dns-settings` | any | DNS servers for PTR lookups. | `DnsSettingsOut` `{servers}` |
@@ -563,7 +570,7 @@ empty value on import means `true` (older exports stay SNMP credentials).
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
 | GET | `/bulk-export/{kind}?fmt=json\|csv` | op+ | Export with secrets masked (`********`). | `BulkExportOut` `{type, format, data}` |
-| POST | `/bulk-import/{kind}` | admin | Validate and import rows; `dry_run` defaults to `true`. | `BulkImportRequest` `{format, data, dry_run}` -> `BulkImportResult` |
+| POST | `/bulk-import/{kind}` | admin | Validate and import rows; `dry_run` defaults to `true`. `data` max 10 MB (`422`). | `BulkImportRequest` `{format, data, dry_run}` -> `BulkImportResult` |
 
 ### config (`routers/config.py`)
 
@@ -574,7 +581,7 @@ items and device placement are not part of this export.
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
 | GET | `/config/export` | op+ | JSON string with `version`, `exported_at`, `settings`, `profiles`, `credentials` (secrets masked; FK references also as `profile_label` / `device_ip`). 10/min. | `GlobalConfigExportOut` `{data}` |
-| POST | `/config/import` | admin | Validate and import an export payload; `dry_run` defaults to `true`. | `GlobalConfigImportRequest` `{data, dry_run}` -> result object (no `response_model`) |
+| POST | `/config/import` | admin | Validate and import an export payload; `dry_run` defaults to `true`. `data` max 10 MB (`422`). | `GlobalConfigImportRequest` `{data, dry_run}` -> result object (no `response_model`) |
 
 ### logs (`routers/logs.py`)
 
@@ -591,19 +598,22 @@ Login, token lifecycle and user management.
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
 | POST | `/auth/login` | public | Username/password login. 5/min. | `LoginRequest` -> `TokenResponse` |
-| POST | `/auth/refresh` | public (needs current token in header) | Refresh a valid or up to 1 h expired token. 10/min. | -> `TokenResponse` |
+| POST | `/auth/refresh` | public (needs current token in header) | Refresh a valid or up to 1 h expired token; rotates (old `jti` blacklisted with Redis); `401 AUTH_SESSION_EXPIRED` after `JWT_MAX_SESSION_HOURS` since login. 10/min. | -> `TokenResponse` |
 | GET | `/auth/me` | any | Current user from the token. | `{id, username, role}` |
 | POST | `/auth/ws-ticket` | any | Issue a 30 s single-use WebSocket ticket (needs Redis). | -> `{ticket}` |
-| POST | `/auth/logout` | any | Blacklist the current token (`503` if Redis unavailable). | -> `{status: "ok"}` |
-| POST | `/auth/revoke-all` | admin | Revoke all sessions of `user_id` (body `{"user_id": n}`), or of the caller when omitted. | -> `{status, user_id}` |
+| POST | `/auth/logout` | any | Blacklist the current token; without Redis revoke all sessions of the user (see [Login and refresh flow](#login-and-refresh-flow)). | -> `{status: "ok"}` or `{status: "ok", revoked: "all_sessions"\|"none"}` |
+| POST | `/auth/revoke-all` | admin | Revoke all sessions of `user_id` (body `{"user_id": n}`), or of the caller when omitted. Unknown user -> `404 USER_NOT_FOUND`. | -> `{status, user_id}` |
 | GET | `/users` | admin | List users. | `UserOut[]` |
-| POST | `/users` | admin | Create user (password min 8 chars, default role `viewer`). 10/min. | `UserCreate` -> `UserOut` (201) |
-| PUT | `/users/{user_id}` | admin | Update email/password/role/is_active. Revokes sessions on password, role or deactivation change. Cannot demote/deactivate yourself or the last active admin (`CANNOT_MODIFY_SELF`, `LAST_ADMIN`). 10/min. | `UserUpdate` -> `UserOut` |
-| DELETE | `/users/{user_id}` | admin | Delete user (same lockout guards; revokes sessions first). 10/min. | 204 |
+| POST | `/users` | admin | Create user (password 8 chars to 72 bytes, default role `viewer`). 10/min. | `UserCreate` -> `UserOut` (201) |
+| PUT | `/users/{user_id}` | admin | Update email/password/role/is_active (same password rule). Revokes sessions on password, role or deactivation change (database, no Redis needed). Cannot demote/deactivate yourself or the last active admin (`CANNOT_MODIFY_SELF`, `LAST_ADMIN`). 10/min. | `UserUpdate` -> `UserOut` |
+| DELETE | `/users/{user_id}` | admin | Delete user (same lockout guards); the user's tokens are rejected afterwards. 10/min. | 204 |
 
 ### audit (`routers/audit.py`)
 
-Audit trail of write operations (`shared/audit.py`).
+Audit trail of write operations (`shared/audit.py`). User, credential and SNMP
+profile writes and config/bulk imports write their entry in the same transaction
+(strict mode): if the audit write fails, the request fails with `500` and nothing
+is changed. Other writes log audit failures and continue.
 
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
@@ -617,7 +627,7 @@ they were seen on.
 
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
-| GET | `/endpoints` | any | All endpoints ordered by MAC. ETag/304. | `EndpointOut[]` |
+| GET | `/endpoints?limit=&offset=` | any | Endpoints ordered by MAC. Without parameters the full list. With `limit` (1..10000) and/or `offset` (>= 0) one page plus header `X-Total-Count` (total endpoints). ETag/304 per page. | `EndpointOut[]` |
 | GET | `/endpoints/{endpoint_id}` | any | One endpoint. | `EndpointOut` |
 | PATCH | `/endpoints/bulk` | op+ | Bulk set `ignored`. | `BulkEndpointUpdate` -> `{"updated": n}` |
 | PATCH | `/endpoints/{endpoint_id}` | op+ | Update `ignored` / `notes`. | `EndpointUpdate` -> `EndpointOut` |

@@ -18,6 +18,18 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
+- Code review hardening (unreleased, MAJOR v4.0.0, migration 029) · priority: P1 · area: full-stack
+  Fixes from the 2026-10-14 review: mandatory secrets, DB-backed revocation, refresh
+  rotation, FK SET NULL, endpoint retention, scan loop off sync Redis/DB, LLDP ifIndex
+  mapping, MAC decoding, scheduler/queue fixes, backup/restore, nginx, CI migration job,
+  frontend hooks refactor. SECRET_TOKEN and the access-token login removed completely (compose, CI, backend, UI).
+  Passed: ruff, 1012 backend tests, alembic upgrade/check/
+  downgrade on postgres:16 (Docker), typecheck, frontend tests.
+  Not verified: real switches (LLDP mapping, raw MAC walks), GitHub Actions run, browser.
+  User to verify: set JWT_SECRET/ENCRYPTION_KEY, local build, login/logout/refresh,
+  credentials still decrypt after upgrade, scan with LLDP neighbours shows correct
+  local ports, map height on mobile, Settings > Scan endpoint retention saves.
+
 - Adopt ping-only devices from endpoints and discovery candidates (unreleased, migration 028) · priority: P2 · area: full-stack
   `POST /credentials/ping-only` (bulk, creates credential + device at once); scan
   records range hosts with ping ok / SNMP failed in `ping_candidates`; endpoint

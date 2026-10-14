@@ -74,9 +74,16 @@ Further documentation: `docs/USER_GUIDE.md` (how to use the web UI), `docs/API.m
 Prerequisite: Docker + Docker Compose
 
 ```bash
-cp .env.example .env   # set POSTGRES_PASSWORD, SECRET_TOKEN, DEFAULT_ADMIN_PASSWORD (required)
+cp .env.example .env   # fill in the required variables (see below)
 docker compose up -d
 ```
+
+Required in `.env` (Compose and the backend refuse to start without them):
+
+- `POSTGRES_PASSWORD`: strong random value.
+- `JWT_SECRET`: `python -c "import secrets; print(secrets.token_hex(32))"` (or `openssl rand -hex 32`).
+- `ENCRYPTION_KEY`: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Back it up with `.env`; without it stored SNMP secrets cannot be read.
+- `DEFAULT_ADMIN_PASSWORD`: initial password of the `admin` user; must not be empty or `changeme`.
 
 This pulls the prebuilt images of the newest release from the GitHub Container
 Registry (`ghcr.io/mainzerp/net2map/backend` and `/frontend`, public, no login
@@ -89,6 +96,9 @@ Update to the newest release:
 git pull
 docker compose pull && docker compose up -d
 ```
+
+Upgrading to v4.0.0 requires new `.env` values; see `docs/OPERATIONS.md`
+("Upgrading to v4.0.0").
 
 To run your local checkout instead (development, unreleased changes), build the
 images from source with the local override `docker-compose.local.yml`:
@@ -179,14 +189,15 @@ Step-by-step instructions for every page: `docs/USER_GUIDE.md`.
   remaining path including query string). New clients should use only `/api/v1`.
 - `GET /health`, `GET /metrics` and the WebSocket
   `/ws/scan-progress` remain unversioned. `GET /health` checks only the database and Redis (container
-  healthcheck); `GET /health?deep=1` additionally checks the Celery workers.
+  healthcheck); `GET /health?deep=1` additionally checks the Celery workers and
+  requires a bearer token.
 - The frontend internally works with logical `/api/...` paths and maps them centrally
   to `/api/v1/...` in `frontend/src/api.ts`.
 
 ## Scan Settings and Metrics
 
 - The number of parallel SNMP queries is configurable in the UI under `Settings -> Scan`.
-- Backend API for scan workers: `GET/PUT /api/v1/scan-settings` with `max_workers`, `snmp_timeout`, `snmp_retries` and `snmp_bulk_size` (rows per SNMP request, 5-100, default 25).
+- Backend API for scan workers: `GET/PUT /api/v1/scan-settings` with `max_workers`, `snmp_timeout`, `snmp_retries` and `snmp_bulk_size` (rows per SNMP request, 5-100, default 25) and `endpoint_retention_days` (0-3650, default 30, 0 disables: after a successful full scan, endpoints not seen for that many days are deleted unless ignored or annotated).
 - Link and MAC scans read interface names and aliases from a cache and walk only status and speed; the names are re-read at most once per discovery interval (or for an unknown ifIndex).
 - VLAN and STP data have their own intervals (`Settings -> Scan`, default 1800 s and 300 s respectively). They are updated in MAC scans as soon as their interval has expired; `0` means only during manual full scans.
 - DNS resolvers for PTR lookups are configurable in the UI under `Settings -> DNS`.
@@ -214,16 +225,14 @@ docker buildx build --build-arg VITE_API_URL=http://your-backend:8000 -t net2map
 
 ## Security
 
-- **Authentication:** `JWT_SECRET` enables user accounts and roles. The
-  static `SECRET_TOKEN` is an alternative mode without JWT. Without either value,
-  the API endpoints are reachable without login.
-- **Session revocation:** JWT revocations require Redis. If Redis is configured but
-  unreachable, JWT checks fail with `503 AUTH_UNAVAILABLE`.
-  Without Redis, login and normal JWT access remain possible; logout,
-  session revocation as well as security-relevant user changes and deletions
-  report `503` instead of pretending a successful revocation.
-  Failed user changes are not saved. The UI still logs out
-  locally and indicates that the server-side revocation failed.
+- **Authentication:** User accounts with roles, JWTs signed with `JWT_SECRET`
+  (required). There is no static-token or auth-disabled mode. Sessions end
+  `JWT_MAX_SESSION_HOURS` (default 168) after login; refresh does not extend them.
+- **Session revocation:** Revoking all sessions of a user (deactivate, demote,
+  password change, delete, admin revoke-all) is stored in the database and works
+  without Redis. Per-token revocation (logout, refresh rotation) uses Redis; without
+  Redis, logout revokes all sessions of the user. If Redis is configured but
+  unreachable, token checks fail with `503 AUTH_UNAVAILABLE`.
 - **WebSockets:** Existing scan connections re-check their original
   credentials five seconds after the last successful check,
   even without incoming messages. Expiry or revocation closes the connection with code `1008`;
@@ -245,8 +254,9 @@ docker buildx build --build-arg VITE_API_URL=http://your-backend:8000 -t net2map
 - **HTTPS:** Provide TLS via a reverse proxy in front of the frontend;
   the bundled containers do not offer HTTPS themselves.
 - **SNMP credentials:** API responses mask communities and SNMPv3 passwords.
-  `ENCRYPTION_KEY` encrypts these values in the database. A key
-  is generated by `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+  They are always stored encrypted with `ENCRYPTION_KEY` (required); plaintext
+  values from older installations are encrypted on startup. Changing or losing
+  the key makes stored secrets unreadable.
 - **SNMP protocol:** For new profiles, use SNMPv3 with authentication and
   encryption (`authPriv`, SHA-256/AES). V2c and V3 without
   encryption remain available for explicitly configured legacy devices;
@@ -257,10 +267,9 @@ docker buildx build --build-arg VITE_API_URL=http://your-backend:8000 -t net2map
 Before deploying Net2Map to production, ensure the following requirements are met:
 
 1. **TLS/HTTPS**: Net2Map does not include built-in TLS. You MUST place a TLS-terminating reverse proxy in front of the application. See the TLS / HTTPS Setup section below.
-2. **Authentication**: Compose always requires `SECRET_TOKEN`; additionally set `JWT_SECRET` (recommended) to enable user accounts and roles. With `JWT_SECRET` set, the static `SECRET_TOKEN` is no longer accepted for API calls.
-3. **Encryption at Rest**: Set `ENCRYPTION_KEY` to encrypt SNMP passwords in the database. Without it, passwords are stored in plaintext.
-4. **Strong Passwords**: Use strong, unique values for `POSTGRES_PASSWORD`, `DEFAULT_ADMIN_PASSWORD`, and all secrets. Never use the example values in production.
-5. **CORS**: Set `CORS_ORIGIN` to your actual domain (e.g. `https://net2map.example.com`). Do not use `*` in production.
+2. **Secrets**: `JWT_SECRET`, `ENCRYPTION_KEY`, `POSTGRES_PASSWORD` and `DEFAULT_ADMIN_PASSWORD` are required (see Quickstart). Keep a copy of `.env` with the backups; `ENCRYPTION_KEY` is needed to read restored SNMP secrets.
+3. **Strong Passwords**: Use strong, unique values for all secrets. Never use the example values in production. Change the `admin` password after the first login.
+4. **CORS**: Set `CORS_ORIGIN` to your actual domain (e.g. `https://net2map.example.com`). Do not use `*` in production.
 
 ## TLS / HTTPS Setup
 

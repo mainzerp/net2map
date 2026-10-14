@@ -9,12 +9,12 @@ work is done; only the user moves them to `Done`.
 - Backend lint: `ruff check backend/` (config in `backend/pyproject.toml`, line length
   120, py312, rules E/W/F/I).
 - Backend tests: `cd backend && python -m pytest tests/ -v` (CI uses
-  `DATABASE_URL=sqlite:///./test.db` and a dummy SECRET_TOKEN; pytest.ini enforces
+  `DATABASE_URL=sqlite:///./test.db` and a dummy JWT_SECRET; pytest.ini enforces
   coverage with `--cov-fail-under=10`).
   On a host Python 3.13 the 7 `test_snmp_driver.py` cases fail (pysnmp needs
   `asyncore`); run the suite in a clean container of the locally built image instead
   (`docker compose -f docker-compose.yml -f docker-compose.local.yml build backend` first):
-  `docker run --rm --entrypoint sh -e DATABASE_URL=sqlite:///./test.db -e SECRET_TOKEN=test-token net2map-backend -c "cd /app && python -m pytest tests/ -q -o addopts=''"`.
+  `docker run --rm --entrypoint sh -e DATABASE_URL=sqlite:///./test.db net2map-backend -c "cd /app && python -m pytest tests/ -q -o addopts=''"`.
   Do not run tests inside the live `net2map-backend` container: its compose env
   (Redis, JWT) breaks test assumptions.
 - Backend code changes must also rebuild the workers: compose services are

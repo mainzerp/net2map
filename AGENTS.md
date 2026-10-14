@@ -264,7 +264,7 @@ Rules of thumb:
   broadcast), `scanners/` (vendor SNMP scanners: aruba_cx, cisco, eaton, fs_scanner, generic,
   hpe_ilo, hpe_ups, opnsense, unifi; plus detection/parsing helpers and `health.py`, the
   pysnmp-free UPS / server health normalization), `shared/`
-  (auth, crypto, audit, metrics, redis_client, state), `alembic/versions/` (migrations 001-028), `latency/` (latency monitor: probe,
+  (auth, crypto, audit, metrics, redis_client, state), `alembic/versions/` (migrations 001-029), `latency/` (latency monitor: probe,
   stats, store, `monitor.py` run as the `latency-monitor` compose service),
   `tests/` (pytest suite), plus `config.py`, `database.py`, `schemas.py`,
   `celery_app.py`, `tasks.py`, legacy `snmp_scanner.py` (the demo seed `seed_db.py` and
@@ -311,8 +311,10 @@ session-spanning context.
 
 - Read `docs/README.md` before authoring or reorganizing documentation.
 - Backend: Python 3.12, ruff-clean (line length 120, rules E/W/F/I per
-  `backend/pyproject.toml`); async SQLAlchemy 2 patterns; new tables need an Alembic
-  migration; every router/feature gets tests in `backend/tests/`.
+  `backend/pyproject.toml`); synchronous SQLAlchemy sessions (`get_db`); keep sync DB and
+  Redis calls off the asyncio loop (`asyncio.to_thread` / `run_in_threadpool`); new tables
+  and model changes need an Alembic migration and must keep `alembic check` clean (CI job
+  `migrations-backend`); every router/feature gets tests in `backend/tests/`.
 - Frontend: TypeScript only (no `.jsx`/`.js` in `src/`); keep shared types in
   `types.ts`; styling via Tailwind tokens only (no inline hex colors); use the UI
   primitives in `src/components/ui/` instead of ad-hoc markup; data fetching goes

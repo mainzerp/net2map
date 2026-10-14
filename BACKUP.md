@@ -85,7 +85,7 @@ Application-level settings stored in the database are included in the pg_dump.
 
 Environment-based configuration (`.env` file) is **not** included in database backups.
 Keep a separate copy of your `.env` file -- it contains secrets like `POSTGRES_PASSWORD`,
-`SECRET_TOKEN`, `JWT_SECRET`, and `ENCRYPTION_KEY`.
+`JWT_SECRET`, and `ENCRYPTION_KEY`.
 
 ---
 

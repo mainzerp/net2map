@@ -22,19 +22,10 @@ Related docs:
 ## Logging in and roles
 
 The login page (`/login`) shows `Net2Map Login` with `Username` and
-`Password` fields and a `Sign In` button. The exact mode depends on how the
-backend is configured (see [OPERATIONS.md](OPERATIONS.md)):
-
-- **User accounts (JWT enabled):** sign in with username and password. On a
-  fresh install one `admin` account exists; its initial password is the
-  `DEFAULT_ADMIN_PASSWORD` value set at deployment time. Change it after the
-  first login.
-- **Access token:** "Use an access token instead" opens a field where you paste
-  an access token (the legacy static token or a JWT). "Use username and
-  password" returns to the login form. A valid static token authenticates as a
-  read/write `admin` session.
-- **No auth configured:** the app loads without a login page and every user has
-  full access.
+`Password` fields and a `Sign In` button. Sign in with your user account; on a
+fresh install one `admin` account exists, its initial password is the
+`DEFAULT_ADMIN_PASSWORD` value set at deployment time (see
+[OPERATIONS.md](OPERATIONS.md)). Change it after the first login.
 
 Login attempts are rate-limited; wait a minute and retry if `Sign In` keeps
 failing with an error.

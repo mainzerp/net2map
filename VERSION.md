@@ -1,11 +1,57 @@
 # Version History
 
-## Unreleased -- Ping-only devices, rack rear view, item palette
+## Unreleased -- Ping-only devices, rack rear view, security hardening
 
-**Type:** MINOR (planned v3.6.0, not tagged). Migration 027 adds
-`credentials.snmp_enabled`, `devices.ping_only`, and `rack_side` / `full_depth` on
-devices and rack items (defaults: SNMP on, front, not full depth); migration 028
-adds the `ping_candidates` table.
+**Type:** MAJOR (planned v4.0.0, not tagged; breaking configuration changes, see
+below). Migration 027 adds `credentials.snmp_enabled`, `devices.ping_only`, and
+`rack_side` / `full_depth` on devices and rack items (defaults: SNMP on, front, not
+full depth); migration 028 adds the `ping_candidates` table; migration 029 changes
+`devices.rack_id`, `devices.class_id`, `devices.model_id` and
+`credentials.profile_id` from `ON DELETE CASCADE` (since 003) to `ON DELETE SET
+NULL` and adds `users.revoked_before_ms` (DB-backed session revocation).
+
+### Breaking changes
+
+- `JWT_SECRET` and `ENCRYPTION_KEY` are required. Compose refuses to start without
+  them (`${VAR:?}` in every service); the backend aborts startup
+  (`config.validate_required_settings`) when either is missing or `ENCRYPTION_KEY`
+  is not a valid Fernet key.
+- `DEFAULT_ADMIN_PASSWORD` must not be empty or `changeme` (backend aborts startup).
+- Legacy single-token mode (`SECRET_TOKEN` without `JWT_SECRET`) and auth-disabled
+  mode no longer exist. `SECRET_TOKEN` was removed completely: compose, CI and the
+  backend no longer read it, and it can be deleted from `.env` (a leftover value is
+  ignored). The "Use an access token" login option is gone; sign in with username
+  and password.
+- On first start, plaintext SNMP secrets in `credentials` and `snmp_profiles` are
+  encrypted with `ENCRYPTION_KEY` (idempotent). From then on the key is needed to
+  read them; losing or changing it makes them unreadable.
+- Deleting a rack, switch class, switch model or SNMP profile now detaches the
+  referencing devices / credentials at the database level (migration 029).
+- `POST /auth/refresh` rotates tokens (the old `jti` is blacklisted when Redis is
+  available) and enforces `JWT_MAX_SESSION_HOURS` (default 168) since the original
+  login: `401 AUTH_SESSION_EXPIRED`, log in again.
+- `POST /auth/logout` without Redis revokes all sessions of the user and returns
+  `{"status": "ok", "revoked": "all_sessions"}` (was `503`).
+- `GET /health?deep=1` requires a bearer token (any role); failed checks report
+  `"error"` without exception text. Plain `/health` stays public.
+- `POST /auth/revoke-all` for an unknown user returns `404 USER_NOT_FOUND`.
+- New passwords longer than 72 bytes are rejected with `422` (create and change);
+  login treats them as a wrong password.
+
+Required upgrade actions:
+
+1. Back up (`./scripts/backup.sh`) and copy `.env`.
+2. Generate and set in `.env`:
+   - `JWT_SECRET`: `python -c "import secrets; print(secrets.token_hex(32))"`
+   - `ENCRYPTION_KEY`: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
+   Setting `JWT_SECRET` for the first time invalidates all existing tokens.
+3. Set `DEFAULT_ADMIN_PASSWORD` to a non-default value (only needed to pass the
+   startup check on existing databases).
+4. If the `admin` user was seeded with `changeme`, change its password in the app
+   (`PUT /api/v1/users/{id}`); the variable does not update existing users.
+5. Start the stack; migration 029 runs automatically (`alembic upgrade head`).
+   Check `docker compose logs backend` for `Encrypted N plaintext SNMP secret
+   value(s)` and for errors about undecryptable values.
 
 ### Features
 
@@ -35,6 +81,42 @@ adds the `ping_candidates` table.
 - `PATCH /topology/devices/{id}/meta` and `bulk-meta` now reject overlapping or
   out-of-range rack positions with 409 (`U_OVERLAP`, `U_POSITION_OUT_OF_RANGE`).
   Overlap checks are side-aware everywhere (`backend/shared/rack_space.py`).
+- Session revocation (deactivate, demote, password change, delete, revoke-all) is
+  stored in `users.revoked_before_ms` and no longer requires Redis. The Redis
+  revoke key is still written for rolling upgrades.
+- Security-critical writes (user, credential and SNMP profile CRUD, config and
+  bulk import) write their audit entry in the same transaction; an audit failure
+  fails the request (`500`) and rolls back the change.
+- Import payloads (`/bulk-import/{kind}`, `/config/import`) are capped at 10 MB
+  (`422`).
+- `GET /endpoints` accepts optional `limit` (1-10000) and `offset`; paged responses
+  carry `X-Total-Count`. Without parameters the full list is returned.
+- New setting `endpoint_retention_days` (default 30, 0 disables, 0-3650) in
+  `/scan-settings`, `/settings` and Settings > Scan: after a successful full scan,
+  endpoints not seen for N days are deleted. Ignored endpoints and endpoints with
+  notes are kept.
+
+### Fixes
+
+- Scan engine: Redis and database calls run off the scan event loop; the cancel
+  flag is polled in the background; stale `queued` / `retrying` jobs are reaped
+  after 15 min; scan job updates are atomic.
+- LLDP local port numbers are mapped to ifIndex via `lldpLocPortTable`.
+- MAC decoding: ARP / IP-MIB MACs starting with `00` were decoded as text.
+- DNS lookups are bounded to 3 s.
+- Scheduler: a refused dispatch no longer skips an interval (thread and Celery
+  paths); the scheduled-dispatch claim fails closed on Redis errors. `scan:waiting`
+  entries are unique per waiter and pruned after 600 s.
+- Backup script writes to a temp file, verifies it with `gzip -t`, renames it
+  atomically and creates backups with mode `0600`. Restore validates the file
+  before dropping the database and runs `psql` with `ON_ERROR_STOP=1`.
+- nginx forwards `X-Forwarded-Proto` and sets connect/send timeouts for WebSockets.
+- Frontend: scan job polling via React Query with error and time caps; ETag cache
+  fix; floor background upload uses the shared 401 handling; dashboard scanning
+  state clears on scan failure or connection loss; all settings mutations use
+  hooks; endpoint retention input in Settings > Scan.
+- CI: new job `migrations-backend` (postgres:16: `alembic upgrade head`,
+  `alembic check`, `downgrade base`, `upgrade head`); both Docker jobs depend on it.
 
 ## v3.5.0 -- Buildings and floors on the topology map
 

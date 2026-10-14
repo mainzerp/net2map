@@ -70,11 +70,11 @@ treat as a credential.
 | `DATABASE_URL` | `postgresql://net2map:net2map_pw@postgres/net2map` | yes, built from `POSTGRES_PASSWORD` | via `POSTGRES_PASSWORD` | yes (contains password) | SQLAlchemy and Alembic connection string. |
 | `REDIS_URL` | empty | yes, `redis://redis:6379/0` (hard-coded) | no | no | Enables Redis state, Celery, revocation, WS tickets. Empty = single-process mode. Celery falls back to `redis://localhost:6379/0` when empty. |
 | `CORS_ORIGIN` | `http://localhost:3000` | yes, `${CORS_ORIGIN:-http://localhost:3000}` (backend only) | no | no | Single allowed CORS origin. `*` logs a warning. Set to the public URL behind TLS. |
-| `JWT_SECRET` | empty | yes, `${JWT_SECRET:-}` | no (recommended) | yes | HS256 signing key; enables JWT mode and RBAC. When set, `SECRET_TOKEN` is ignored. |
-| `SECRET_TOKEN` | empty | yes | yes (compose) | yes | Legacy static bearer token (maps to role `admin`) and JWT signing fallback, only effective when `JWT_SECRET` is empty. |
+| `JWT_SECRET` | empty | yes, `${JWT_SECRET:?}` (all backend-image services) | yes (compose and backend startup) | yes | HS256 signing key for all JWTs. Generate: `python -c "import secrets; print(secrets.token_hex(32))"` or `openssl rand -hex 32`. Changing it invalidates all tokens. |
 | `JWT_EXPIRY_HOURS` | `24` | yes, `${JWT_EXPIRY_HOURS:-24}` (backend) | no | no | Token lifetime. Refresh grace is a fixed 1 h. |
-| `ENCRYPTION_KEY` | empty | yes, `${ENCRYPTION_KEY:-}` | no (strongly recommended) | yes | Fernet key encrypting SNMP secrets at rest. Empty = plaintext (critical log at startup). Generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Do not change it on an existing database without re-entering credentials. |
-| `DEFAULT_ADMIN_PASSWORD` | `changeme` | yes (backend only) | yes (compose) | yes | Password of the `admin` user created by Alembic migration 006. Read only during that first migration (`os.environ` in `alembic/versions/006_add_users_table.py`); later changes have no effect. |
+| `JWT_MAX_SESSION_HOURS` | `168` | no (not forwarded by `docker-compose.yml`) | no | no | Absolute session lifetime since login; `/auth/refresh` returns `401 AUTH_SESSION_EXPIRED` after it. |
+| `ENCRYPTION_KEY` | empty | yes, `${ENCRYPTION_KEY:?}` (all backend-image services) | yes (compose and backend startup; must be a valid Fernet key) | yes | Fernet key encrypting SNMP secrets at rest. Plaintext secrets from older installations are encrypted on startup. Generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Never change or lose it: stored secrets become unreadable (re-enter credentials). |
+| `DEFAULT_ADMIN_PASSWORD` | empty | yes (backend only) | yes (compose and backend startup; not empty, not `changeme`) | yes | Password of the `admin` user created by Alembic migration 006. Read only during that first migration (`os.environ` in `alembic/versions/006_add_users_table.py`); later changes have no effect on the user but the startup check still applies. |
 | `LOG_LEVEL` | `INFO` | yes, `${LOG_LEVEL:-INFO}` (backend) | no | no | Python logging level of the backend. |
 | `AUDIT_RETENTION_DAYS` | `90` | yes, `${AUDIT_RETENTION_DAYS:-90}` (backend, celery-worker) | no | no | Fallback retention for the 6-hourly audit purge (runs in celery-worker) and the default of `DELETE /api/v1/audit-logs/purge`. The app setting `audit_retention_days` (DB, `PUT /api/v1/settings/audit_retention_days`) wins when it is a positive integer; invalid DB values are logged and ignored. `<= 0` here (without a DB value) disables the scheduled purge. |
 | `REQUEST_LOG_ENABLED` | `false` | yes, `${REQUEST_LOG_ENABLED:-false}` (backend) | no | no | Logs one line per HTTP request (method, path, status, duration). `/health`, `/metrics`, `/ws*` are skipped. |
@@ -103,10 +103,8 @@ without it they are per process.
 1. Install Docker with Compose v2 and make sure the daemon (Docker Desktop on
    Windows/macOS) is running.
 2. `cp .env.example .env` and fill in at least:
-   - `POSTGRES_PASSWORD`, `SECRET_TOKEN`, `DEFAULT_ADMIN_PASSWORD` (required).
-   - `JWT_SECRET` (`python -c "import secrets; print(secrets.token_hex(32))"`),
-     otherwise the stack runs in legacy single-token mode.
-   - `ENCRYPTION_KEY` (Fernet key, see above).
+   - `POSTGRES_PASSWORD`, `DEFAULT_ADMIN_PASSWORD`, `JWT_SECRET`,
+     `ENCRYPTION_KEY` (all required; generators and rules in the table above).
    - `CORS_ORIGIN` = the URL users open (e.g. `https://net2map.example.com`).
 3. `docker compose up -d` (pulls the release images from GHCR; to build the checkout
    use `docker compose -f docker-compose.yml -f docker-compose.local.yml up --build -d`, see "Images" below).
@@ -140,8 +138,8 @@ without it they are per process.
    - `docker compose ps`: all services `running`, backend and celery-worker
      `healthy`.
    - `docker compose exec backend python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/health').read().decode())"`
-     -> `{"status": "ok", "checks": {"database": "ok", "redis": "ok"}}`; append
-     `?deep=1` to include the Celery worker check (`"workers": "ok"`).
+     -> `{"status": "ok", "checks": {"database": "ok", "redis": "ok"}}`. The Celery
+     worker check (`?deep=1`) needs a bearer token, see "Health checks and metrics".
    - UI login at `http://localhost:3000` and a test scan.
 
 ### Images
@@ -162,6 +160,30 @@ Two variants; the backend image (`backend/Dockerfile`) serves `backend`,
 CI (`.github/workflows/ci.yml`) builds with the local override; job `docker-push`
 retags the result as `<tag>` and `latest` on GHCR for every `v*` git tag; `main`
 pushes nothing.
+
+### Upgrading to v4.0.0
+
+v4.0.0 makes secrets mandatory and adds migration 029. Full list of breaking
+changes: `VERSION.md`.
+
+1. Back up (`./scripts/backup.sh`) and copy `.env`.
+2. Set `JWT_SECRET` and `ENCRYPTION_KEY` in `.env` (generators in the variable
+   table). A new `JWT_SECRET` logs out every user.
+3. Set `DEFAULT_ADMIN_PASSWORD` to a value other than empty / `changeme`.
+4. Update and start as in the update procedure. Migration 029 runs automatically:
+   rack / class / model / profile foreign keys become `ON DELETE SET NULL`,
+   `users.revoked_before_ms` is added.
+5. Check `docker compose logs backend`: startup aborts with `Refusing to start,
+   insecure configuration` when a secret is missing or invalid; `Encrypted N
+   plaintext SNMP secret value(s) at rest` confirms the one-time encryption; an
+   error about values that "do not decrypt with the current ENCRYPTION_KEY" means
+   the key differs from the one used before.
+6. If the `admin` user still has the password `changeme`, change it in the app
+   (`PUT /api/v1/users/{id}`).
+7. Monitoring that calls `/health?deep=1` must now send a bearer token.
+
+Rollback to v3.x needs the pre-update dump (migration 029, encrypted secrets);
+v3.x reads the encrypted secrets only when given the same `ENCRYPTION_KEY`.
 
 ### Upgrading from NetMap (v2.x) to Net2Map (v3.0.0)
 
@@ -209,8 +231,9 @@ start it again; it uses the untouched old volumes.
 ## Rollback procedure
 
 Be aware of the constraint first: migrations are applied automatically and the
-practical model is forward-only. Every Alembic revision has a `downgrade()`, but
-downgrades are not exercised by CI, some are lossy (e.g. 013 restores endpoint data
+practical model is forward-only. Every Alembic revision has a `downgrade()`; CI
+(job `migrations-backend`) runs `downgrade base` on an empty Postgres 16 database
+only, some downgrades are lossy (e.g. 013 restores endpoint data
 only best-effort), and the entrypoint never runs them. The supported rollback is
 therefore "old code + database restored from the pre-update backup".
 
@@ -232,7 +255,7 @@ code is sufficient. An `alembic downgrade <rev>` inside the backend container is
 possible in principle but is untested; prefer the restore path.
 
 After restoring older Redis data or losing the Redis volume, rotate `JWT_SECRET` so
-previously revoked tokens cannot become valid again (README, "Sicherheit").
+previously revoked tokens cannot become valid again (README, "Security").
 
 ## Backups
 
@@ -248,8 +271,10 @@ commands, cron, retention). Points not covered there:
 
 - `GET /health` (unversioned, no auth): liveness. Checks database and Redis only;
   `200` with `status: ok`, or `503` with `status: degraded` and the failing check
-  (`error: ...`). A missing Celery worker does not affect it.
-- `GET /health?deep=1`: readiness. Adds a Celery worker ping (2 s timeout), reported
+  (`"error"`; details only in the backend log). A missing Celery worker does not
+  affect it.
+- `GET /health?deep=1`: readiness. Requires a bearer token of any role (`401
+  AUTH_REQUIRED` otherwise). Adds a Celery worker ping (2 s timeout), reported
   as `workers` / `checks.celery` (`ok`, `none`, `unreachable`, `not_configured`);
   `503` when no worker answers while Redis is configured. Use it for external
   monitoring of the scan pipeline.
@@ -263,8 +288,8 @@ commands, cron, retention). Points not covered there:
   - celery-beat, latency-monitor and frontend: none. Liveness of the latency
     monitor is its Redis heartbeat, exposed as `monitor_alive` in
     `GET /api/v1/latency/summary`.
-- `GET /metrics` (unversioned): Prometheus format. Requires a bearer token when
-  auth is enabled (not auth-exempt) and is not proxied by nginx, so a Prometheus
+- `GET /metrics` (unversioned): Prometheus format. Requires a bearer token
+  (not auth-exempt) and is not proxied by nginx, so a Prometheus
   scraper needs network access to `backend:8000` and an `Authorization` header.
   Metrics (`backend/shared/metrics.py`): `net2map_request_duration_seconds`,
   `net2map_requests_total` (labeled by route template; legacy `/api` folded into
@@ -309,9 +334,10 @@ commands, cron, retention). Points not covered there:
   files per container.
 - Backend format: `LEVEL logger: message`. Level via `LOG_LEVEL`; per-request lines
   via `REQUEST_LOG_ENABLED=true` (both set in `.env`, forwarded by compose).
-- Startup warnings to look for: `SECURITY: No authentication configured`,
-  `SECURITY: ENCRYPTION_KEY is not set`, `CORS_ORIGIN is set to '*'`,
-  `Both JWT_SECRET and SECRET_TOKEN are set -- ignoring legacy SECRET_TOKEN`.
+- Startup messages to look for: `Refusing to start, insecure configuration`
+  (missing or invalid `JWT_SECRET` / `ENCRYPTION_KEY` / `DEFAULT_ADMIN_PASSWORD`;
+  the backend exits), `Encrypted N plaintext SNMP secret value(s) at rest`,
+  `... do not decrypt with the current ENCRYPTION_KEY`, `CORS_ORIGIN is set to '*'`.
 - In-app: `GET /api/v1/logs` (admin/operator) returns the structured in-memory log
   buffer of the answering backend process; the audit trail is under
   `GET /api/v1/audit-logs` (admin).
@@ -392,12 +418,14 @@ If host port 3000 is taken, set `NET2MAP_PORT` (e.g. `3100`) in `.env`.
 | `connection refused` / `ERR_CONNECTION_REFUSED` on `http://localhost:3000` | Docker Desktop (daemon) is not running, or the stack is down. | Start Docker Desktop, then `docker compose up -d`; check `docker compose ps`. |
 | Vite terminal shows `http proxy error ... ECONNREFUSED` for `/api/...` or `/ws/...` | Dev server proxies to `localhost:8000` but no backend is listening there. | Start the backend locally on port 8000 (or point `VITE_API_URL` at a running backend). |
 | Login fails with "Invalid username or password" on a fresh install | Admin password is whatever `DEFAULT_ADMIN_PASSWORD` was when migration 006 first ran (fallback `changeme` if unset at that time). Changing `.env` later does not update it. | Use the original value. Otherwise reset the hash in the `users` table or recreate the database (`docker compose down -v`, destroys data). |
-| Compose aborts with `Set POSTGRES_PASSWORD in .env` (or `SECRET_TOKEN`, `DEFAULT_ADMIN_PASSWORD`) | Required variable missing. | Fill `.env` from `.env.example`. |
+| Compose aborts with `Set POSTGRES_PASSWORD in .env` (or `DEFAULT_ADMIN_PASSWORD`, `JWT_SECRET`, `ENCRYPTION_KEY`) | Required variable missing. | Fill `.env` from `.env.example`. |
+| Backend exits with `Refusing to start, insecure configuration` | `JWT_SECRET` / `ENCRYPTION_KEY` missing, `ENCRYPTION_KEY` not a valid Fernet key, or `DEFAULT_ADMIN_PASSWORD` empty / `changeme`. | Fix the listed variables in `.env` (generators in the variable table), `docker compose up -d`. |
+| Users are logged out after at most 7 days although they keep working | Absolute session lifetime `JWT_MAX_SESSION_HOURS` (default 168); `/auth/refresh` returns `401 AUTH_SESSION_EXPIRED`. | Expected; log in again. |
 | Postgres auth errors after changing `POSTGRES_PASSWORD` | The password is only applied when the volume is initialized. | Revert the value, or change the role password inside postgres (`ALTER USER net2map PASSWORD ...`). |
 | Frontend container never starts; backend `unhealthy` | `/health` returns 503 (database or Redis check failing). | `docker compose logs backend`; query `/health` inside the backend container to see which check fails. |
 | Latency card shows the monitor as offline (`monitor_alive=false`) | `latency-monitor` container stopped, crash-looping, or waiting for the lock. | `docker compose ps latency-monitor`; `docker compose logs latency-monitor`. |
 | All latency targets `down` although devices answer scans | ICMP blocked between the monitor and the devices, or `ping` lacks `CAP_NET_RAW`. | `docker compose exec latency-monitor ping -c 3 <ip>`. |
-| Scans stay queued | No Celery worker answering. | `/health?deep=1` shows `"workers": "none"`; check `docker compose logs celery-worker`. |
+| Scans stay queued | No Celery worker answering. | `/health?deep=1` (with bearer token) shows `"workers": "none"`; check `docker compose logs celery-worker`. |
 | API returns `503 AUTH_UNAVAILABLE` | `REDIS_URL` configured but Redis unreachable; token revocation checks fail closed. | Check the `redis` container and its healthcheck. |
 | Scan progress does not update live | WebSocket ticket needs Redis; nginx must pass `/ws/`. | Check Redis; check browser console for WS close codes `1008` (auth) / `1011` (auth service down). |
 | SNMP secrets unreadable after restore or key change | `ENCRYPTION_KEY` differs from the key used to encrypt. | Restore the original key from the `.env` backup, or re-enter credentials. |

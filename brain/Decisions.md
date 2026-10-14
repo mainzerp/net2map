@@ -44,7 +44,9 @@
   SNMPv3 passwords on any unrelated edit.
 - **Viewer is read-only** for device/rack positions, bulk export and `/api/logs`
   (admin/operator required). `/api/auth/refresh` enforces token blacklist and user
-  revocation; the legacy static token only works when no `JWT_SECRET` is configured.
+  revocation; the legacy static token only works when no `JWT_SECRET` is configured
+  (2026-10-14: static token and auth-disabled mode removed, `JWT_SECRET` mandatory; see
+  "Code review hardening").
 - **Scan lock** uses a UUID owner token with compare-and-delete release and periodic
   renewal (TTL 600s was shorter than real scan durations); manual scans acquire the
   same lock as scheduled ones.
@@ -361,3 +363,28 @@
   is faster when you place many patch panels; the dialog stays for click/keyboard.
 - **UI says "devices"** (user decision): visible "switch(es)" texts became
   "device(s)"; identifiers, file names and API paths stay `switch*`.
+
+## Code review hardening (2026-10-14)
+
+- **Secrets are mandatory** (user decision): `JWT_SECRET` and a valid Fernet
+  `ENCRYPTION_KEY` are required; startup aborts otherwise, `DEFAULT_ADMIN_PASSWORD` must
+  not be empty or `changeme`. Plaintext SNMP secrets are encrypted at startup. Reason: a
+  silent plaintext fallback leaked credentials into DB and backups. Breaking, so the
+  unreleased version becomes MAJOR (planned v4.0.0).
+- **Token revocation in the DB** (`users.revoked_before_ms`, migration 029, 5 s
+  per-process cache), Redis only mirrors it. Reason: without Redis an account could not
+  be locked out. Refresh rotates the jti and is capped by `JWT_MAX_SESSION_HOURS`.
+- **FK semantics SET NULL** for device rack/class/model and credential profile
+  (migration 029). Reason: the routers already unassign; the old DB CASCADE would have
+  deleted devices with a rack. Models are aligned so `alembic check` is clean and
+  blocks in CI.
+- **Endpoint retention** (user decision): `endpoint_retention_days`, default 30, 0 off;
+  pruned only after a successful full scan; ignored endpoints and endpoints with notes
+  are kept.
+- **Scan lock key names unchanged** (`scan:lock`, `scan:active_type`, `scan:waiting`):
+  renaming to the `net2map:` prefix is unsafe during a rolling upgrade (two locks).
+- **snmp_scanner.py not split** in this round: too risky without real hardware.
+- **SECRET_TOKEN removed** (user decision): with `JWT_SECRET` mandatory the static
+  token and auth-disabled modes were dead code; compose, backend, WebSocket, the
+  "Use an access token" login option and docs dropped them. `config.py` ignores
+  unknown env keys so a leftover `SECRET_TOKEN` in `.env` does not break startup.
