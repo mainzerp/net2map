@@ -75,7 +75,56 @@ jobs:
       - run: cd backend && python -m pytest tests/ -v
         env:
           DATABASE_URL: "sqlite:///./test.db"
-          SECRET_TOKEN: "test-token"
+          JWT_SECRET: "ci-dummy-jwt-secret-not-for-production-use"
+          ENCRYPTION_KEY: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+
+  migrations-backend:
+    runs-on: ubuntu-latest
+    needs: lint-backend
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: net2map
+          POSTGRES_PASSWORD: ci-dummy
+          POSTGRES_DB: net2map
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U net2map -d net2map"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: "postgresql://net2map:ci-dummy@localhost:5432/net2map"
+      JWT_SECRET: "ci-dummy-jwt-secret-not-for-production-use"
+      ENCRYPTION_KEY: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+      DEFAULT_ADMIN_PASSWORD: "ci-dummy-admin-password"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: pip install -r backend/requirements.txt
+      # alembic.ini sets script_location = /app/alembic (the container WORKDIR),
+      # so expose the checked-out backend at /app for the CLI.
+      - name: Map backend checkout to /app
+        run: sudo ln -sfn "$GITHUB_WORKSPACE/backend" /app
+      - name: Upgrade to head
+        working-directory: backend
+        run: alembic upgrade head
+      - name: Check models against migrations (drift)
+        working-directory: backend
+        run: alembic check
+      - name: Downgrade to base
+        working-directory: backend
+        run: alembic downgrade base
+      - name: Upgrade to head again
+        working-directory: backend
+        run: alembic upgrade head
 
   test-frontend:
     runs-on: ubuntu-latest
@@ -92,12 +141,13 @@ jobs:
 
   docker-build:
     runs-on: ubuntu-latest
-    needs: [security-scan, test-backend, test-frontend]
+    needs: [security-scan, test-backend, migrations-backend, test-frontend]
     if: success() && needs.security-scan.result == 'success' && github.event_name == 'push'
     env:
       POSTGRES_PASSWORD: ci-dummy
-      SECRET_TOKEN: ci-dummy
       DEFAULT_ADMIN_PASSWORD: ci-dummy
+      JWT_SECRET: "ci-dummy-jwt-secret-not-for-production-use"
+      ENCRYPTION_KEY: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -114,8 +164,9 @@ jobs:
       packages: write
     env:
       POSTGRES_PASSWORD: ci-dummy
-      SECRET_TOKEN: ci-dummy
       DEFAULT_ADMIN_PASSWORD: ci-dummy
+      JWT_SECRET: "ci-dummy-jwt-secret-not-for-production-use"
+      ENCRYPTION_KEY: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:

@@ -30,6 +30,27 @@ if [ ! -f "$BACKUP_FILE" ]; then
     exit 1
 fi
 
+# Validate the file before anything destructive happens: the database is
+# dropped below, so an unsupported or corrupt file must be rejected here.
+case "$BACKUP_FILE" in
+    *.sql.gz)
+        if ! gzip -t -- "$BACKUP_FILE"; then
+            echo "ERROR: Backup file failed gzip integrity check: ${BACKUP_FILE}" >&2
+            exit 1
+        fi
+        ;;
+    *.sql)
+        if [ ! -s "$BACKUP_FILE" ]; then
+            echo "ERROR: Backup file is empty: ${BACKUP_FILE}" >&2
+            exit 1
+        fi
+        ;;
+    *)
+        echo "ERROR: Unsupported file format. Use .sql or .sql.gz" >&2
+        exit 1
+        ;;
+esac
+
 # ── Pre-flight checks ─────────────────────────────────────────────────────
 
 # 1. Docker must be available
@@ -57,7 +78,8 @@ echo "         All existing data will be overwritten."
 echo ""
 echo "Backup file: ${BACKUP_FILE}"
 echo ""
-read -rp "Type 'yes' to continue: " CONFIRM
+CONFIRM=""
+read -rp "Type 'yes' to continue: " CONFIRM || true
 
 if [ "$CONFIRM" != "yes" ]; then
     echo "Restore cancelled."
@@ -68,7 +90,7 @@ fi
 echo "Dropping and recreating database '${DB_NAME}'..."
 
 docker exec "$CONTAINER" \
-    psql -U "$DB_USER" -d postgres \
+    psql -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
     -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${DB_NAME}' AND pid <> pg_backend_pid();" \
     -c "DROP DATABASE IF EXISTS ${DB_NAME};" \
     -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};"
@@ -78,11 +100,11 @@ echo "Restoring from ${BACKUP_FILE}..."
 
 case "$BACKUP_FILE" in
     *.sql.gz)
-        gunzip -c "$BACKUP_FILE" \
-            | docker exec -i "$CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" --single-transaction -q
+        gunzip -c -- "$BACKUP_FILE" \
+            | docker exec -i "$CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" --single-transaction -q -v ON_ERROR_STOP=1
         ;;
     *.sql)
-        docker exec -i "$CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" --single-transaction -q \
+        docker exec -i "$CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" --single-transaction -q -v ON_ERROR_STOP=1 \
             < "$BACKUP_FILE"
         ;;
     *)

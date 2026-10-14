@@ -46,16 +46,37 @@ mkdir -p "$BACKUP_DIR"
 # ── Run pg_dump ────────────────────────────────────────────────────────────
 echo "Starting backup of database '${DB_NAME}' from container '${CONTAINER}'..."
 
+# Write to a temp file in the target directory so the final mv is atomic and
+# a failed or interrupted dump never leaves a truncated *.sql.gz behind.
+TMP_FILE="$(mktemp "${BACKUP_DIR}/.net2map_${TIMESTAMP}.sql.gz.tmp.XXXXXX")"
+
+cleanup() {
+    if [ -n "${TMP_FILE:-}" ] && [ -e "$TMP_FILE" ]; then
+        rm -f -- "$TMP_FILE"
+    fi
+}
+trap cleanup EXIT
+trap 'echo "ERROR: Backup failed; partial output removed." >&2' ERR
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 docker exec "$CONTAINER" \
     pg_dump -U "$DB_USER" -d "$DB_NAME" --no-owner --no-acl \
-    | gzip > "$BACKUP_FILE"
+    | gzip > "$TMP_FILE"
 
 # ── Verify output ─────────────────────────────────────────────────────────
-if [ ! -s "$BACKUP_FILE" ]; then
+if [ ! -s "$TMP_FILE" ]; then
     echo "ERROR: Backup file is empty or was not created." >&2
-    rm -f "$BACKUP_FILE"
     exit 1
 fi
+
+if ! gzip -t -- "$TMP_FILE"; then
+    echo "ERROR: Backup file failed gzip integrity check." >&2
+    exit 1
+fi
+
+mv -f -- "$TMP_FILE" "$BACKUP_FILE"
+TMP_FILE=""
 
 FILE_SIZE="$(du -h "$BACKUP_FILE" | cut -f1)"
 echo "Backup complete: ${BACKUP_FILE} (${FILE_SIZE})"
