@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { api, extractErrorMessage } from "../../../api";
-import { queryKeys, useAppSettings, useInvalidateApi, useScanSettings } from "../../../hooks/api";
+import { extractErrorMessage } from "../../../api";
+import { useAppSettings, useScanSettings, useUpdateScanEngineConfig } from "../../../hooks/api";
 import { Button, Input } from "../../ui";
 import { SectionHeader } from "../shared";
 
@@ -12,12 +11,12 @@ import { SectionHeader } from "../shared";
 function ScanEngineConfig() {
   const { data: scanSettings, isLoading: scanLoading } = useScanSettings();
   const { data: appSettings, isLoading: appLoading } = useAppSettings();
-  const { invalidate } = useInvalidateApi();
 
   const [scanWorkers, setScanWorkers] = useState<number | string>(4);
   const [snmpTimeout, setSnmpTimeout] = useState<number | string>(3);
   const [snmpRetries, setSnmpRetries] = useState<number | string>(1);
   const [snmpBulkSize, setSnmpBulkSize] = useState<number | string>(25);
+  const [endpointRetentionDays, setEndpointRetentionDays] = useState<number | string>(30);
   const [discoveryIntervalSec, setDiscoveryIntervalSec] = useState<number | string>(1800);
   const [linkUpdateIntervalSec, setLinkUpdateIntervalSec] = useState<number | string>(60);
   const [macUpdateIntervalSec, setMacUpdateIntervalSec] = useState<number | string>(300);
@@ -37,6 +36,7 @@ function ScanEngineConfig() {
     if (scanSettings?.snmp_timeout != null) setSnmpTimeout(Number(scanSettings.snmp_timeout));
     if (scanSettings?.snmp_retries != null) setSnmpRetries(Number(scanSettings.snmp_retries));
     if (scanSettings?.snmp_bulk_size != null) setSnmpBulkSize(Number(scanSettings.snmp_bulk_size));
+    if (scanSettings?.endpoint_retention_days != null) setEndpointRetentionDays(Number(scanSettings.endpoint_retention_days));
 
     const settingsList = appSettings ?? [];
     const discovery = settingsList.find((s) => s.key === "discovery_interval_sec");
@@ -53,55 +53,43 @@ function ScanEngineConfig() {
     if (stp?.value != null) setStpUpdateIntervalSec(Number(stp.value));
   }, [scanLoading, appLoading, scanSettings, appSettings]);
 
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      const normalized = {
-        max_workers: Math.max(1, Math.min(128, Number(scanWorkers) || 1)),
-        snmp_timeout: Math.max(1, Math.min(30, Number(snmpTimeout) || 3)),
-        snmp_retries: Math.max(0, Math.min(10, Number(snmpRetries) || 1)),
-        snmp_bulk_size: Math.max(5, Math.min(100, Number(snmpBulkSize) || 25)),
-        discovery_interval_sec: Math.max(0, Math.min(86400, Number(discoveryIntervalSec) || 0)),
-        link_update_interval_sec: Math.max(0, Math.min(3600, Number(linkUpdateIntervalSec) || 0)),
-        mac_update_interval_sec: Math.max(0, Math.min(3600, Number(macUpdateIntervalSec) || 0)),
-        vlan_update_interval_sec: Math.max(0, Math.min(86400, Number(vlanUpdateIntervalSec) || 0)),
-        stp_update_interval_sec: Math.max(0, Math.min(86400, Number(stpUpdateIntervalSec) || 0)),
-      };
-
-      await api.put("/api/scan-settings", {
-        max_workers: normalized.max_workers,
-        snmp_timeout: normalized.snmp_timeout,
-        snmp_retries: normalized.snmp_retries,
-        snmp_bulk_size: normalized.snmp_bulk_size,
-      });
-      await api.put("/api/settings/discovery_interval_sec", { value: String(normalized.discovery_interval_sec) });
-      await api.put("/api/settings/link_update_interval_sec", { value: String(normalized.link_update_interval_sec) });
-      await api.put("/api/settings/mac_update_interval_sec", { value: String(normalized.mac_update_interval_sec) });
-      await api.put("/api/settings/vlan_update_interval_sec", { value: String(normalized.vlan_update_interval_sec) });
-      await api.put("/api/settings/stp_update_interval_sec", { value: String(normalized.stp_update_interval_sec) });
-      // Intentional migration sync: the backend still reads the legacy
-      // port_update_interval_sec key as a fallback, so keep it in step.
-      await api.put("/api/settings/port_update_interval_sec", { value: String(normalized.mac_update_interval_sec) });
-      return normalized;
-    },
+  const saveMutation = useUpdateScanEngineConfig({
     onSuccess: (normalized) => {
       // Re-sync the form with the clamped values that were actually saved.
       setScanWorkers(normalized.max_workers);
       setSnmpTimeout(normalized.snmp_timeout);
       setSnmpRetries(normalized.snmp_retries);
       setSnmpBulkSize(normalized.snmp_bulk_size);
+      setEndpointRetentionDays(normalized.endpoint_retention_days);
       setDiscoveryIntervalSec(normalized.discovery_interval_sec);
       setLinkUpdateIntervalSec(normalized.link_update_interval_sec);
       setMacUpdateIntervalSec(normalized.mac_update_interval_sec);
       setVlanUpdateIntervalSec(normalized.vlan_update_interval_sec);
       setStpUpdateIntervalSec(normalized.stp_update_interval_sec);
-      invalidate(queryKeys.scanSettings, queryKeys.appSettings);
     },
     onError: (ex) => setSettingsError(extractErrorMessage(ex)),
   });
 
   const save = () => {
     setSettingsError("");
-    saveMutation.mutate();
+    // 0 is a valid retention (cleanup disabled); only an empty or invalid
+    // field falls back to the default.
+    const retention = Number(endpointRetentionDays);
+    saveMutation.mutate({
+      max_workers: Math.max(1, Math.min(128, Number(scanWorkers) || 1)),
+      snmp_timeout: Math.max(1, Math.min(30, Number(snmpTimeout) || 3)),
+      snmp_retries: Math.max(0, Math.min(10, Number(snmpRetries) || 1)),
+      snmp_bulk_size: Math.max(5, Math.min(100, Number(snmpBulkSize) || 25)),
+      endpoint_retention_days:
+        String(endpointRetentionDays).trim() === "" || !Number.isFinite(retention)
+          ? 30
+          : Math.max(0, Math.min(3650, Math.round(retention))),
+      discovery_interval_sec: Math.max(0, Math.min(86400, Number(discoveryIntervalSec) || 0)),
+      link_update_interval_sec: Math.max(0, Math.min(3600, Number(linkUpdateIntervalSec) || 0)),
+      mac_update_interval_sec: Math.max(0, Math.min(3600, Number(macUpdateIntervalSec) || 0)),
+      vlan_update_interval_sec: Math.max(0, Math.min(86400, Number(vlanUpdateIntervalSec) || 0)),
+      stp_update_interval_sec: Math.max(0, Math.min(86400, Number(stpUpdateIntervalSec) || 0)),
+    });
   };
 
   const discoverySeconds = Math.max(0, Number(discoveryIntervalSec) || 0);
@@ -171,6 +159,13 @@ function ScanEngineConfig() {
             {settingsLoading ? "Loading settings..." : "1-128 workers; bulk size = rows per SNMP request (5-100)"}
           </span>
         </div>
+        {intervalInput(
+          "Endpoint retention (days)",
+          endpointRetentionDays,
+          setEndpointRetentionDays,
+          3650,
+          "Endpoints not seen for this many days are removed after a successful scan. 0 disables cleanup.",
+        )}
       </div>
 
       <div className="p-3 rounded-card bg-surface border border-line flex flex-col gap-2">

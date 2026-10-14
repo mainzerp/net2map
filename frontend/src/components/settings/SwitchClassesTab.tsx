@@ -1,8 +1,14 @@
 import { useState, useEffect } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { api, extractErrorMessage } from "../../api";
+import { extractErrorMessage } from "../../api";
 import type { SwitchClass, TopologyNode } from "../../types";
-import { queryKeys, useDevices, useInvalidateApi, useSwitchClasses } from "../../hooks/api";
+import {
+  useDeleteSwitchClass,
+  useDevices,
+  useSaveSwitchClass,
+  useSwitchClasses,
+  useUpdateDeviceMeta,
+} from "../../hooks/api";
+import { DEFAULT_SWITCH_CLASS_COLOR } from "../../theme/visual";
 import { Badge, Button, Card, EmptyState, Input, Modal } from "../ui";
 import { ConfirmDeleteModal, DeviceAssignment, Field, TabError, TabLoading } from "./shared";
 
@@ -25,12 +31,11 @@ interface ClassesTabContentProps {
 
 // Default for a user-chosen class color (data, not UI chrome): the palette ink
 // blue from theme/visual.ts. A native color input needs a hex value.
-const EMPTY_CLASS_FORM: ClassForm = { label: "", description: "", color: "#5a86b8", allow_outside_rack: false };
+const EMPTY_CLASS_FORM: ClassForm = { label: "", description: "", color: DEFAULT_SWITCH_CLASS_COLOR, allow_outside_rack: false };
 
 function ClassesTabContent({ newEntryTrigger }: ClassesTabContentProps) {
   const { data: classes = [], isLoading } = useSwitchClasses();
   const { data: devicesRaw } = useDevices();
-  const { invalidate } = useInvalidateApi();
 
   const devices: TopologyNode[] = Array.isArray(devicesRaw) ? devicesRaw : [];
 
@@ -52,36 +57,16 @@ function ClassesTabContent({ newEntryTrigger }: ClassesTabContentProps) {
     setErr("");
   };
 
-  const saveMutation = useMutation({
-    mutationFn: async (values: { id: number | null; form: ClassForm }) => {
-      if (values.id) {
-        await api.put(`/api/switch-classes/${values.id}`, values.form);
-      } else {
-        const r = await api.post<{ detail?: unknown }>("/api/switch-classes", values.form);
-        if (r.detail) throw new Error(typeof r.detail === "string" ? r.detail : JSON.stringify(r.detail));
-      }
-    },
-    onSuccess: () => {
-      invalidate(queryKeys.switchClasses, queryKeys.topology);
-      resetForm();
-    },
+  const saveMutation = useSaveSwitchClass({
+    onSuccess: () => resetForm(),
     onError: (ex) => setErr(extractErrorMessage(ex)),
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => api.del(`/api/switch-classes/${id}`),
-    onSuccess: () => {
-      invalidate(queryKeys.switchClasses, queryKeys.topology, queryKeys.devices);
-      setDeleteTarget(null);
-    },
+  const deleteMutation = useDeleteSwitchClass({
+    onSuccess: () => setDeleteTarget(null),
   });
 
-  const assignMutation = useMutation({
-    mutationFn: ({ devId, classId }: { devId: string; classId: number | null }) =>
-      api.patch(`/api/topology/devices/${devId}/meta`, { class_id: classId }),
-    onSuccess: () => {
-      invalidate(queryKeys.topology, queryKeys.devices, queryKeys.credentials);
-    },
+  const assignMutation = useUpdateDeviceMeta({
     onError: (ex) => setErr(extractErrorMessage(ex)),
   });
 
@@ -175,8 +160,8 @@ function ClassesTabContent({ newEntryTrigger }: ClassesTabContentProps) {
                 <DeviceAssignment
                   assigned={assigned}
                   available={available}
-                  onAssign={(devId) => assignMutation.mutate({ devId: String(devId), classId: sc.id })}
-                  onUnassign={(devId) => assignMutation.mutate({ devId: String(devId), classId: null })}
+                  onAssign={(devId) => assignMutation.mutate({ id: String(devId), patch: { class_id: sc.id } })}
+                  onUnassign={(devId) => assignMutation.mutate({ id: String(devId), patch: { class_id: null } })}
                 />
               </Card>
             );

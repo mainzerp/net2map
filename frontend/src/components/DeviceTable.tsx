@@ -1,11 +1,17 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { api, extractErrorMessage } from "../api";
+import { extractErrorMessage } from "../api";
 import { useToast } from "./ToastProvider";
-import { useBuildings, useDevices, useRacks, useInvalidateApi } from "../hooks/api";
+import {
+  useBuildings,
+  useBulkUpdateDeviceMeta,
+  useDevices,
+  useRacks,
+  useSwitchClasses,
+  useSwitchModels,
+  useUpdateDeviceMeta,
+} from "../hooks/api";
 import { flattenFloors } from "../features/topology/floors";
-import { queryKeys } from "../hooks/api";
 import {
   Badge,
   Button,
@@ -20,7 +26,7 @@ import {
 } from "./ui";
 import { formatTimestamp } from "../utils/datetime";
 import { useInspector } from "../hooks/useInspector";
-import type { DeviceTableProps, RackInfo, SwitchClass, SwitchModel, TopologyNode } from "../types";
+import type { DeviceTableProps, RackInfo, TopologyNode } from "../types";
 
 // /api/devices returns DeviceOut, which adds last_seen to the topology node shape.
 type DeviceRow = TopologyNode & { last_seen?: string | null };
@@ -53,16 +59,11 @@ function dotStatus(pingStatus: string | undefined): StatusDotStatus {
 export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel, emptyMessage }: DeviceTableProps) {
   const devicesQuery = useDevices();
   const racksQuery = useRacks();
-  const classesQuery = useQuery<SwitchClass[]>({
-    queryKey: queryKeys.switchClasses,
-    queryFn: () => api.get<SwitchClass[]>("/api/switch-classes"),
-  });
-  const modelsQuery = useQuery<SwitchModel[]>({
-    queryKey: queryKeys.switchModels,
-    queryFn: () => api.get<SwitchModel[]>("/api/switch-models"),
-  });
+  const classesQuery = useSwitchClasses();
+  const modelsQuery = useSwitchModels();
   const buildingsQuery = useBuildings();
-  const { invalidate } = useInvalidateApi();
+  const updateMeta = useUpdateDeviceMeta();
+  const bulkUpdateMeta = useBulkUpdateDeviceMeta();
   const { open: openInspector } = useInspector();
 
   const [togglingId, setTogglingId] = useState<number | null>(null);
@@ -98,15 +99,10 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
   const classMap = useMemo(() => Object.fromEntries(classes.map((c) => [c.id, c])), [classes]);
   const modelMap = useMemo(() => Object.fromEntries(models.map((m) => [m.id, m])), [models]);
 
-  const invalidateDeviceData = () => {
-    invalidate(queryKeys.topology, queryKeys.devices, queryKeys.stats);
-  };
-
   const toggleIgnored = async (dev: DeviceRow) => {
     setTogglingId(dev.id);
     try {
-      await api.patch(`/api/topology/devices/${dev.id}/meta`, { ignored: !dev.ignored });
-      invalidateDeviceData();
+      await updateMeta.mutateAsync({ id: dev.id, patch: { ignored: !dev.ignored } });
     } catch (ex) {
       addToast(`Failed to update device: ${extractErrorMessage(ex)}`, "error");
     } finally {
@@ -117,12 +113,11 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
   const bulkIgnore = async (ignored: boolean) => {
     setBulkLoading(true);
     try {
-      await api.patch("/api/topology/devices/bulk-meta", {
+      await bulkUpdateMeta.mutateAsync({
         device_ids: [...selected],
         ignored,
       });
       setSelected(new Set());
-      invalidateDeviceData();
     } catch (ex) {
       addToast(`Failed to update devices: ${extractErrorMessage(ex)}`, "error");
     } finally {
@@ -137,12 +132,11 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
     if (!value) return;
     setBulkLoading(true);
     try {
-      await api.patch("/api/topology/devices/bulk-meta", {
+      await bulkUpdateMeta.mutateAsync({
         device_ids: [...selected],
         ...(value === "none" ? { clear_floor: true } : { floor_id: Number(value) }),
       });
       setSelected(new Set());
-      invalidateDeviceData();
     } catch (ex) {
       addToast(`Failed to move devices: ${extractErrorMessage(ex)}`, "error");
     } finally {
@@ -183,8 +177,7 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
       return;
     }
     try {
-      await api.patch(`/api/topology/devices/${editState.id}/meta`, changes);
-      invalidateDeviceData();
+      await updateMeta.mutateAsync({ id: editState.id as number, patch: changes });
       resetForm();
     } catch (ex) {
       setErr(extractErrorMessage(ex));

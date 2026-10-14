@@ -1,12 +1,14 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { api, extractErrorMessage } from "../api";
+import { extractErrorMessage } from "../api";
 import useNet2MapStore from "../store";
 import { useToast } from "../components/ToastProvider";
 import { useScanProgress } from "../hooks/useScanProgress";
-import { queryKeys } from "../hooks/api/keys";
+import { isScanTerminal } from "../hooks/scanEvents";
 import { useInvalidateApi } from "../hooks/api/invalidate";
 import { useLatencySummary } from "../hooks/api/useLatency";
+import { useTopology, useUpdateDevicePosition, useUpdateRackPosition } from "../hooks/api/useTopology";
+import { useSaveRack } from "../hooks/api/useRacks";
+import { useUpdateDeviceMeta } from "../hooks/api/useDevices";
 import TopologyCanvas, {
   type AutoLayoutAssignment,
   type DevicePositionPatch,
@@ -32,11 +34,7 @@ const EMPTY_BUILDINGS: Building[] = [];
 // ── MapPage ──────────────────────────────────────────────────────────────────
 export default function MapPage() {
   // Live topology: 30s polling; the ETag in api.get keeps 304 responses cheap.
-  const topologyQuery = useQuery<TopologyData>({
-    queryKey: queryKeys.topology,
-    queryFn: () => api.get<TopologyData>("/api/topology"),
-    refetchInterval: 30_000,
-  });
+  const topologyQuery = useTopology({ refetchInterval: 30_000 });
   const topology = topologyQuery.data ?? EMPTY_TOPOLOGY;
   const loadError = topologyQuery.error ? extractErrorMessage(topologyQuery.error) : null;
 
@@ -61,6 +59,10 @@ export default function MapPage() {
   const activeScanJobId = useNet2MapStore(s => s.activeScanJobId);
   const setFocusDevice = useNet2MapStore(s => s.setFocusDevice);
   const { invalidateTopology } = useInvalidateApi();
+  const { mutateAsync: patchDevicePosition } = useUpdateDevicePosition();
+  const { mutateAsync: patchRackPosition } = useUpdateRackPosition();
+  const { mutateAsync: saveRack } = useSaveRack();
+  const { mutateAsync: patchDeviceMeta } = useUpdateDeviceMeta();
   const latencyQuery = useLatencySummary();
   const { rackOrders, reorderDevice, reorderClassSection } = useRackOrders();
   const { addToast } = useToast();
@@ -74,14 +76,14 @@ export default function MapPage() {
   // When the active scan job finishes, refresh the topology immediately.
   const scanProgress = useScanProgress(activeScanJobId);
   useEffect(() => {
-    if (scanProgress?.type === "scan_complete") {
+    if (isScanTerminal(scanProgress)) {
       invalidateTopology();
     }
   }, [scanProgress, invalidateTopology]);
 
   // Scan sweep overlay on the canvas while the job runs.
   const scanOverlay = useMemo(() => {
-    if (!activeScanJobId || scanProgress?.type === "scan_complete") return undefined;
+    if (!activeScanJobId || isScanTerminal(scanProgress)) return undefined;
     const total = scanProgress?.total ?? 0;
     const scanned = scanProgress?.scanned ?? scanProgress?.completed ?? 0;
     const known = scanProgress?.type === "scan_progress" && total > 0;
@@ -230,19 +232,17 @@ export default function MapPage() {
 
   // Device drag: center-convention position PATCH (unchanged contract).
   const saveDevicePosition = useCallback((id: number, pos: { x: number; y: number }) => {
-    api.patch(`/api/topology/devices/${id}/position`, { map_x: pos.x, map_y: pos.y }).catch((ex: unknown) => {
+    patchDevicePosition({ id, x: pos.x, y: pos.y }).catch((ex: unknown) => {
       addToast(`Position could not be saved: ${extractErrorMessage(ex)}`, "error");
     });
-  }, [addToast]);
+  }, [addToast, patchDevicePosition]);
 
   // Rack drag: persist the rack position and all member device positions in
   // parallel; a single toast covers any failure.
   const saveRackPosition = useCallback((rackId: number, pos: { x: number; y: number }, devicePositions: DevicePositionPatch[]) => {
     const tasks: Promise<unknown>[] = [
-      api.patch(`/api/topology/racks/${rackId}/position`, { map_x: pos.x, map_y: pos.y }),
-      ...devicePositions.map(d =>
-        api.patch(`/api/topology/devices/${d.id}/position`, { map_x: d.x, map_y: d.y }),
-      ),
+      patchRackPosition({ id: rackId, x: pos.x, y: pos.y }),
+      ...devicePositions.map(d => patchDevicePosition({ id: d.id, x: d.x, y: d.y })),
     ];
     void Promise.allSettled(tasks).then(results => {
       const failed = results.find(r => r.status === "rejected") as PromiseRejectedResult | undefined;
@@ -250,17 +250,13 @@ export default function MapPage() {
         addToast(`Position could not be saved: ${extractErrorMessage(failed.reason)}`, "error");
       }
     });
-  }, [addToast]);
+  }, [addToast, patchRackPosition, patchDevicePosition]);
 
   // Auto-Layout: persist every computed position, one toast on failure.
   const persistAutoLayout = useCallback((assignment: AutoLayoutAssignment) => {
     const tasks: Promise<unknown>[] = [
-      ...Object.entries(assignment.racks).map(([id, p]) =>
-        api.patch(`/api/topology/racks/${id}/position`, { map_x: p.x, map_y: p.y }),
-      ),
-      ...Object.entries(assignment.devices).map(([id, p]) =>
-        api.patch(`/api/topology/devices/${id}/position`, { map_x: p.x, map_y: p.y }),
-      ),
+      ...Object.entries(assignment.racks).map(([id, p]) => patchRackPosition({ id, x: p.x, y: p.y })),
+      ...Object.entries(assignment.devices).map(([id, p]) => patchDevicePosition({ id, x: p.x, y: p.y })),
     ];
     void Promise.allSettled(tasks).then(results => {
       const failed = results.filter(r => r.status === "rejected");
@@ -268,22 +264,19 @@ export default function MapPage() {
         addToast(`Auto-Layout: ${failed.length} position(s) could not be saved`, "error");
       }
     });
-  }, [addToast]);
+  }, [addToast, patchRackPosition, patchDevicePosition]);
 
   const renameRack = async (rack: SelectedRack, newName: string) => {
-    await api.put(`/api/racks/${rack.id}`, { label: newName });
+    await saveRack({ id: Number(rack.id), payload: { label: newName } });
     setSelectedRack(prev => prev ? { ...prev, label: newName } : null);
-    invalidateTopology();
   };
 
   const moveDevice = async (device: TopologyNode, newRackId: number | null) => {
-    await api.patch(`/api/topology/devices/${device.id}/meta`, { rack_id: newRackId || null });
-    invalidateTopology();
+    await patchDeviceMeta({ id: device.id, patch: { rack_id: newRackId || null } });
   };
 
   const updateDeviceMeta = async (device: TopologyNode, patch: Record<string, unknown>) => {
-    await api.patch(`/api/topology/devices/${device.id}/meta`, patch);
-    invalidateTopology();
+    await patchDeviceMeta({ id: device.id, patch });
   };
 
   const panelWidth = useMemo(() => {
@@ -315,7 +308,7 @@ export default function MapPage() {
   }, [rackOrders, selectedDetail]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 48px)", overflow: "hidden" }}>
+    <div className="h-full min-h-0 flex flex-col overflow-hidden">
       {loadError && (
         <div className="p-6 text-danger text-center">
           Failed to load topology: {loadError}
@@ -323,7 +316,7 @@ export default function MapPage() {
       )}
 
       {/* Map area: flex row so the panel sits inline and the map fills the left */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 min-h-0 flex overflow-hidden">
         <div className="flex-1 flex flex-col overflow-hidden transition-all">
           <div className="flex-1 overflow-hidden rounded-xl border border-line mx-3 mb-3 mt-1">
             <TopologyCanvas

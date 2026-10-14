@@ -18,6 +18,10 @@ const PALETTE = {
   slate: "#6b7a86",
 } as const;
 
+// Default for a user-chosen switch class color (data, not UI chrome). A native
+// color input needs a hex value.
+export const DEFAULT_SWITCH_CLASS_COLOR: string = PALETTE.inkBlue;
+
 export const CABLE_COLORS: string[] = [
   PALETTE.terracotta,
   PALETTE.inkBlue,

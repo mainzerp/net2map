@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { api, extractErrorMessage, AUTH_PROTOCOLS, PRIV_PROTOCOLS, SEC_LEVELS } from "../../api";
+import { extractErrorMessage, AUTH_PROTOCOLS, PRIV_PROTOCOLS, SEC_LEVELS } from "../../api";
 import type { SnmpProfile } from "../../types";
-import { queryKeys, useInvalidateApi, useSnmpProfiles } from "../../hooks/api";
+import { useDeleteSnmpProfile, useSaveSnmpProfile, useSnmpProfiles } from "../../hooks/api";
 import { Badge, Button, Card, EmptyState, Input, Modal, Select } from "../ui";
 import { ConfirmDeleteModal, Field, TabError, TabLoading } from "./shared";
 
@@ -38,7 +37,6 @@ const EMPTY_PROFILE_FORM: ProfileForm = {
 
 function SnmpProfilesTabContent({ newEntryTrigger }: SnmpProfilesTabContentProps) {
   const { data: profiles = [], isLoading, error: loadError } = useSnmpProfiles();
-  const { invalidate } = useInvalidateApi();
   const [editState, setEditState] = useState<EditState>({ id: null, open: false });
   const [form, setForm] = useState<ProfileForm>({ ...EMPTY_PROFILE_FORM });
   const [err, setErr] = useState<string>("");
@@ -65,33 +63,15 @@ function SnmpProfilesTabContent({ newEntryTrigger }: SnmpProfilesTabContentProps
     setErr("");
   };
 
-  const saveMutation = useMutation({
-    mutationFn: async (values: { id: number | null; form: ProfileForm }) => {
-      if (values.id) {
-        // On edit, omit secret fields left empty so the backend keeps the
-        // stored value instead of overwriting it.
-        const payload: Record<string, unknown> = { ...values.form };
-        (["community", "v3_auth_password", "v3_priv_password"] as const).forEach((k) => {
-          if (payload[k] === "") delete payload[k];
-        });
-        await api.put(`/api/snmp-profiles/${values.id}`, payload);
-      } else {
-        await api.post("/api/snmp-profiles", values.form);
-      }
-    },
-    onSuccess: () => {
-      invalidate(queryKeys.snmpProfiles, queryKeys.credentials);
-      resetForm();
-    },
+  // On edit, the hook omits secret fields left empty so the backend keeps
+  // the stored value instead of overwriting it.
+  const saveMutation = useSaveSnmpProfile({
+    onSuccess: () => resetForm(),
     onError: (ex) => setErr(extractErrorMessage(ex)),
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => api.del(`/api/snmp-profiles/${id}`),
-    onSuccess: () => {
-      invalidate(queryKeys.snmpProfiles, queryKeys.credentials);
-      setDeleteTarget(null);
-    },
+  const deleteMutation = useDeleteSnmpProfile({
+    onSuccess: () => setDeleteTarget(null),
     onError: (ex) => setErr(extractErrorMessage(ex)),
   });
 

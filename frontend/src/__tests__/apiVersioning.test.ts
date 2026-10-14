@@ -84,6 +84,20 @@ describe("API version mapping", () => {
     expect((await headersFor("/api/items/1")).headers["If-None-Match"]).toBeUndefined();
   });
 
+  it("stores the refetched ETag when a 304 arrives without a cache entry", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 304 }))
+      .mockResolvedValueOnce(response([{ id: 3 }], 200, { ETag: "m1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await api.get("/api/miss-test")).toEqual([{ id: 3 }]);
+    expect(fetchMock.mock.calls[1][1].headers["If-None-Match"]).toBeUndefined();
+
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 304 }));
+    const cached = await api.get("/api/miss-test");
+    expect(fetchMock.mock.calls[2][1].headers["If-None-Match"]).toBe("m1");
+    expect(cached).toEqual([{ id: 3 }]);
+  });
+
   it("mutations drop related cached GETs including filtered list views", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response([{ id: 1 }], 200, { ETag: "r1" }));
     vi.stubGlobal("fetch", fetchMock);
@@ -93,6 +107,29 @@ describe("API version mapping", () => {
     fetchMock.mockResolvedValue(response([{ id: 1 }], 200, { ETag: "r2" }));
     await api.get("/api/racks?room=a");
     expect(fetchMock.mock.calls[2][1].headers["If-None-Match"]).toBeUndefined();
+  });
+
+  it("multipart uploads send FormData without a JSON content type", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ id: 5 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const fd = new FormData();
+    fd.append("file", new File(["x"], "a.png"));
+    expect(await api.upload("/api/floors/5/background", fd)).toEqual({ id: 5 });
+    const init = fetchMock.mock.calls[0][1];
+    expect(String(fetchMock.mock.calls[0][0]).endsWith("/api/v1/floors/5/background")).toBe(true);
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe(fd);
+    expect(init.headers["Content-Type"]).toBeUndefined();
+    expect(init.headers.Authorization).toBe("Bearer token");
+  });
+
+  it("multipart uploads share the 401 session handling", async () => {
+    const navigate = vi.fn();
+    setApiNavigate(navigate);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ detail: "expired" }, 401)));
+    await expect(api.upload("/api/floors/5/background", new FormData())).rejects.toThrow("HTTP 401: expired");
+    expect(navigate).toHaveBeenCalledWith("/login", { replace: true });
+    expect(localStorage.getItem("auth_token")).toBeNull();
   });
 
   it("mutations go to the versioned URL", async () => {

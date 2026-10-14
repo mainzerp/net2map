@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, apiUrl, _getAuthHeader } from "../../api";
+import { api } from "../../api";
 import type { Building, Floor } from "../../types";
 import { queryKeys } from "./keys";
 
@@ -101,27 +101,12 @@ export function useDeleteFloor() {
   });
 }
 
-// Multipart upload: the JSON api helper cannot send FormData, so this uses a
-// bare fetch with the same auth header and error extraction.
+// Multipart upload through the shared api helper, so the 401 handling
+// (session clear and /login redirect) and error extraction apply.
 export async function uploadFloorBackground(floorId: number, file: File): Promise<Floor> {
   const fd = new FormData();
   fd.append("file", file);
-  const res = await fetch(apiUrl(`/api/floors/${floorId}/background`), {
-    method: "POST",
-    body: fd,
-    headers: _getAuthHeader(),
-  });
-  if (!res.ok) {
-    let msg: string;
-    try {
-      const b = await res.json();
-      msg = b?.error?.message || b?.detail || res.statusText;
-    } catch {
-      msg = res.statusText;
-    }
-    throw new Error(msg);
-  }
-  return (await res.json()) as Floor;
+  return api.upload<Floor>(`/api/floors/${floorId}/background`, fd);
 }
 
 export function useUploadFloorBackground() {

@@ -1,6 +1,13 @@
-import { useState, useEffect, useRef } from "react";
-import { api, extractErrorMessage } from "../../../api";
-import { queryKeys, useInvalidateApi, useScanRuns } from "../../../hooks/api";
+import { useState, useEffect } from "react";
+import { extractErrorMessage } from "../../../api";
+import {
+  queryKeys,
+  useCancelScanJob,
+  useCreateScanJob,
+  useInvalidateApi,
+  useScanJob,
+  useScanRuns,
+} from "../../../hooks/api";
 import { useToast } from "../../ToastProvider";
 import { Button, Card, EmptyState } from "../../ui";
 import { SectionHeader, TabLoading } from "../shared";
@@ -25,12 +32,9 @@ interface SwitchMetric {
   success: boolean;
 }
 
-// Job statuses that mean "still working" -- everything else (finished,
-// failed, cancelled, skipped, dry_run) ends the poll loop.
-const ACTIVE_JOB_STATUSES = new Set(["queued", "running"]);
-
 // Run-scan action with job polling, the latest result panel, and the
-// persisted scan run history.
+// persisted scan run history. Polling (useScanJob) never overlaps requests
+// and gives up after repeated failed GETs or a maximum duration.
 function ScanRunHistory() {
   const { data: history = [], isLoading: historyLoading } = useScanRuns(20);
   const { invalidate } = useInvalidateApi();
@@ -38,48 +42,46 @@ function ScanRunHistory() {
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<string | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const { addToast } = useToast();
+  const createJob = useCreateScanJob();
+  const cancelJob = useCancelScanJob();
+  const { job, finished, error: pollError, timedOut } = useScanJob<ScanResult>(activeJobId);
 
-  const stopPolling = () => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  };
+  // Mirror each poll result into the result panel and status line.
+  useEffect(() => {
+    if (job?.result) setScanResult(job.result);
+    if (job?.status) setJobStatus(job.status);
+  }, [job]);
 
-  useEffect(() => stopPolling, []);
+  useEffect(() => {
+    if (!finished) return;
+    setScanning(false);
+    setActiveJobId(null);
+    invalidate(queryKeys.scanRuns, queryKeys.topology, queryKeys.devices, queryKeys.stats);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finished]);
 
-  const startPolling = (jobId: string) => {
-    stopPolling();
-    pollRef.current = setInterval(async () => {
-      try {
-        const st = await api.get<{ status?: string; result?: ScanResult } | null>(`/api/scan/jobs/${jobId}`);
-        if (st?.result) {
-          setScanResult(st.result);
-        }
-        if (st?.status) setJobStatus(st.status);
-        if (st?.status && !ACTIVE_JOB_STATUSES.has(st.status)) {
-          setScanning(false);
-          setActiveJobId(null);
-          stopPolling();
-          invalidate(queryKeys.scanRuns, queryKeys.topology, queryKeys.devices, queryKeys.stats);
-        }
-      } catch (_) {
-        // keep polling on transient UI/API glitches
-      }
-    }, 1500);
-  };
+  // Polling gave up: stop waiting and surface the failure.
+  useEffect(() => {
+    if (!pollError && !timedOut) return;
+    const message = timedOut
+      ? "Timed out waiting for the scan result"
+      : `Lost track of the scan job: ${extractErrorMessage(pollError)}`;
+    setScanning(false);
+    setActiveJobId(null);
+    setScanResult((prev) => ({ ...(prev ?? {}), errors: [...(prev?.errors ?? []), message], status: "failed" }));
+    addToast(message, "error");
+    invalidate(queryKeys.scanRuns);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pollError, timedOut]);
 
   const runScan = async () => {
     setScanning(true);
     setScanResult(null);
     try {
-      const job: { job_id?: string } = await api.post("/api/scan/jobs", {});
-      if (!job?.job_id) throw new Error("Scan job could not be created");
-      setActiveJobId(job.job_id);
+      const jobId = await createJob.mutateAsync();
+      setActiveJobId(jobId);
       setJobStatus("queued");
-      startPolling(job.job_id);
     } catch (e) {
       setScanning(false);
       setScanResult({ scanned: 0, found: 0, links: 0, errors: [extractErrorMessage(e)], status: "failed" });
@@ -89,7 +91,7 @@ function ScanRunHistory() {
   const cancelScan = async () => {
     if (!activeJobId) return;
     try {
-      await api.post(`/api/scan/jobs/${activeJobId}/cancel`, {});
+      await cancelJob.mutateAsync(activeJobId);
     } catch (e) {
       // Keep polling: a failed cancel leaves the job running.
       addToast(`Cancel failed: ${extractErrorMessage(e)}`, "error");

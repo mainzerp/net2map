@@ -106,7 +106,7 @@ function _invalidateRelated(path: string): void {
   }
 }
 
-// Auth token from localStorage (login JWT or legacy SECRET_TOKEN)
+// Auth token (login JWT) from localStorage
 export function _getAuthHeader(): Record<string, string> {
   const token = localStorage.getItem("auth_token") || "";
   return token ? { Authorization: "Bearer " + token } : {};
@@ -116,20 +116,6 @@ export function login(token: string, user: { username: string; role: string }): 
   localStorage.setItem("auth_token", token);
   localStorage.setItem("auth_user", JSON.stringify(user));
   resetSessionCaches();
-}
-
-/**
- * Validate a static access token (legacy single SECRET_TOKEN mode, or a pasted
- * JWT) against GET /api/auth/me without storing it. Resolves to the user the
- * backend associates with the token; rejects with an "HTTP <status>: ..." error.
- */
-export async function verifyAccessToken(token: string): Promise<{ username: string; role: string }> {
-  const r = await fetch(apiUrl("/api/auth/me"), { headers: { Authorization: "Bearer " + token } });
-  if (!r.ok) {
-    throw new Error(`HTTP ${r.status}: ${r.status === 401 ? "Invalid access token" : r.statusText}`);
-  }
-  const data: { username?: string; role?: string } = await r.json();
-  return { username: data.username || "token", role: data.role || "viewer" };
 }
 
 export async function logout(): Promise<boolean> {
@@ -268,8 +254,10 @@ export const api = {
       const r2 = await fetch(apiUrl(path), { headers: { ..._getAuthHeader() } });
       checkSession(version);
       await _checkOk(r2);
+      const etag2 = r2.headers.get("ETag");
       const data2 = await r2.json();
       checkSession(version);
+      if (etag2) _etagCacheSet(key, { etag: etag2, data: structuredClone(data2) });
       return data2 as T;
     }
     await _checkOk(r);
@@ -283,6 +271,9 @@ export const api = {
   put: <T = unknown>(path: string, body?: unknown): Promise<T> => mutate<T>("PUT", path, body),
   patch: <T = unknown>(path: string, body?: unknown): Promise<T> => mutate<T>("PATCH", path, body),
   del: (path: string): Promise<void> => mutate<void>("DELETE", path),
+  /** Multipart upload (FormData body) through the shared auth, 401 and error handling. */
+  upload: <T = unknown>(path: string, body: FormData, method: string = "POST"): Promise<T> =>
+    mutate<T>(method, path, body),
   /** Invalidate one or more ETag cache entries so the next GET fetches fresh data. */
   invalidate: (...paths: string[]): void => { paths.forEach(p => { _etagCache.delete(etagCacheKey(p)); }); },
 };
@@ -291,10 +282,13 @@ async function mutate<T>(method: string, path: string, body?: unknown): Promise<
   const version = _sessionVersion;
   if (path !== "/api/auth/login") await refreshTokenIfNeeded();
   checkSession(version);
+  // FormData bodies must not carry a JSON Content-Type: the browser sets the
+  // multipart boundary itself.
+  const isForm = typeof FormData !== "undefined" && body instanceof FormData;
   const response = await fetch(apiUrl(path), {
     method,
-    headers: { "Content-Type": "application/json", ..._getAuthHeader() },
-    body: JSON.stringify(body),
+    headers: isForm ? { ..._getAuthHeader() } : { "Content-Type": "application/json", ..._getAuthHeader() },
+    body: isForm ? body : JSON.stringify(body),
   });
   checkSession(version);
   await _checkOk(response);

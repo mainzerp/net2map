@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { API, api } from "../api";
 import { useToast } from "../components/ToastProvider";
 import type { ScanProgress } from "../types";
+import { SCAN_CONNECTION_LOST } from "./scanEvents";
 
 const MAX_RECONNECT_ATTEMPTS = 5;
 const BASE_RETRY_DELAY_MS = 3000;
@@ -43,6 +44,8 @@ export function useScanProgress(jobId: string | null): ScanProgress | null {
       if (failureNotified) return;
       failureNotified = true;
       addToastRef.current(message, "error");
+      // Let consumers stop waiting for a completion event that cannot arrive.
+      if (!unmounted) setProgress({ type: SCAN_CONNECTION_LOST, job_id: jobId ?? undefined, message });
     }
 
     async function connect() {

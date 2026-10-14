@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from "react";
-import { api, extractErrorMessage } from "../../../api";
-import { useDiscoveryRanges } from "../../../hooks/api";
+import { useState, useEffect } from "react";
+import { extractErrorMessage } from "../../../api";
+import { useCreateScanJob, useDiscoveryRanges, useScanJob } from "../../../hooks/api";
 import { useToast } from "../../ToastProvider";
 import { Badge, Button } from "../../ui";
 
@@ -22,76 +22,54 @@ interface DryRunResult {
   preview: DryRunPreviewItem[];
 }
 
-// Job statuses that mean "still working" -- everything else (finished,
-// failed, cancelled, skipped, dry_run) ends the poll loop.
-const ACTIVE_JOB_STATUSES = new Set(["queued", "running"]);
-
 // Starts a discovery dry-run job and polls it until done. The polling is
 // bounded so a stuck job cannot leak polling forever.
+const DRY_RUN_POLL = { intervalMs: 2000, maxErrors: 5, maxDurationMs: 5 * 60_000 };
+
 function DryRunPanel() {
   const { data: discoveryRanges = [], isLoading: rangesLoading } = useDiscoveryRanges();
   const [dryRunLoading, setDryRunLoading] = useState<boolean>(false);
   const [dryRunResult, setDryRunResult] = useState<DryRunResult | null>(null);
-  const dryRunPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
   const { addToast } = useToast();
+  const createJob = useCreateScanJob();
+  const { job, finished, error: pollError, timedOut } = useScanJob<Partial<DryRunResult>>(jobId, DRY_RUN_POLL);
 
-  const stopDryRunPolling = () => {
-    if (dryRunPollRef.current) {
-      clearInterval(dryRunPollRef.current);
-      dryRunPollRef.current = null;
-    }
-  };
+  useEffect(() => {
+    if (!job?.result) return;
+    const preview: DryRunPreviewItem[] = job.result?.preview ?? [];
+    setDryRunResult({
+      status: job.result.status,
+      scanned: job.result.scanned,
+      found: job.result.found,
+      errors: job.result.errors,
+      total_duration_ms: job.result.total_duration_ms,
+      preview,
+    });
+  }, [job]);
 
-  useEffect(() => stopDryRunPolling, []);
+  useEffect(() => {
+    if (!finished) return;
+    setJobId(null);
+    setDryRunLoading(false);
+  }, [finished]);
+
+  useEffect(() => {
+    if (!pollError && !timedOut) return;
+    const message = timedOut ? "Timed out waiting for the dry run result (5 min)" : extractErrorMessage(pollError);
+    setJobId(null);
+    setDryRunResult({ status: "error", errors: [message], preview: [] });
+    setDryRunLoading(false);
+    addToast(`Dry run failed: ${message}`, "error");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pollError, timedOut]);
 
   const runDryRun = async () => {
     setDryRunLoading(true);
     setDryRunResult(null);
-    stopDryRunPolling();
+    setJobId(null);
     try {
-      const job: { job_id?: string } = await api.post("/api/scan/dry-run/jobs", {});
-      if (!job?.job_id) throw new Error("Dry run job could not be created");
-      const MAX_ATTEMPTS = 150; // 150 x 2s = 5 minutes
-      const MAX_ERRORS = 5;
-      let attempts = 0;
-      let consecutiveErrors = 0;
-      const failDryRun = (message: string) => {
-        stopDryRunPolling();
-        setDryRunResult({ status: "error", errors: [message], preview: [] });
-        setDryRunLoading(false);
-        addToast(`Dry run failed: ${message}`, "error");
-      };
-      dryRunPollRef.current = setInterval(async () => {
-        attempts += 1;
-        if (attempts > MAX_ATTEMPTS) {
-          failDryRun("Timed out waiting for the dry run result (5 min)");
-          return;
-        }
-        try {
-          const st = await api.get<{ status?: string; result?: Partial<DryRunResult> } | null>(`/api/scan/jobs/${job.job_id}`);
-          consecutiveErrors = 0;
-          if (st?.result) {
-            const preview: DryRunPreviewItem[] = st.result?.preview ?? [];
-            setDryRunResult({
-              status: st.result.status,
-              scanned: st.result.scanned,
-              found: st.result.found,
-              errors: st.result.errors,
-              total_duration_ms: st.result.total_duration_ms,
-              preview,
-            });
-          }
-          if (st?.status && !ACTIVE_JOB_STATUSES.has(st.status)) {
-            stopDryRunPolling();
-            setDryRunLoading(false);
-          }
-        } catch (ex) {
-          consecutiveErrors += 1;
-          if (consecutiveErrors >= MAX_ERRORS) {
-            failDryRun(extractErrorMessage(ex));
-          }
-        }
-      }, 2000);
+      setJobId(await createJob.mutateAsync({ dryRun: true }));
     } catch (ex) {
       setDryRunResult({ status: "error", errors: [extractErrorMessage(ex)], preview: [] });
       setDryRunLoading(false);

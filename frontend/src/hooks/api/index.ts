@@ -1,14 +1,21 @@
 export { queryKeys } from "./keys";
 export { useInvalidateApi } from "./invalidate";
-export { useTopology } from "./useTopology";
+export {
+  useTopology,
+  useUpdateDevicePosition,
+  useUpdateRackPosition,
+  type UseTopologyOptions,
+  type MapPositionUpdate,
+} from "./useTopology";
+export { useApiMutation, type MutationHookOptions } from "./mutation";
 export { useStats, type Stats } from "./useStats";
-export { useDevices } from "./useDevices";
-export { useEndpoints } from "./useEndpoints";
-export { useRacks } from "./useRacks";
+export { useDevices, useUpdateDeviceMeta, useBulkUpdateDeviceMeta, type DeviceMetaUpdate } from "./useDevices";
+export { useEndpoints, useUpdateEndpoint, useBulkUpdateEndpoints, type EndpointUpdate } from "./useEndpoints";
+export { useRacks, useSaveRack, useDeleteRack, type RackSave } from "./useRacks";
 export { useRackItems, useCreateRackItem, useUpdateRackItem, useDeleteRackItem } from "./useRackItems";
 export { useLogs, type LogEntry, type LogsParams } from "./useLogs";
-export { useSnmpProfiles } from "./useSnmpProfiles";
-export { useCredentials } from "./useCredentials";
+export { useSnmpProfiles, useSaveSnmpProfile, useDeleteSnmpProfile, type SnmpProfileSave } from "./useSnmpProfiles";
+export { useCredentials, useSaveCredential, useDeleteCredential, type CredentialSave } from "./useCredentials";
 export {
   useAdoptPingOnly,
   usePingCandidates,
@@ -16,19 +23,34 @@ export {
   useRestorePingCandidates,
   pingOnlySkipLabel,
 } from "./usePingOnly";
-export { useSwitchModels } from "./useSwitchModels";
-export { useSwitchClasses } from "./useSwitchClasses";
+export { useSwitchModels, useSaveSwitchModel, useDeleteSwitchModel, type SwitchModelSave } from "./useSwitchModels";
+export { useSwitchClasses, useSaveSwitchClass, useDeleteSwitchClass, type SwitchClassSave } from "./useSwitchClasses";
 export {
   useScanSettings,
   useAppSettings,
   useUpdateAppSettings,
   useDiscoveryRanges,
   useScanRuns,
+  useUpdateDiscoveryRanges,
+  useUpdateScanEngineConfig,
+  useScanJob,
+  useCreateScanJob,
+  useCancelScanJob,
+  ACTIVE_SCAN_JOB_STATUSES,
+  type ScanEngineConfigValues,
+  type ScanJobStatus,
+  type UseScanJobOptions,
   type ScanSettings,
   type AppSetting,
   type ScanRunEntry,
 } from "./useScanConfig";
-export { useDnsServers } from "./useDnsServers";
+export { useDnsServers, useUpdateDnsServers } from "./useDnsServers";
+export {
+  useExportConfig,
+  useImportConfig,
+  type ConfigImportResponse,
+  type ConfigImportInput,
+} from "./useConfigBackup";
 export {
   useBuildings,
   useCreateBuilding,

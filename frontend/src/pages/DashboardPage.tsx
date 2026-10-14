@@ -2,8 +2,9 @@ import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { m } from "motion/react";
 import { ArrowRight, RefreshCw, Server, Settings, Waypoints, type LucideIcon } from "lucide-react";
-import { useTopology, useStats, useEndpoints, useInvalidateApi } from "../hooks/api";
+import { queryKeys, useCancelScanJob, useTopology, useStats, useEndpoints, useInvalidateApi } from "../hooks/api";
 import { useScanProgress } from "../hooks/useScanProgress";
+import { isScanTerminal } from "../hooks/scanEvents";
 import useNet2MapStore from "../store";
 import { useToast } from "../components/ToastProvider";
 import { Button, Card } from "../components/ui";
@@ -14,7 +15,7 @@ import { RackOverview } from "../features/dashboard/RackOverview";
 import { findFloor } from "../features/topology/floors";
 import { LatencyCard } from "../features/latency/LatencyCard";
 import { useLastScanRun } from "../features/dashboard/useLastScanRun";
-import { api, extractErrorMessage } from "../api";
+import { extractErrorMessage } from "../api";
 import { formatTimestamp } from "../utils/datetime";
 import type { ScanProgress, TopologyData } from "../types";
 import { revealContainerVariants, revealItemVariants, useReducedMotion } from "../theme/motion";
@@ -144,6 +145,7 @@ export default function DashboardPage() {
   const endpointsQuery = useEndpoints();
   const lastScanQuery = useLastScanRun();
   const { invalidate, invalidateTopology } = useInvalidateApi();
+  const cancelScanJob = useCancelScanJob();
 
   const [scanning, setScanning] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -157,14 +159,16 @@ export default function DashboardPage() {
   const reduced = useReducedMotion();
   const revealItem = revealItemVariants(reduced);
 
-  // Handle scan completion via WebSocket: refresh all dashboard data.
+  // Handle scan completion, failure or cancellation via WebSocket (and the
+  // live connection giving up): stop tracking the job and refresh all
+  // dashboard data.
   useEffect(() => {
-    if (progress?.type === "scan_complete") {
+    if (isScanTerminal(progress)) {
       setScanning(false);
       setCancelling(false);
       clearScanJob();
       invalidateTopology();
-      invalidate(["scan-runs"]);
+      invalidate(queryKeys.scanRuns);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [progress]);
@@ -189,7 +193,7 @@ export default function DashboardPage() {
     if (!activeScanJobId) return;
     setCancelling(true);
     try {
-      await api.post(`/api/scan/jobs/${activeScanJobId}/cancel`, {});
+      await cancelScanJob.mutateAsync(activeScanJobId);
       addToast("Scan cancellation requested", "info");
     } catch (e: unknown) {
       setCancelling(false);

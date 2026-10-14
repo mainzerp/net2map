@@ -1,8 +1,13 @@
 import { useState, useEffect } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { api, extractErrorMessage } from "../../api";
+import { extractErrorMessage } from "../../api";
 import type { SwitchModel, TopologyNode } from "../../types";
-import { queryKeys, useDevices, useInvalidateApi, useSwitchModels } from "../../hooks/api";
+import {
+  useDeleteSwitchModel,
+  useDevices,
+  useSaveSwitchModel,
+  useSwitchModels,
+  useUpdateDeviceMeta,
+} from "../../hooks/api";
 import { Badge, Button, Card, EmptyState, Input, Modal } from "../ui";
 import { ConfirmDeleteModal, DeviceAssignment, Field, TabLoading } from "./shared";
 
@@ -28,7 +33,6 @@ const EMPTY_MODEL_FORM: ModelForm = { name: "", ports_per_row: 24, total_ports: 
 function ModelsTabContent({ newEntryTrigger }: ModelsTabContentProps) {
   const { data: models = [], isLoading } = useSwitchModels();
   const { data: devicesRaw } = useDevices();
-  const { invalidate } = useInvalidateApi();
 
   const devices: TopologyNode[] = Array.isArray(devicesRaw) ? devicesRaw : [];
 
@@ -57,51 +61,30 @@ function ModelsTabContent({ newEntryTrigger }: ModelsTabContentProps) {
     setErr("");
   };
 
-  const saveMutation = useMutation({
-    mutationFn: async (values: { id: number | null; form: ModelForm; cutoff: boolean }) => {
-      const ppr = parseInt(String(values.form.ports_per_row), 10);
-      if (!String(values.form.name).trim()) throw new Error("Name is required");
-      if (isNaN(ppr) || ppr < 1) throw new Error("Ports per row must be a positive number");
-      const payload = {
-        name: String(values.form.name).trim(),
-        ports_per_row: ppr,
-        total_ports: values.cutoff && values.form.total_ports !== "" ? parseInt(String(values.form.total_ports), 10) || null : null,
-        description: values.form.description,
-      };
-      if (values.id) {
-        await api.put(`/api/switch-models/${values.id}`, payload);
-      } else {
-        const r = await api.post<{ detail?: unknown }>("/api/switch-models", payload);
-        if (r.detail) throw new Error(typeof r.detail === "string" ? r.detail : JSON.stringify(r.detail));
-      }
-    },
-    onSuccess: () => {
-      invalidate(queryKeys.switchModels, queryKeys.topology, queryKeys.devices);
-      resetForm();
-    },
+  const saveMutation = useSaveSwitchModel({
+    onSuccess: () => resetForm(),
     onError: (ex) => setErr(extractErrorMessage(ex)),
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => api.del(`/api/switch-models/${id}`),
-    onSuccess: () => {
-      invalidate(queryKeys.switchModels, queryKeys.topology, queryKeys.devices);
-      setDeleteTarget(null);
-    },
+  const deleteMutation = useDeleteSwitchModel({
+    onSuccess: () => setDeleteTarget(null),
   });
 
-  const assignMutation = useMutation({
-    mutationFn: ({ devId, modelId }: { devId: string; modelId: number | null }) =>
-      api.patch(`/api/topology/devices/${devId}/meta`, { model_id: modelId }),
-    onSuccess: () => {
-      invalidate(queryKeys.topology, queryKeys.devices, queryKeys.credentials);
-    },
-  });
+  const assignMutation = useUpdateDeviceMeta();
 
   const submit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setErr("");
-    saveMutation.mutate({ id: editState.id, form, cutoff: cutoffEnabled });
+    const ppr = parseInt(String(form.ports_per_row), 10);
+    if (!String(form.name).trim()) { setErr("Name is required"); return; }
+    if (isNaN(ppr) || ppr < 1) { setErr("Ports per row must be a positive number"); return; }
+    const payload = {
+      name: String(form.name).trim(),
+      ports_per_row: ppr,
+      total_ports: cutoffEnabled && form.total_ports !== "" ? parseInt(String(form.total_ports), 10) || null : null,
+      description: form.description,
+    };
+    saveMutation.mutate({ id: editState.id, payload });
   };
 
   return (
@@ -210,8 +193,8 @@ function ModelsTabContent({ newEntryTrigger }: ModelsTabContentProps) {
                 <DeviceAssignment
                   assigned={assigned}
                   available={available}
-                  onAssign={(devId) => assignMutation.mutate({ devId: String(devId), modelId: sm.id })}
-                  onUnassign={(devId) => assignMutation.mutate({ devId: String(devId), modelId: null })}
+                  onAssign={(devId) => assignMutation.mutate({ id: String(devId), patch: { model_id: sm.id } })}
+                  onUnassign={(devId) => assignMutation.mutate({ id: String(devId), patch: { model_id: null } })}
                 />
               </Card>
             );

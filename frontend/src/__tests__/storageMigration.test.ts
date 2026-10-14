@@ -33,4 +33,28 @@ describe("migrateLegacyStorageKeys", () => {
     expect(storage.getItem("net2map-theme")).toBe("light");
     expect(storage.getItem("netmap-theme")).toBeNull();
   });
+
+  it("migrates the persisted floor choice", () => {
+    const storage = memoryStorage({ "netmap-floor": "b1:f2" });
+
+    migrateLegacyStorageKeys(storage);
+
+    expect(storage.getItem("net2map-floor")).toBe("b1:f2");
+    expect(storage.getItem("netmap-floor")).toBeNull();
+  });
+
+  it("migrates prefixed per-floor zoom keys and keeps the suffix", () => {
+    const storage = memoryStorage({
+      "netmap-zoom:b1:f2": '{"x":1}',
+      "netmap-zoom:none": '{"x":2}',
+      "net2map-zoom:none": '{"x":3}',
+    });
+
+    migrateLegacyStorageKeys(storage);
+
+    expect(storage.getItem("net2map-zoom:b1:f2")).toBe('{"x":1}');
+    expect(storage.getItem("net2map-zoom:none")).toBe('{"x":3}');
+    expect(storage.getItem("netmap-zoom:b1:f2")).toBeNull();
+    expect(storage.getItem("netmap-zoom:none")).toBeNull();
+  });
 });

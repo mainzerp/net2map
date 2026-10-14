@@ -1,37 +1,17 @@
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { api, extractErrorMessage } from "../../api";
-import { useInvalidateApi } from "../../hooks/api";
+import { extractErrorMessage } from "../../api";
+import { useExportConfig, useImportConfig } from "../../hooks/api";
 import { useToast } from "../ToastProvider";
 import { Button, Card } from "../ui";
 import { SectionHeader } from "./shared";
-
-interface ImportTotals {
-  settings?: number;
-  profiles?: number;
-  credentials?: number;
-}
-
-interface ImportError {
-  section: string;
-  row: number;
-  message: string;
-}
-
-interface ImportResponse {
-  totals?: ImportTotals;
-  errors?: ImportError[];
-}
 
 function DataImportExportTabContent() {
   const [configDryRun, setConfigDryRun] = useState<boolean>(true);
   const [configData, setConfigData] = useState<string>("");
   const [configMsg, setConfigMsg] = useState<string>("");
   const { addToast } = useToast();
-  const { invalidateAll } = useInvalidateApi();
 
-  const exportMutation = useMutation({
-    mutationFn: () => api.get("/api/config/export") as Promise<{ data?: string }>,
+  const exportMutation = useExportConfig({
     onSuccess: (res) => {
       setConfigData(res?.data || "");
       setConfigMsg("Global config exported");
@@ -39,17 +19,12 @@ function DataImportExportTabContent() {
     onError: (ex) => setConfigMsg(extractErrorMessage(ex)),
   });
 
-  const importMutation = useMutation({
-    mutationFn: (values: { data: string; dryRun: boolean }) =>
-      api.post("/api/config/import", { data: values.data, dry_run: values.dryRun }) as Promise<ImportResponse>,
+  const importMutation = useImportConfig({
     onSuccess: (res, values) => {
       const errorCount = Array.isArray(res?.errors) ? res.errors.length : 0;
       const summary = `${values.dryRun ? "Dry-run" : "Restore"}: settings ${res?.totals?.settings ?? 0}, profiles ${res?.totals?.profiles ?? 0}, credentials ${res?.totals?.credentials ?? 0}, errors ${errorCount}`;
       setConfigMsg(summary);
       addToast(summary, errorCount > 0 ? "warning" : "success");
-      if (!values.dryRun) {
-        invalidateAll();
-      }
       if (errorCount > 0) {
         const details = res.errors!.map((e) => `${e.section} row ${e.row}: ${e.message}`).join("\n");
         setConfigData((prev) => `${prev}\n\n# Validation Errors\n${details}`);

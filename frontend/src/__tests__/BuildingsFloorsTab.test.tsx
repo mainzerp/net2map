@@ -13,6 +13,7 @@ const mockApiGet = vi.fn();
 const mockApiPost = vi.fn();
 const mockApiPatch = vi.fn();
 const mockApiDel = vi.fn();
+const mockApiUpload = vi.fn();
 let mockRole = "admin";
 
 vi.mock("../api", () => ({
@@ -22,6 +23,7 @@ vi.mock("../api", () => ({
     put: vi.fn(),
     patch: (...args: unknown[]) => mockApiPatch(...args),
     del: (...args: unknown[]) => mockApiDel(...args),
+    upload: (...args: unknown[]) => mockApiUpload(...args),
     invalidate: vi.fn(),
   },
   API: "",
@@ -114,8 +116,7 @@ describe("BuildingsFloorsTab", () => {
   });
 
   it("saves floor background settings and uploads a floor plan", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(floor(11, "First", 1, true)) });
-    vi.stubGlobal("fetch", fetchMock);
+    mockApiUpload.mockResolvedValue(floor(11, "First", 1, true));
     renderWithRouter(<BuildingsFloorsTabContent />);
     await screen.findByDisplayValue("Ground");
 
@@ -133,11 +134,10 @@ describe("BuildingsFloorsTab", () => {
     const firstPanel = await screen.findByTestId("floor-bg-11");
     const file = new File(["png"], "plan.png", { type: "image/png" });
     fireEvent.change(within(firstPanel).getByLabelText("Background image for First"), { target: { files: [file] } });
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const [url, init] = fetchMock.mock.calls[0];
+    await waitFor(() => expect(mockApiUpload).toHaveBeenCalled());
+    const [url, body] = mockApiUpload.mock.calls[0];
     expect(url).toBe("/api/floors/11/background");
-    expect(init.method).toBe("POST");
-    expect((init.body as FormData).get("file")).toBe(file);
+    expect((body as FormData).get("file")).toBe(file);
   });
 
   it("deletes a building after confirmation", async () => {

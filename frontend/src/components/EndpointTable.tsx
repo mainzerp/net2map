@@ -1,10 +1,9 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { api, normPort, extractErrorMessage, getStoredUser } from "../api";
+import { normPort, extractErrorMessage, getStoredUser } from "../api";
 import { useToast } from "./ToastProvider";
 import useNet2MapStore from "../store";
-import { useAdoptPingOnly, useEndpoints, useInvalidateApi } from "../hooks/api";
-import { queryKeys } from "../hooks/api";
+import { useAdoptPingOnly, useBulkUpdateEndpoints, useEndpoints, useUpdateEndpoint } from "../hooks/api";
 import { Button, Card, DataTable, Input, type DataTableColumn } from "./ui";
 import { formatTimestamp } from "../utils/datetime";
 import { useInspector } from "../hooks/useInspector";
@@ -14,7 +13,8 @@ export default function EndpointTable() {
   const navigate = useNavigate();
   const setHighlightPortKey = useNet2MapStore((s) => s.setHighlightPortKey);
   const endpointsQuery = useEndpoints();
-  const { invalidate } = useInvalidateApi();
+  const updateEndpoint = useUpdateEndpoint();
+  const bulkUpdateEndpoints = useBulkUpdateEndpoints();
   const { open: openInspector } = useInspector();
 
   const [togglingId, setTogglingId] = useState<number | null>(null);
@@ -42,8 +42,7 @@ export default function EndpointTable() {
   const toggleIgnored = async (ep: Endpoint) => {
     setTogglingId(ep.id);
     try {
-      await api.patch(`/api/endpoints/${ep.id}`, { ignored: !ep.ignored });
-      invalidate(queryKeys.endpoints);
+      await updateEndpoint.mutateAsync({ id: ep.id, patch: { ignored: !ep.ignored } });
     } catch (ex) {
       addToast(`Failed to update endpoint: ${extractErrorMessage(ex)}`, "error");
     } finally {
@@ -54,12 +53,11 @@ export default function EndpointTable() {
   const bulkIgnore = async (ignored: boolean) => {
     setBulkLoading(true);
     try {
-      await api.patch("/api/endpoints/bulk", {
+      await bulkUpdateEndpoints.mutateAsync({
         endpoint_ids: [...selected],
         ignored,
       });
       setSelected(new Set());
-      invalidate(queryKeys.endpoints);
     } catch (ex) {
       addToast(`Failed to update endpoints: ${extractErrorMessage(ex)}`, "error");
     } finally {

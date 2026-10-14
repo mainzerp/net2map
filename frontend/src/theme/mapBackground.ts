@@ -7,6 +7,9 @@
 // Any other value is a user-chosen data color and is honored as-is.
 export const THEME_MAP_BG_SENTINEL = "#020817";
 
+// Plain white canvas preset for floor plans (a user data color, not UI chrome).
+export const MAP_BG_WHITE = "#ffffff";
+
 // Resolve a stored bg_color to the value the canvas should use. An empty string
 // means "use var(--surface)" (TopologyCanvas falls back to the theme surface).
 export function resolveMapBgColor(stored: string | null | undefined): string {

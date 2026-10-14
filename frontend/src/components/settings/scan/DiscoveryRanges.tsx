@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { api, extractErrorMessage } from "../../../api";
-import { queryKeys, useDiscoveryRanges, useInvalidateApi } from "../../../hooks/api";
+import { extractErrorMessage } from "../../../api";
+import { useDiscoveryRanges, useUpdateDiscoveryRanges } from "../../../hooks/api";
 import { Button } from "../../ui";
 
 // ── DiscoveryRanges ──────────────────────────────────────────────────────────
@@ -9,7 +8,6 @@ import { Button } from "../../ui";
 // ranges are shown as removable chips plus the raw textarea form.
 function DiscoveryRanges() {
   const { data: savedRanges = [], isLoading } = useDiscoveryRanges();
-  const { invalidate } = useInvalidateApi();
   const [rangesInput, setRangesInput] = useState<string>("");
   const [rangesDraft, setRangesDraft] = useState<string[]>([]);
   const [rangesError, setRangesError] = useState<string>("");
@@ -24,26 +22,21 @@ function DiscoveryRanges() {
     setRangesDraft(savedRanges);
   }, [isLoading, savedRanges]);
 
-  const saveMutation = useMutation({
-    mutationFn: async (text: string) => {
-      const lines = text
-        .split(/[\n,;]+/)
-        .map((s) => s.trim())
-        .filter(Boolean);
-      const resp = await api.put<{ ranges?: unknown } | null>("/api/discovery-ranges", { ranges: lines });
-      return Array.isArray(resp?.ranges) ? (resp.ranges as string[]) : lines;
-    },
+  const saveMutation = useUpdateDiscoveryRanges({
     onSuccess: (saved) => {
       setRangesInput(saved.join("\n"));
       setRangesDraft(saved);
-      invalidate(queryKeys.discoveryRanges);
     },
     onError: (ex) => setRangesError(extractErrorMessage(ex)),
   });
 
   const save = () => {
     setRangesError("");
-    saveMutation.mutate(rangesInput);
+    const lines = rangesInput
+      .split(/[\n,;]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    saveMutation.mutate(lines);
   };
 
   // Chips edit the local draft; the change only persists via "Save Ranges".

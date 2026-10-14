@@ -1,9 +1,8 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { useMutation } from "@tanstack/react-query";
-import { api, extractErrorMessage } from "../../api";
+import { extractErrorMessage } from "../../api";
 import type { RackInfo, TopologyNode } from "../../types";
-import { queryKeys, useBuildings, useDevices, useInvalidateApi, useRacks } from "../../hooks/api";
+import { useBuildings, useDeleteRack, useDevices, useRacks, useSaveRack, useUpdateDeviceMeta } from "../../hooks/api";
 import FloorSelect from "../../features/topology/FloorSelect";
 import { findFloor, flattenFloors } from "../../features/topology/floors";
 import { Button, Card, EmptyState, Input, Modal } from "../ui";
@@ -34,7 +33,6 @@ function RacksTabContent({ newEntryTrigger }: RacksTabContentProps) {
   const { data: devicesRaw } = useDevices();
   const { data: buildings = [] } = useBuildings();
   const hasFloors = flattenFloors(buildings).length > 0;
-  const { invalidate } = useInvalidateApi();
 
   const devices: TopologyNode[] = Array.isArray(devicesRaw) ? devicesRaw : [];
 
@@ -56,54 +54,29 @@ function RacksTabContent({ newEntryTrigger }: RacksTabContentProps) {
     setErr("");
   };
 
-  const invalidateRacks = () => {
-    invalidate(queryKeys.racks, queryKeys.devices, queryKeys.topology, queryKeys.stats);
-  };
-
-  const saveMutation = useMutation({
-    mutationFn: async (values: { id: number | null; form: RackForm }) => {
-      const payload = {
-        label: values.form.label,
-        room: values.form.room,
-        description: values.form.description,
-        height_u: Math.max(6, Math.min(60, Number(values.form.height_u) || 42)),
-        floor_id: values.form.floor_id,
-      };
-      if (values.id) {
-        await api.put(`/api/racks/${values.id}`, payload);
-      } else {
-        const r = await api.post<{ detail?: unknown }>("/api/racks", payload);
-        if (r.detail) throw new Error(typeof r.detail === "string" ? r.detail : JSON.stringify(r.detail));
-      }
-    },
-    onSuccess: () => {
-      invalidateRacks();
-      resetForm();
-    },
+  const saveMutation = useSaveRack({
+    onSuccess: () => resetForm(),
     onError: (ex) => setErr(extractErrorMessage(ex)),
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => api.del(`/api/racks/${id}`),
-    onSuccess: () => {
-      invalidateRacks();
-      setDeleteTarget(null);
-    },
+  const deleteMutation = useDeleteRack({
+    onSuccess: () => setDeleteTarget(null),
   });
 
-  const assignMutation = useMutation({
-    mutationFn: ({ devId, rackId }: { devId: string; rackId: number | null }) =>
-      api.patch(`/api/topology/devices/${devId}/meta`, { rack_id: rackId }),
-    onSuccess: () => {
-      invalidate(queryKeys.topology, queryKeys.racks, queryKeys.devices, queryKeys.credentials);
-    },
-  });
+  const assignMutation = useUpdateDeviceMeta();
 
   const submit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setErr("");
     if (!form.label.trim()) { setErr("Label is required"); return; }
-    saveMutation.mutate({ id: editState.id, form });
+    const payload = {
+      label: form.label,
+      room: form.room,
+      description: form.description,
+      height_u: Math.max(6, Math.min(60, Number(form.height_u) || 42)),
+      floor_id: form.floor_id,
+    };
+    saveMutation.mutate({ id: editState.id, payload });
   };
 
   return (
@@ -207,8 +180,8 @@ function RacksTabContent({ newEntryTrigger }: RacksTabContentProps) {
                 <DeviceAssignment
                   assigned={assigned}
                   available={available}
-                  onAssign={(devId) => assignMutation.mutate({ devId: String(devId), rackId: rack.id })}
-                  onUnassign={(devId) => assignMutation.mutate({ devId: String(devId), rackId: null })}
+                  onAssign={(devId) => assignMutation.mutate({ id: String(devId), patch: { rack_id: rack.id } })}
+                  onUnassign={(devId) => assignMutation.mutate({ id: String(devId), patch: { rack_id: null } })}
                 />
               </Card>
             );

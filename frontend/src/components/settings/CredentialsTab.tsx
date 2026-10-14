@@ -1,14 +1,14 @@
 import { useState, useEffect } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { api, extractErrorMessage, AUTH_PROTOCOLS, PRIV_PROTOCOLS, SEC_LEVELS } from "../../api";
+import { extractErrorMessage, AUTH_PROTOCOLS, PRIV_PROTOCOLS, SEC_LEVELS } from "../../api";
 import type { Credential, TopologyNode } from "../../types";
 import {
-  queryKeys,
   useCredentials,
+  useDeleteCredential,
   useDevices,
-  useInvalidateApi,
   useRacks,
+  useSaveCredential,
   useSnmpProfiles,
+  useUpdateDeviceMeta,
 } from "../../hooks/api";
 import { Badge, Button, Card, EmptyState, Input, Modal, Select, StatusDot } from "../ui";
 import { ConfirmDeleteModal, Field, SectionHeader, TabLoading } from "./shared";
@@ -65,7 +65,6 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
   const { data: devicesRaw } = useDevices();
   const { data: racks = [] } = useRacks();
   const { data: profiles = [] } = useSnmpProfiles();
-  const { invalidate } = useInvalidateApi();
 
   const devices: TopologyNode[] = Array.isArray(devicesRaw)
     ? devicesRaw
@@ -110,45 +109,20 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
     setErr("");
   };
 
-  const invalidateCredentials = () => {
-    invalidate(queryKeys.credentials, queryKeys.devices, queryKeys.topology);
-  };
-
-  const toggleIgnoreMutation = useMutation({
-    mutationFn: (dev: TopologyNode) =>
-      api.patch(`/api/topology/devices/${dev.id}/meta`, { ignored: !dev.ignored }),
-    onMutate: (dev) => setTogglingIgnoreId(dev.id),
+  const toggleIgnoreMutation = useUpdateDeviceMeta({
+    onMutate: ({ id }) => setTogglingIgnoreId(Number(id)),
     onSettled: () => setTogglingIgnoreId(null),
-    onSuccess: () => invalidate(queryKeys.devices, queryKeys.topology, queryKeys.stats),
   });
 
-  const saveMutation = useMutation({
-    mutationFn: async (values: { id: number | null; form: CredentialForm }) => {
-      if (values.id) {
-        // On edit, omit secret fields left empty so the backend keeps the
-        // stored value instead of overwriting it.
-        const payload: Record<string, unknown> = { ...values.form };
-        (["community", "v3_auth_password", "v3_priv_password"] as const).forEach((k) => {
-          if (payload[k] === "") delete payload[k];
-        });
-        await api.put(`/api/credentials/${values.id}`, payload);
-      } else {
-        await api.post("/api/credentials", values.form);
-      }
-    },
-    onSuccess: () => {
-      invalidateCredentials();
-      resetForm();
-    },
+  // On edit, the hook omits secret fields left empty so the backend keeps
+  // the stored value instead of overwriting it.
+  const saveMutation = useSaveCredential({
+    onSuccess: () => resetForm(),
     onError: (ex) => setErr(extractErrorMessage(ex)),
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => api.del(`/api/credentials/${id}`),
-    onSuccess: () => {
-      invalidateCredentials();
-      setDeleteTarget(null);
-    },
+  const deleteMutation = useDeleteCredential({
+    onSuccess: () => setDeleteTarget(null),
   });
 
   const F = form;
@@ -177,7 +151,7 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
     <Button
       size="sm"
       disabled={togglingIgnoreId === d.id}
-      onClick={() => toggleIgnoreMutation.mutate(d)}
+      onClick={() => toggleIgnoreMutation.mutate({ id: d.id, patch: { ignored: !d.ignored } })}
       title={d.ignored ? "Re-enable: scan this device and show on map" : "Ignore: skip scan and hide from map"}
       className={d.ignored ? "border-accent text-accent" : ""}
     >

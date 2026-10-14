@@ -17,7 +17,7 @@ import {
 import { floorBackgroundUrl } from "../../hooks/useMapBackground";
 import { useToast } from "../ToastProvider";
 import { debounce } from "../../utils/debounce";
-import { THEME_MAP_BG_SENTINEL, resolveMapBgColor } from "../../theme/mapBackground";
+import { MAP_BG_WHITE, THEME_MAP_BG_SENTINEL, resolveMapBgColor } from "../../theme/mapBackground";
 import { Button, Card, EmptyState, Input } from "../ui";
 import { ConfirmDeleteModal, SectionHeader, TabError, TabLoading } from "./shared";
 
@@ -208,7 +208,7 @@ function FloorBackgroundPanel({ floor, canEdit }: { floor: Floor; canEdit: boole
           Follow theme
         </Button>
         {/* White is a user data color for floor plans, not UI chrome */}
-        <Button size="sm" disabled={!canEdit} onClick={() => change({ bg_color: "#ffffff" })}>
+        <Button size="sm" disabled={!canEdit} onClick={() => change({ bg_color: MAP_BG_WHITE })}>
           White
         </Button>
       </div>

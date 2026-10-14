@@ -1,14 +1,12 @@
 import { useState, useEffect, useRef } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { api, extractErrorMessage } from "../../api";
-import { queryKeys, useDnsServers, useInvalidateApi } from "../../hooks/api";
+import { extractErrorMessage } from "../../api";
+import { useDnsServers, useUpdateDnsServers } from "../../hooks/api";
 import { Button, Card } from "../ui";
 import { SectionHeader, TabLoading } from "./shared";
 
 // ── DnsSettingsTabContent ───────────────────────────────────────────────────
 function DnsSettingsTabContent() {
   const { data: servers = [], isLoading } = useDnsServers();
-  const { invalidate } = useInvalidateApi();
   const [serversText, setServersText] = useState<string>("");
   const [err, setErr] = useState<string>("");
   const [ok, setOk] = useState<string>("");
@@ -22,19 +20,10 @@ function DnsSettingsTabContent() {
     setServersText(servers.join("\n"));
   }, [isLoading, servers]);
 
-  const saveMutation = useMutation({
-    mutationFn: async (text: string) => {
-      const list = text
-        .split(/[\n,;]/)
-        .map((v) => v.trim())
-        .filter(Boolean);
-      const result: { servers?: string[] } = await api.put("/api/dns-settings", { servers: list });
-      return Array.isArray(result?.servers) ? result.servers : list;
-    },
+  const saveMutation = useUpdateDnsServers({
     onSuccess: (normalized) => {
       setServersText(normalized.join("\n"));
       setOk("DNS settings saved");
-      invalidate(queryKeys.dnsSettings);
     },
     onError: (ex) => setErr(extractErrorMessage(ex)),
   });
@@ -42,7 +31,11 @@ function DnsSettingsTabContent() {
   const save = () => {
     setErr("");
     setOk("");
-    saveMutation.mutate(serversText);
+    const list = serversText
+      .split(/[\n,;]/)
+      .map((v) => v.trim())
+      .filter(Boolean);
+    saveMutation.mutate(list);
   };
 
   return (
