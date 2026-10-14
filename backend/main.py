@@ -32,6 +32,7 @@ from routers import (
     latency,
     logs,
     map_bg,
+    ping_candidates,
     rack_items,
     racks,
     scan,
@@ -198,6 +199,7 @@ API_ROUTERS = (
     audit.router,
     endpoints.router,
     latency.router,
+    ping_candidates.router,
 )
 
 # Canonical v1 mount first: Starlette matches routes in registration order, so

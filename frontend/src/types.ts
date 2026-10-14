@@ -61,11 +61,17 @@ export interface TopologyNode {
   enabled?: boolean;
   rack_u_position?: number | null;
   u_height?: number;
+  // Rack face the device is mounted on (default "front"); full_depth devices
+  // block the same U range on both faces.
+  rack_side?: RackSide;
+  full_depth?: boolean;
   stp?: DeviceStpInfo | null;
   // VLAN id (as string) -> VLAN name
   vlan_names?: Record<string, string>;
   // Device kind derived from the detected vendor scanner (default "switch").
   device_type?: DeviceType;
+  // Reachability-only device: monitored via ping, never polled over SNMP.
+  ping_only?: boolean;
   // Normalized SNMP health snapshot (UPS or server), null when not reported.
   health?: DeviceHealth | null;
   health_updated_at?: string | null;
@@ -75,7 +81,7 @@ export interface TopologyNode {
   [key: string]: unknown;
 }
 
-export type DeviceType = "switch" | "firewall" | "ups" | "server";
+export type DeviceType = "switch" | "firewall" | "ups" | "server" | "other";
 export type HealthStatus = "ok" | "warning" | "critical" | "unknown";
 // HPE CPQ condition, "unknown" also covers other(1) = not supported.
 export type HealthCondition = "ok" | "degraded" | "failed" | "unknown";
@@ -167,6 +173,9 @@ export interface Building {
 // U space in the rack elevation, has no ports and is never scanned.
 export type RackItemKind = "patch_panel" | "blank" | "cable_manager" | "shelf" | "other";
 
+// Rack face an object is mounted on.
+export type RackSide = "front" | "rear";
+
 export interface RackItem {
   id: number;
   rack_id: number;
@@ -174,12 +183,16 @@ export interface RackItem {
   label: string;
   rack_u_position: number;
   u_height: number;
+  // Default "front" / false when missing.
+  rack_side?: RackSide;
+  full_depth?: boolean;
   note: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
 
-export type RackItemInput = Pick<RackItem, "kind" | "label" | "rack_u_position" | "u_height" | "note">;
+export type RackItemInput = Pick<RackItem, "kind" | "label" | "rack_u_position" | "u_height" | "note"> &
+  Partial<Pick<RackItem, "rack_side" | "full_depth">>;
 
 export interface SwitchClass {
   id: number;
@@ -360,6 +373,8 @@ export interface Credential {
   enabled: boolean;
   profile_id: number | null;
   device_id: number | null;
+  /** False = ping-only credential: the device is never polled over SNMP. */
+  snmp_enabled?: boolean;
   snmp_version: string;
   community: string;
   v3_security_level: string;
@@ -406,4 +421,30 @@ export interface DiscoveryRange {
   id: number;
   range: string;
   [key: string]: unknown;
+}
+
+// -- Ping-only adoption and candidates ------------------------------------------
+export interface PingOnlyEntry {
+  ip: string;
+  label?: string;
+}
+
+export type PingOnlySkipReason = "exists" | "invalid" | "duplicate";
+
+export interface PingOnlyAdoptResult {
+  created: { ip: string; credential_id: number; device_id: number }[];
+  skipped: { ip: string; reason: PingOnlySkipReason }[];
+}
+
+/** Host in a discovery range that answered ping but not SNMP, not yet managed. */
+export interface PingCandidate {
+  id: number;
+  ip: string;
+  rtt_ms: number | null;
+  first_seen: string | null;
+  last_seen: string | null;
+  hostname: string | null;
+  mac: string | null;
+  vendor: string | null;
+  dismissed: boolean;
 }

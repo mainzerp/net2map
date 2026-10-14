@@ -24,6 +24,7 @@ vi.mock("../api", () => ({
     del: (...args: unknown[]) => mockApiDel(...args),
     invalidate: vi.fn(),
   },
+  getStoredUser: () => ({ username: "admin", role: "admin" }),
   extractErrorMessage: (ex: unknown) => (ex instanceof Error ? ex.message : String(ex)),
   AUTH_PROTOCOLS: ["SHA-256"],
   PRIV_PROTOCOLS: ["AES-128"],
@@ -128,5 +129,75 @@ describe("CredentialsTab engine ID", () => {
     await user.click(screen.getByRole("button", { name: "Edit" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).queryByLabelText(/Engine ID override/)).toBeNull();
+  });
+});
+
+describe("CredentialsTab ping only", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockApiGet.mockImplementation((path: string) => {
+      if (path === "/api/credentials") return Promise.resolve([]);
+      return Promise.resolve([]);
+    });
+    mockApiPost.mockResolvedValue({});
+    mockApiPut.mockResolvedValue({});
+  });
+
+  it("hides SNMP fields when ping only is checked and posts snmp_enabled=false", async () => {
+    const user = userEvent.setup();
+    renderWithQuery(<CredentialsTabContent newEntryTrigger={1} />);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByLabelText(/Community String/)).toBeTruthy();
+    expect(within(dialog).getByText("SNMP Version")).toBeTruthy();
+
+    await user.click(within(dialog).getByRole("checkbox", { name: /Ping only/ }));
+    expect(within(dialog).queryByLabelText(/Community String/)).toBeNull();
+    expect(within(dialog).queryByText("SNMP Version")).toBeNull();
+    expect(within(dialog).queryByLabelText(/SNMP Port/)).toBeNull();
+    expect(within(dialog).queryByLabelText(/Credential profile/)).toBeNull();
+
+    fireEvent.change(within(dialog).getByLabelText(/Label/), { target: { value: "Printer" } });
+    fireEvent.change(within(dialog).getByLabelText(/IP address/), { target: { value: "10.0.5.20" } });
+    await user.click(within(dialog).getByRole("button", { name: "+ Add" }));
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith(
+        "/api/credentials",
+        expect.objectContaining({ ip: "10.0.5.20", snmp_enabled: false, v3_engine_id: "" }),
+      );
+    });
+  });
+
+  it("sends snmp_enabled=true by default", async () => {
+    const user = userEvent.setup();
+    renderWithQuery(<CredentialsTabContent newEntryTrigger={1} />);
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/Label/), { target: { value: "Core" } });
+    fireEvent.change(within(dialog).getByLabelText(/IP address/), { target: { value: "10.0.0.1" } });
+    await user.click(within(dialog).getByRole("button", { name: "+ Add" }));
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith("/api/credentials", expect.objectContaining({ snmp_enabled: true }));
+    });
+  });
+
+  it("shows a Ping only badge in the list and pre-checks the toggle on edit", async () => {
+    const user = userEvent.setup();
+    mockApiGet.mockImplementation((path: string) => {
+      if (path === "/api/credentials") {
+        return Promise.resolve([{ ...V3_CRED, snmp_enabled: false, discovered_engine_id: null, engine_id_seen_at: null }]);
+      }
+      return Promise.resolve([]);
+    });
+    renderWithQuery(<CredentialsTabContent newEntryTrigger={0} />);
+    expect(await screen.findByText("Ping only")).toBeTruthy();
+    expect(screen.queryByText("v3")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog");
+    const toggle = within(dialog).getByRole("checkbox", { name: /Ping only/ }) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    expect(within(dialog).queryByLabelText(/Engine ID override/)).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: "Save changes" }));
+    await waitFor(() => {
+      expect(mockApiPut).toHaveBeenCalledWith("/api/credentials/7", expect.objectContaining({ snmp_enabled: false }));
+    });
   });
 });

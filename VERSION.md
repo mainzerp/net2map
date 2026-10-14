@@ -1,5 +1,41 @@
 # Version History
 
+## Unreleased -- Ping-only devices, rack rear view, item palette
+
+**Type:** MINOR (planned v3.6.0, not tagged). Migration 027 adds
+`credentials.snmp_enabled`, `devices.ping_only`, and `rack_side` / `full_depth` on
+devices and rack items (defaults: SNMP on, front, not full depth); migration 028
+adds the `ping_candidates` table.
+
+### Features
+
+- Ping-only devices: "Ping only (no SNMP)" on a credential in Settings > Network
+  Devices. The scan only pings such hosts and creates a device with type `other`
+  even when the host does not answer. Racks, floors, classes and the latency
+  monitor work as usual. Badge "Ping only" in the device table, the inspector
+  and the credentials list.
+- Adopting ping-only devices: "Adopt as ping-only device" in the endpoint inspector
+  and as a bulk action in the endpoint table (`POST /credentials/ping-only` creates
+  credential and device at once). Hosts in the discovery ranges that answer ping
+  but not SNMP are collected as candidates (migration 028, `ping_candidates`) and
+  listed in Settings > Network Devices to adopt, dismiss or restore
+  (`GET /ping-candidates`, `POST /ping-candidates/dismiss|restore`).
+- Rack front and rear are shown side by side. Devices and items have a side, and
+  full-depth objects take the U on both sides (hatched shadow on the other side).
+  Drag onto the other column to switch sides; there is a full-depth toggle on the
+  faceplate.
+- Rack item palette replaces "+ Add item": drag patch panels, blanks, cable
+  managers, shelves straight into the rack. Existing items can be dragged.
+- The assign picker (racks, classes, models) is now a search box: filter by name,
+  IP, vendor, model or label, use the keyboard, and assign several in a row.
+- UI wording: "Switches" becomes "Network Devices" / "devices" across the UI.
+
+### Changed behavior
+
+- `PATCH /topology/devices/{id}/meta` and `bulk-meta` now reject overlapping or
+  out-of-range rack positions with 409 (`U_OVERLAP`, `U_POSITION_OUT_OF_RANGE`).
+  Overlap checks are side-aware everywhere (`backend/shared/rack_space.py`).
+
 ## v3.5.0 -- Buildings and floors on the topology map
 
 **Type:** MINOR

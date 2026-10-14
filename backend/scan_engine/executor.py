@@ -21,6 +21,7 @@ from database import (
     DryRunResult,
     Endpoint,
     EndpointPortAssociation,
+    PingCandidate,
     Port,
     SnmpProfile,
     TopologyLink,
@@ -48,6 +49,7 @@ from shared.metrics import (
     SCAN_TOTAL,
     STALE_LEASE_REJECTIONS,
 )
+from shared.ping_only import upsert_ping_only_device as _upsert_ping_only_device
 from shared.state import SCAN_LOCK_FENCE_NAME, _log_event, fence_token_of, renew_scan_lock
 from snmp_scanner import (
     SwitchData,
@@ -271,15 +273,35 @@ async def _execute_scan_body(
         credentials = db.query(Credential).filter(
             Credential.enabled.is_(True), Credential.ip.in_(known_ips)
         ).order_by(Credential.ip, Credential.priority).all()
+        # Ping-only hosts are always pinged (cheap) so a newly registered one
+        # gets its Device row with the next scan of any type.
+        known_cred_ids = {c.id for c in credentials}
+        credentials += [
+            c for c in db.query(Credential).filter(
+                Credential.enabled.is_(True), Credential.snmp_enabled.is_(False),
+                Credential.ip.notin_(ignored_ips),
+            ).order_by(Credential.ip, Credential.priority).all()
+            if c.id not in known_cred_ids
+        ]
     else:
         credentials = db.query(Credential).filter(
             Credential.enabled.is_(True), Credential.ip.notin_(ignored_ips)
         ).order_by(Credential.ip, Credential.priority).all()
 
-    # Group credentials by IP for fallback chain support
+    # Group credentials by IP for fallback chain support. Credentials with
+    # snmp_enabled=False never take part in SNMP; an IP whose enabled
+    # credentials are all SNMP-disabled becomes a ping-only target.
     creds_by_ip: Dict[str, List] = defaultdict(list)
+    ping_only_creds: Dict[str, Credential] = {}
     for c in credentials:
-        creds_by_ip[c.ip].append(c)
+        if c.snmp_enabled is False:
+            ping_only_creds.setdefault(c.ip, c)
+        else:
+            creds_by_ip[c.ip].append(c)
+    ping_only_targets: Dict[str, dict] = {
+        ip: {"credential_id": c.id, "label": c.label or ""}
+        for ip, c in ping_only_creds.items() if ip not in creds_by_ip
+    }
 
     scan_settings = _read_scan_settings()
     configured_max_workers = scan_settings.get("max_workers", 4)
@@ -434,6 +456,14 @@ async def _execute_scan_body(
             "fallback_creds": fallback_creds,
         })
 
+    for ip, info in ping_only_targets.items():
+        scan_targets.append({
+            "ip": ip,
+            "label": info["label"] or ip,
+            "is_range_probe": False,
+            "ping_only": True,
+        })
+
     scan_targets.extend(range_targets)
 
     async def _ping_host_async(ip: str, timeout_sec: int = 1) -> tuple[bool, int]:
@@ -483,6 +513,11 @@ async def _execute_scan_body(
             if cancel_event and cancel_event.is_set():
                 return ip, label, None, "cancelled", 0, False, 0, is_probe, None
             ping_ok, ping_rtt = await _ping_host_async(ip)
+
+            # Ping-only hosts (credential snmp_enabled=False): never try SNMP
+            if target.get("ping_only"):
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                return ip, label, None, "", duration_ms, ping_ok, ping_rtt, is_probe, None
 
             # For range probes: skip SNMP scan if host does not respond to ping
             if is_probe and not ping_ok:
@@ -581,7 +616,24 @@ async def _execute_scan_body(
             ip, label, data, error_msg, duration_ms, ping_ok, ping_rtt, is_probe, matched_profile_id = await completed
             scanned_count += 1
             ping_by_ip[ip] = (ping_ok, ping_rtt)
-            if data:
+            if ip in ping_only_targets and not is_probe:
+                _log_event(
+                    logging.INFO if ping_ok else logging.DEBUG,
+                    "scan.switch.result",
+                    correlation_id=corr,
+                    ip=ip,
+                    label=label,
+                    success=ping_ok,
+                    ping_ok=ping_ok,
+                    ping_rtt_ms=ping_rtt,
+                    duration_ms=duration_ms,
+                    ping_only=True,
+                )
+                switch_metrics.append(ScanSwitchMetric(
+                    ip=ip, label=label, duration_ms=duration_ms,
+                    success=ping_ok, error="" if ping_ok else "no ping reply (ping-only)",
+                ))
+            elif data:
                 switch_data[ip] = data
                 if is_probe:
                     range_found_ips.append(ip)
@@ -669,6 +721,7 @@ async def _execute_scan_body(
         lock_token=lock_token,
         lease=lease,
         working_cred_by_ip=working_cred_by_ip,
+        ping_only_targets=ping_only_targets,
     ))
     try:
         result, dry_run_preview = await asyncio.shield(finalization_task)
@@ -862,6 +915,37 @@ def _apply_stp_vlan_names(device: Device, sw) -> None:
         device.vlan_at = now
 
 
+def _upsert_ping_candidates(db: Session, probe_ips: List[str], ping_by_ip: Dict[str, tuple]) -> None:
+    """Record discovery-range hosts that answer ping but not SNMP as ping candidates.
+
+    ``probe_ips`` are range probe targets for which no SNMP profile worked
+    (credential targets never land here). Hosts that already have a Device or
+    a Credential are skipped. Existing candidates get last_seen / rtt_ms
+    refreshed; their dismissed flag is kept. The caller commits (lease-guarded).
+    """
+    rtt_by_ip: Dict[str, int] = {}
+    for ip in probe_ips:
+        ping_ok, ping_rtt = ping_by_ip.get(ip, (False, 0))
+        if ping_ok:
+            rtt_by_ip[ip] = ping_rtt
+    if not rtt_by_ip:
+        return
+    ips = list(rtt_by_ip)
+    known = {row[0] for row in db.query(Device.ip).filter(Device.ip.in_(ips)).all()}
+    known |= {row[0] for row in db.query(Credential.ip).filter(Credential.ip.in_(ips)).all()}
+    existing = {c.ip: c for c in db.query(PingCandidate).filter(PingCandidate.ip.in_(ips)).all()}
+    now = datetime.now(timezone.utc)
+    for ip, rtt in rtt_by_ip.items():
+        if ip in known:
+            continue
+        cand = existing.get(ip)
+        if cand is None:
+            db.add(PingCandidate(ip=ip, rtt_ms=rtt, first_seen=now, last_seen=now, dismissed=False))
+        else:
+            cand.rtt_ms = rtt
+            cand.last_seen = now
+
+
 @_guard_scan_transactions
 def _finalize_scan_db(
     db: Session,
@@ -884,6 +968,7 @@ def _finalize_scan_db(
     lock_token: Optional[str],
     lease: _ScanLease,
     working_cred_by_ip: Optional[Dict[str, int]] = None,
+    ping_only_targets: Optional[Dict[str, dict]] = None,
 ) -> tuple:
     """Synchronous DB rebuild phase -- runs in a worker thread via
     asyncio.to_thread (see _execute_scan_body).
@@ -1008,10 +1093,26 @@ def _finalize_scan_db(
     update_ips = discovered_ips | (
         {ip for ip, (ok, _) in ping_by_ip.items() if not ok} & existing_ips
     )
+    # Ping-only hosts were registered explicitly: their Device row is created
+    # regardless of the ping result (except when the scan was cancelled and
+    # the host may never have been pinged).
+    ping_only_targets = ping_only_targets or {}
+    ping_only_ips = {
+        ip for ip in ping_only_targets
+        if ip in ping_by_ip and (ip in existing_ips or status != "cancelled")
+    }
+    update_ips |= ping_only_ips
+    ping_only_creds: Dict[int, Credential] = {}
+    if ping_only_ips:
+        ping_only_creds = {
+            c.id: c for c in db.query(Credential).filter(
+                Credential.id.in_([ping_only_targets[ip]["credential_id"] for ip in ping_only_ips])
+            ).all()
+        }
     devices_by_ip: Dict[str, Device] = {}
     if update_ips:
         devices_by_ip = {d.ip: d for d in db.query(Device).filter(Device.ip.in_(list(update_ips))).all()}
-    new_ips = [ip for ip in discovered_ips if ip not in existing_ips]
+    new_ips = [ip for ip in discovered_ips | ping_only_ips if ip not in existing_ips]
     all_ips_ordered = list(existing_ips) + new_ips
     layout = auto_layout(all_ips_ordered)
     # Reload credentials to include any auto-created entries from range probes
@@ -1038,6 +1139,15 @@ def _finalize_scan_db(
         sw = switch_data.get(ip)
         ping_ok, ping_rtt = ping_by_ip.get(ip, (False, 0))
         ping_status = "online" if ping_ok else "offline"
+
+        if ip in ping_only_ips:
+            info = ping_only_targets[ip]
+            devices_by_ip[ip] = _upsert_ping_only_device(
+                db, ip, devices_by_ip.get(ip), ping_only_creds.get(info["credential_id"]),
+                info.get("label") or "", ping_ok, ping_rtt, layout.get(ip, (100.0, 100.0)),
+            )
+            continue
+
         cred = cred_by_ip.get(ip)
 
         observed_engine_id = getattr(sw, "engine_id", "") if sw is not None else ""
@@ -1059,7 +1169,14 @@ def _finalize_scan_db(
 
         device = devices_by_ip.get(ip)
         if device:
+            was_ping_only = bool(device.ping_only)
+            # The credential is SNMP-enabled again (normal SNMP path)
+            device.ping_only = False
             if sw:
+                if was_ping_only and device.device_type == "other":
+                    # "other" was only the ping-only placeholder; let the
+                    # SNMP detection decide the type again.
+                    device.device_type = "switch"
                 detected_vendor = vendor or "generic"
                 if device.vendor_override and device.vendor:
                     # The vendor was set manually via the topology API
@@ -1140,6 +1257,9 @@ def _finalize_scan_db(
             devices_by_ip[ip] = new_device
             if cred and not cred.device_id:
                 cred.device_id = new_device.id
+
+    if status != "cancelled" and not (cancel_event and cancel_event.is_set()):
+        _upsert_ping_candidates(db, range_no_profile_ips, ping_by_ip)
 
     db.commit()
 

@@ -7,12 +7,18 @@ from sqlalchemy.orm import Session
 from database import Device, get_db
 from database import Rack as RackModel
 from routers.floors import ensure_floor_exists
-from routers.rack_items import find_overlap, item_ranges
 from routers.topology import _bump_topo_version
 from schemas import RackCreate, RackLayoutIn, RackOut, RackUpdate
 from shared.audit import log_audit
 from shared.auth import require_role
 from shared.errors import api_error
+from shared.rack_space import (
+    collect_rack_slots,
+    conflict_details,
+    device_slot,
+    find_conflict,
+    find_pairwise_conflict,
+)
 
 router = APIRouter()
 
@@ -49,7 +55,7 @@ def update_rack(rack_id: int, body: RackUpdate, request: Request, db: Session = 
         ).all()
         if any(d.rack_u_position + d.u_height - 1 > height for d in occupied):
             api_error(409, "U_POSITION_OUT_OF_RANGE", "Rack height would exclude an assigned device")
-        if any(start + size - 1 > height for start, size, _ in item_ranges(db, rack_id)):
+        if any(s.top > height for s in collect_rack_slots(db, rack_id, include_devices=False)):
             api_error(409, "U_POSITION_OUT_OF_RANGE", "Rack height would exclude a rack item")
     if "floor_id" in payload:
         ensure_floor_exists(db, payload["floor_id"])
@@ -86,7 +92,8 @@ def update_rack_layout(rack_id: int, body: RackLayoutIn, request: Request, db: S
     """Place devices in the rack elevation (1-based U space) in one transaction.
 
     Every entry must reference a device assigned to this rack, must fit inside
-    rack.height_u, and no two entries may overlap in U-space.
+    rack.height_u, and the resulting layout may not contain conflicting
+    objects (side-aware U overlap, see shared.rack_space).
     """
     rack = db.query(RackModel).filter(RackModel.id == rack_id).first()
     if not rack:
@@ -115,36 +122,44 @@ def update_rack_layout(rack_id: int, body: RackLayoutIn, request: Request, db: S
                 f"but rack {rack_id} only has {rack.height_u}U",
             )
 
-    # PATCH leaves omitted devices in place; validate the complete resulting layout.
-    positions = [(e.rack_u_position, e.u_height, e.device_id) for e in body.entries]
-    positions.extend(
-        (d.rack_u_position, d.u_height, d.id)
-        for d in db.query(Device).filter(Device.rack_id == rack_id).all()
-        if d.id not in devices and d.rack_u_position is not None
-    )
-    ordered = sorted(positions)
-    for prev, cur in zip(ordered, ordered[1:]):
-        if cur[0] <= prev[0] + prev[1] - 1:
-            api_error(
-                409, "U_OVERLAP",
-                f"Devices {prev[2]} and {cur[2]} overlap in U-space",
-                details=[{"device_ids": [prev[2], cur[2]]}],
-            )
+    # PATCH leaves omitted devices in place; validate the complete resulting
+    # device layout, then the entries against the rack items.
+    entry_slots = [
+        device_slot(
+            devices[e.device_id], position=e.rack_u_position, height=e.u_height,
+            side=e.rack_side, full_depth=e.full_depth,
+        )
+        for e in body.entries
+    ]
+    other_devices = collect_rack_slots(db, rack_id, exclude_device_ids=device_ids, include_items=False)
+    pair = find_pairwise_conflict(entry_slots + other_devices)
+    if pair:
+        a, b = pair
+        api_error(
+            409, "U_OVERLAP",
+            f"Devices {a.obj_id} and {b.obj_id} overlap in U-space on the same rack side",
+            details=conflict_details(a, b),
+        )
 
     # Rack items (patch panels, blanks, ...) occupy U space as well
-    items = item_ranges(db, rack_id)
-    for e in body.entries:
-        conflict = find_overlap(e.rack_u_position, e.u_height, items)
-        if conflict:
+    items = collect_rack_slots(db, rack_id, include_devices=False)
+    for dev_slot in entry_slots:
+        item = find_conflict(dev_slot, items)
+        if item:
             api_error(
                 409, "U_OVERLAP",
-                f"Device {e.device_id} overlaps {conflict} in U-space",
-                details=[{"device_ids": [e.device_id]}],
+                f"Device {dev_slot.obj_id} overlaps {item.label} in U-space on the same rack side",
+                details=conflict_details(dev_slot, item),
             )
 
     for e in body.entries:
-        devices[e.device_id].rack_u_position = e.rack_u_position
-        devices[e.device_id].u_height = e.u_height
+        dev = devices[e.device_id]
+        dev.rack_u_position = e.rack_u_position
+        dev.u_height = e.u_height
+        if e.rack_side is not None:
+            dev.rack_side = e.rack_side
+        if e.full_depth is not None:
+            dev.full_depth = e.full_depth
     db.commit()
     _bump_topo_version()
     log_audit(request, "update", "rack_layout", str(rack_id), {"device_ids": device_ids})

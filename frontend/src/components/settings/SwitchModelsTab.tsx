@@ -36,7 +36,6 @@ function ModelsTabContent({ newEntryTrigger }: ModelsTabContentProps) {
   const [form, setForm] = useState<ModelForm>({ ...EMPTY_MODEL_FORM });
   const [cutoffEnabled, setCutoffEnabled] = useState<boolean>(false);
   const [err, setErr] = useState<string>("");
-  const [assignSel, setAssignSel] = useState<Record<number, string>>({});
   const [deleteTarget, setDeleteTarget] = useState<SwitchModel | null>(null);
 
   useEffect(() => {
@@ -94,10 +93,8 @@ function ModelsTabContent({ newEntryTrigger }: ModelsTabContentProps) {
   const assignMutation = useMutation({
     mutationFn: ({ devId, modelId }: { devId: string; modelId: number | null }) =>
       api.patch(`/api/topology/devices/${devId}/meta`, { model_id: modelId }),
-    onSuccess: (_data, vars) => {
+    onSuccess: () => {
       invalidate(queryKeys.topology, queryKeys.devices, queryKeys.credentials);
-      const modelId = vars.modelId;
-      if (modelId != null) setAssignSel((prev) => ({ ...prev, [modelId]: "" }));
     },
   });
 
@@ -174,7 +171,7 @@ function ModelsTabContent({ newEntryTrigger }: ModelsTabContentProps) {
       <ConfirmDeleteModal
         open={deleteTarget != null}
         title="Delete Model"
-        message={deleteTarget ? `Delete model "${deleteTarget.name}"? Assigned switches are unassigned, not deleted.` : ""}
+        message={deleteTarget ? `Delete model "${deleteTarget.name}"? Assigned devices are unassigned, not deleted.` : ""}
         busy={deleteMutation.isPending}
         onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
         onCancel={() => setDeleteTarget(null)}
@@ -190,7 +187,6 @@ function ModelsTabContent({ newEntryTrigger }: ModelsTabContentProps) {
           {models.map((sm) => {
             const assigned = devices.filter((d) => d.model_id === sm.id);
             const available = devices.filter((d) => d.model_id == null && !d.ignored);
-            const selVal = assignSel[sm.id] || "";
             return (
               <Card key={sm.id} className="border-l-2 border-l-accent">
                 <div className="flex items-start gap-2">
@@ -214,9 +210,7 @@ function ModelsTabContent({ newEntryTrigger }: ModelsTabContentProps) {
                 <DeviceAssignment
                   assigned={assigned}
                   available={available}
-                  selVal={selVal}
-                  onSelect={(val) => setAssignSel((p) => ({ ...p, [sm.id]: val }))}
-                  onAssign={() => assignMutation.mutate({ devId: selVal, modelId: sm.id })}
+                  onAssign={(devId) => assignMutation.mutate({ devId: String(devId), modelId: sm.id })}
                   onUnassign={(devId) => assignMutation.mutate({ devId: String(devId), modelId: null })}
                 />
               </Card>

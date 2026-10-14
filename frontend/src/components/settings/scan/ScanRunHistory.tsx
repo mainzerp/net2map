@@ -107,7 +107,7 @@ function ScanRunHistory() {
     <>
       <Card title={<SectionHeader>NETWORK SCAN</SectionHeader>}>
         <div className="text-muted text-[11px] leading-relaxed mb-3">
-          Discovers switches, ports, and LLDP neighbor links from enabled SNMP credentials.
+          Discovers devices, ports, and LLDP neighbor links from enabled SNMP credentials.
         </div>
         <div className="flex items-center gap-3">
           <Button variant="primary" onClick={runScan} disabled={scanning} className="px-6 py-2.5">
@@ -140,7 +140,7 @@ function ScanRunHistory() {
           </div>
           {(scanResult.switch_metrics?.length ?? 0) > 0 && (
             <div className="mt-2.5 border-t border-line pt-2">
-              <div className="text-muted text-[9px] tracking-[1px] mb-1.5">SWITCH DURATIONS</div>
+              <div className="text-muted text-[9px] tracking-[1px] mb-1.5">DEVICE DURATIONS</div>
               <div className="flex flex-col gap-1 max-h-[180px] overflow-y-auto">
                 {scanResult.switch_metrics!.map((m, i) => (
                   <div
@@ -191,7 +191,7 @@ function ScanRunHistory() {
                   {h.status === "finished" ? "OK" : h.status === "cancelled" ? "CAN" : "ERR"}
                 </span>
                 <span className="text-muted">
-                  {h.found} switches, {h.links} links
+                  {h.found} devices, {h.links} links
                   <span className="opacity-80"> - {fmtDuration(h.total_duration_ms)}</span>
                   <span className="opacity-70"> - w:{h.max_workers}</span>
                   {(h.error_count ?? 0) > 0 && <span className="text-danger"> ({h.error_count} errors)</span>}

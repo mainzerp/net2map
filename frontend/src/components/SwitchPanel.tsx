@@ -49,7 +49,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
               {onShowDetail ? (
                 <button
                   type="button"
-                  title="Open switch details"
+                  title="Open device details"
                   onClick={e => { e.stopPropagation(); onShowDetail(device.id); }}
                   className="text-primary font-semibold text-sm text-left bg-transparent border-0 p-0 cursor-pointer hover:text-accent hover:underline underline-offset-2 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent rounded-sm"
                 >{switchModel ? switchModel.name : (device.model || device.sys_name)}</button>
@@ -77,7 +77,7 @@ export default function SwitchPanel({ device, otherRacks = [], onMove, onUpdateM
         <div className="flex items-center gap-1.5">
           <button
             type="button"
-            title="Switch details"
+            title="Device details"
             onClick={e => { e.stopPropagation(); onShowDetail?.(device.id); }}
             className="text-[10px] text-muted px-2 py-0.5 rounded border border-line-strong bg-transparent hover:text-accent hover:border-accent transition-colors cursor-pointer select-none tracking-wide"
           >Details</button>

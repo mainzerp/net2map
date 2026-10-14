@@ -4,7 +4,7 @@ export default function NetworkPage() {
   return (
     <DeviceTable
       title="Network"
-      subtitle="Managed network equipment (switches, routers, firewalls)"
+      subtitle="Managed network equipment (switches, routers, firewalls, UPS, servers)"
       activeLabel="ACTIVE NETWORK DEVICES"
       ignoredLabel="IGNORED NETWORK DEVICES"
       emptyMessage="No network devices discovered yet"

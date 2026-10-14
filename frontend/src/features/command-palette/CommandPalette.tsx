@@ -194,8 +194,8 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
             aria-controls={listId}
             aria-autocomplete="list"
             aria-activedescendant={activeIndex >= 0 ? optionId(activeIndex) : undefined}
-            aria-label="Search pages, actions, switches, endpoints, racks and ports"
-            placeholder="Search switches, endpoints, racks, ports or commands..."
+            aria-label="Search pages, actions, devices, endpoints, racks and ports"
+            placeholder="Search devices, endpoints, racks, ports or commands..."
             spellCheck={false}
             autoComplete="off"
             className="flex-1 min-w-0 h-14 bg-transparent text-[15px] text-primary placeholder:text-muted outline-none"

@@ -117,7 +117,7 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
   );
 
   if (isLoading || (!device && devicesQuery.isLoading)) return <InspectorLoading titleId={titleId} />;
-  if (!device) return <InspectorNotFound titleId={titleId} what="Switch" onClose={close} />;
+  if (!device) return <InspectorNotFound titleId={titleId} what="Device" onClose={close} />;
 
   const showVlan = ports.some((p) => p.vlan != null || (p.tagged_vlans?.length ?? 0) > 0);
   const showStp = ports.some((p) => p.stp_state != null || p.stp_role != null);
@@ -127,6 +127,9 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
   const upPercent = ports.length > 0 ? Math.round((upCount / ports.length) * 100) : 0;
   const title = device.sys_name || device.hostname || device.ip;
   const deviceType = deviceTypeOf(device);
+  // Ping-only devices are never polled over SNMP: port and neighbor sections
+  // would always be empty, so they are skipped unless data exists anyway.
+  const pingOnly = device.ping_only === true;
 
   // Floor: racked devices inherit the rack's floor; others are assigned here.
   const buildings = data?.buildings ?? [];
@@ -172,6 +175,11 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
           {deviceType !== "switch" && (
             <Badge tone="accent" data-testid="device-type">
               {DEVICE_TYPE_LABEL[deviceType]}
+            </Badge>
+          )}
+          {pingOnly && (
+            <Badge tone="neutral" title="Monitored by ping only, no SNMP polling" data-testid="ping-only">
+              Ping only
             </Badge>
           )}
           {device.ignored && <Badge tone="warning">Ignored</Badge>}
@@ -233,108 +241,112 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
         </InspectorSection>
       )}
 
-      <InspectorSection
-        title="Ports"
-        aside={
-          <span className="text-[11px] text-muted">
-            <span className="text-success font-semibold">{upCount} up</span>
-            {" / "}
-            <span>{downCount} down</span>
-          </span>
-        }
-      >
-        <div
-          className="h-1.5 rounded-full bg-panel-2 overflow-hidden"
-          role="img"
-          aria-label={`${upCount} of ${ports.length} ports up`}
+      {!(pingOnly && ports.length === 0) && (
+        <InspectorSection
+          title="Ports"
+          aside={
+            <span className="text-[11px] text-muted">
+              <span className="text-success font-semibold">{upCount} up</span>
+              {" / "}
+              <span>{downCount} down</span>
+            </span>
+          }
         >
-          <div className="h-full bg-success rounded-full" style={{ width: `${upPercent}%` }} />
-        </div>
-        {ports.length > 0 ? (
-          <div className="mt-3 max-h-72 overflow-y-auto border border-line rounded-control">
-            <table className="w-full text-[11px]">
-              <thead className="sticky top-0 bg-panel-2">
-                <tr className="text-[10px] uppercase tracking-wider text-muted">
-                  <th className="px-2 py-1.5 text-left font-semibold">Port</th>
-                  <th className="px-2 py-1.5 text-left font-semibold">Status</th>
-                  <th className="px-2 py-1.5 text-right font-semibold">Speed</th>
-                  {showVlan && <th className="px-2 py-1.5 text-right font-semibold">VLAN</th>}
-                  {showStp && <th className="px-2 py-1.5 text-left font-semibold">STP</th>}
-                  <th className="px-2 py-1.5 text-right font-semibold">Endp.</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ports.map((port) => {
-                  const up = port.oper_status === 1;
-                  const taggedList = port.tagged_vlans ?? [];
-                  const tagged = taggedList.length ? `Tagged: ${taggedList.join(", ")}` : undefined;
-                  const vlanText = [
-                    port.vlan != null ? String(port.vlan) : null,
-                    taggedList.length ? `${taggedList.length} tagged` : null,
-                  ].filter(Boolean).join(" + ") || "-";
-                  return (
-                    <tr key={port.id ?? port.port_id} className="border-t border-line">
-                      <td className="px-2 py-1 font-mono text-primary truncate max-w-32">{portName(port)}</td>
-                      <td className="px-2 py-1">
-                        <span className="inline-flex items-center gap-1.5 text-muted">
-                          <StatusDot status={up ? "up" : "unknown"} />
-                          {up ? "Up" : "Down"}
-                        </span>
-                      </td>
-                      <td className="px-2 py-1 text-right font-mono text-muted">
-                        {port.speed_mbps ? speedLabel(port.speed_mbps) : "-"}
-                      </td>
-                      {showVlan && (
-                        <td className="px-2 py-1 text-right font-mono text-muted whitespace-nowrap" title={tagged}>
-                          {vlanText}
-                        </td>
-                      )}
-                      {showStp && (
-                        <td className="px-2 py-1">
-                          <StpChip port={port} />
-                        </td>
-                      )}
-                      <td className="px-2 py-1 text-right font-mono text-muted">{port.endpoint_count || 0}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div
+            className="h-1.5 rounded-full bg-panel-2 overflow-hidden"
+            role="img"
+            aria-label={`${upCount} of ${ports.length} ports up`}
+          >
+            <div className="h-full bg-success rounded-full" style={{ width: `${upPercent}%` }} />
           </div>
-        ) : (
-          <div className="mt-3 text-xs text-muted">No ports recorded</div>
-        )}
-      </InspectorSection>
+          {ports.length > 0 ? (
+            <div className="mt-3 max-h-72 overflow-y-auto border border-line rounded-control">
+              <table className="w-full text-[11px]">
+                <thead className="sticky top-0 bg-panel-2">
+                  <tr className="text-[10px] uppercase tracking-wider text-muted">
+                    <th className="px-2 py-1.5 text-left font-semibold">Port</th>
+                    <th className="px-2 py-1.5 text-left font-semibold">Status</th>
+                    <th className="px-2 py-1.5 text-right font-semibold">Speed</th>
+                    {showVlan && <th className="px-2 py-1.5 text-right font-semibold">VLAN</th>}
+                    {showStp && <th className="px-2 py-1.5 text-left font-semibold">STP</th>}
+                    <th className="px-2 py-1.5 text-right font-semibold">Endp.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ports.map((port) => {
+                    const up = port.oper_status === 1;
+                    const taggedList = port.tagged_vlans ?? [];
+                    const tagged = taggedList.length ? `Tagged: ${taggedList.join(", ")}` : undefined;
+                    const vlanText = [
+                      port.vlan != null ? String(port.vlan) : null,
+                      taggedList.length ? `${taggedList.length} tagged` : null,
+                    ].filter(Boolean).join(" + ") || "-";
+                    return (
+                      <tr key={port.id ?? port.port_id} className="border-t border-line">
+                        <td className="px-2 py-1 font-mono text-primary truncate max-w-32">{portName(port)}</td>
+                        <td className="px-2 py-1">
+                          <span className="inline-flex items-center gap-1.5 text-muted">
+                            <StatusDot status={up ? "up" : "unknown"} />
+                            {up ? "Up" : "Down"}
+                          </span>
+                        </td>
+                        <td className="px-2 py-1 text-right font-mono text-muted">
+                          {port.speed_mbps ? speedLabel(port.speed_mbps) : "-"}
+                        </td>
+                        {showVlan && (
+                          <td className="px-2 py-1 text-right font-mono text-muted whitespace-nowrap" title={tagged}>
+                            {vlanText}
+                          </td>
+                        )}
+                        {showStp && (
+                          <td className="px-2 py-1">
+                            <StpChip port={port} />
+                          </td>
+                        )}
+                        <td className="px-2 py-1 text-right font-mono text-muted">{port.endpoint_count || 0}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="mt-3 text-xs text-muted">No ports recorded</div>
+          )}
+        </InspectorSection>
+      )}
 
-      <InspectorSection title={`Neighbors (${neighbors.length})`}>
-        {neighbors.length === 0 ? (
-          <div className="text-xs text-muted">No links discovered</div>
-        ) : (
-          <ul className="flex flex-col gap-1.5">
-            {neighbors.map((n) => (
-              <li key={n.key} className="flex items-center gap-2 text-xs min-w-0">
-                <span className="font-mono text-[11px] text-muted shrink-0">{n.localPort}</span>
-                <span className="text-muted shrink-0">to</span>
-                <span className="min-w-0 truncate">
-                  {n.remoteId != null ? (
-                    <LinkButton onClick={() => open("device", n.remoteId as number)} title={n.remoteIp}>
-                      {n.remoteName}
-                    </LinkButton>
-                  ) : (
-                    <span className="text-primary">{n.remoteName}</span>
+      {!(pingOnly && neighbors.length === 0) && (
+        <InspectorSection title={`Neighbors (${neighbors.length})`}>
+          {neighbors.length === 0 ? (
+            <div className="text-xs text-muted">No links discovered</div>
+          ) : (
+            <ul className="flex flex-col gap-1.5">
+              {neighbors.map((n) => (
+                <li key={n.key} className="flex items-center gap-2 text-xs min-w-0">
+                  <span className="font-mono text-[11px] text-muted shrink-0">{n.localPort}</span>
+                  <span className="text-muted shrink-0">to</span>
+                  <span className="min-w-0 truncate">
+                    {n.remoteId != null ? (
+                      <LinkButton onClick={() => open("device", n.remoteId as number)} title={n.remoteIp}>
+                        {n.remoteName}
+                      </LinkButton>
+                    ) : (
+                      <span className="text-primary">{n.remoteName}</span>
+                    )}
+                    <span className="font-mono text-[11px] text-muted"> : {n.remotePort}</span>
+                  </span>
+                  {n.speed && (
+                    <Badge tone="accent" className="ml-auto shrink-0">
+                      {n.speed}
+                    </Badge>
                   )}
-                  <span className="font-mono text-[11px] text-muted"> : {n.remotePort}</span>
-                </span>
-                {n.speed && (
-                  <Badge tone="accent" className="ml-auto shrink-0">
-                    {n.speed}
-                  </Badge>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </InspectorSection>
+                </li>
+              ))}
+            </ul>
+          )}
+        </InspectorSection>
+      )}
     </div>
   );
 }

@@ -153,11 +153,20 @@ class RackOut(RackBase):
         from_attributes = True
 
 
+RackSide = Literal["front", "rear"]
+
+
 class RackLayoutEntry(BaseModel):
-    """Placement of one device in the rack elevation (1-based U space)."""
+    """Placement of one device in the rack elevation (1-based U space).
+
+    rack_side / full_depth are optional; omitted values keep the device's
+    stored side and depth.
+    """
     device_id:       int
     rack_u_position: int = Field(..., ge=1, le=48)
     u_height:        int = Field(..., ge=1, le=60)
+    rack_side:       Optional[RackSide] = None
+    full_depth:      Optional[bool] = None
 
 
 class RackLayoutIn(BaseModel):
@@ -173,6 +182,8 @@ class RackItemCreate(BaseModel):
     label:           str = Field("", max_length=120)
     rack_u_position: int = Field(..., ge=1, le=48)
     u_height:        int = Field(1, ge=1, le=60)
+    rack_side:       RackSide = "front"
+    full_depth:      bool = False
     note:            Optional[str] = Field(None, max_length=2000)
 
 
@@ -181,6 +192,8 @@ class RackItemUpdate(BaseModel):
     label:           Optional[str] = Field(None, max_length=120)
     rack_u_position: Optional[int] = Field(None, ge=1, le=48)
     u_height:        Optional[int] = Field(None, ge=1, le=60)
+    rack_side:       Optional[RackSide] = None
+    full_depth:      Optional[bool] = None
     note:            Optional[str] = Field(None, max_length=2000)
 
 
@@ -191,6 +204,8 @@ class RackItemOut(BaseModel):
     label:           str
     rack_u_position: int
     u_height:        int
+    rack_side:       str = "front"
+    full_depth:      bool = False
     note:            Optional[str] = None
     created_at:      Optional[datetime] = None
     updated_at:      Optional[datetime] = None
@@ -432,6 +447,8 @@ class CredentialBase(BaseModel):
     priority:     int  = 0
     snmp_port:    int  = 161
     enabled:      bool = True
+    # False registers a ping-only host (the scan never tries SNMP)
+    snmp_enabled: bool = True
     # v2c
     snmp_version: SnmpVersion  = "v2c"
     community:    str          = "public"
@@ -468,6 +485,7 @@ class CredentialUpdate(BaseModel):
     priority:          Optional[int]           = None
     snmp_port:         Optional[int]           = None
     enabled:           Optional[bool]          = None
+    snmp_enabled:      Optional[bool]          = None
     snmp_version:      Optional[SnmpVersion]   = None
     community:         Optional[str]           = None
     v3_security_level: Optional[SecurityLevel] = None
@@ -568,6 +586,8 @@ class DeviceBase(BaseModel):
     location:  str = ""
     ping_status: str = "unknown"
     ping_rtt_ms: int = 0
+    # True while the device is monitored by ping only (credential snmp_enabled=False)
+    ping_only: bool = False
     map_x:     float = 100.0
     map_y:     float = 100.0
     ignored:   bool  = False
@@ -638,11 +658,13 @@ class DeviceOut(DeviceBase):
     floor_id:      Optional[int] = None
     rack_u_position: Optional[int] = None
     u_height:      int = 1
+    rack_side:     str = "front"          # "front" | "rear"
+    full_depth:    bool = False           # occupies the U range on both sides
     ports_per_row: Optional[int] = None   # resolved from switch_model
     total_ports:   Optional[int] = None   # port cutoff: ports beyond this index are hidden
     stp:           Optional[StpInfo] = None
     vlan_names:    Dict[str, str] = Field(default_factory=dict)
-    # Device kind ("switch" | "firewall" | "ups" | "server") and the
+    # Device kind ("switch" | "firewall" | "ups" | "server" | "other") and the
     # normalized health snapshot (see scanners.health), NULL when not reported.
     device_type:   str = "switch"
     health:        Optional[Dict[str, Any]] = None
@@ -661,6 +683,16 @@ class DeviceOut(DeviceBase):
         # u_height is declared on DeviceOut (not DeviceBase); NULL must map
         # to the 1U default rather than fail the int validation.
         return 1 if v is None else v
+
+    @field_validator("rack_side", mode="before")
+    @classmethod
+    def _default_rack_side(cls, v):
+        return v or "front"
+
+    @field_validator("full_depth", mode="before")
+    @classmethod
+    def _default_full_depth(cls, v):
+        return bool(v)
 
     @field_validator("device_type", mode="before")
     @classmethod
@@ -698,6 +730,9 @@ class DevicePositionUpdate(BaseModel):
     map_y: float
 
 
+DeviceType = Literal["switch", "firewall", "ups", "server", "other"]
+
+
 class DeviceMetaUpdate(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
@@ -715,13 +750,15 @@ class DeviceMetaUpdate(BaseModel):
     enabled:  Optional[bool] = None
     rack_u_position: Optional[int] = Field(None, ge=1, le=48)
     u_height: Optional[int] = Field(None, ge=1, le=60)
+    rack_side: Optional[RackSide] = None
+    full_depth: Optional[bool] = None
     # Explicit control over the manual-vendor flag; wins over the implicit
     # derivation from the vendor field when both are sent.
     vendor_override: Optional[bool] = None
     # Opt-in for the latency monitor in latency_mode "selected".
     latency_monitored: Optional[bool] = None
     # Manual correction of the scan-derived device kind.
-    device_type: Optional[Literal["switch", "firewall", "ups", "server"]] = None
+    device_type: Optional[DeviceType] = None
 
 
 class BulkDeviceMetaUpdate(BaseModel):
@@ -734,6 +771,9 @@ class BulkDeviceMetaUpdate(BaseModel):
     floor_id: Optional[int] = None
     # Explicitly unassign devices from their floor (floor_id cannot express this)
     clear_floor: bool = False
+    # Rack side / depth applied to all listed devices (placement is re-validated)
+    rack_side: Optional[RackSide] = None
+    full_depth: Optional[bool] = None
 
 
 # ─── Endpoint ─────────────────────────────────────────────────────────────────
@@ -774,6 +814,50 @@ class EndpointUpdate(BaseModel):
 class BulkEndpointUpdate(BaseModel):
     endpoint_ids: List[int]
     ignored: Optional[bool] = None
+
+
+# ─── Ping-only adoption / ping candidates ─────────────────────────────────────
+
+class PingOnlyEntry(BaseModel):
+    # Validated per entry by the endpoint (one bad IP must not fail the batch)
+    ip: str
+    label: Optional[str] = None
+
+
+class PingOnlyAdoptRequest(BaseModel):
+    entries: List[PingOnlyEntry] = Field(..., max_length=500)
+
+
+class PingOnlyCreated(BaseModel):
+    ip: str
+    credential_id: int
+    device_id: int
+
+
+class PingOnlySkipped(BaseModel):
+    ip: str
+    reason: Literal["exists", "invalid", "duplicate"]
+
+
+class PingOnlyAdoptResult(BaseModel):
+    created: List[PingOnlyCreated] = []
+    skipped: List[PingOnlySkipped] = []
+
+
+class PingCandidateOut(BaseModel):
+    id: int
+    ip: str
+    rtt_ms: Optional[int] = None
+    first_seen: Optional[datetime] = None
+    last_seen: Optional[datetime] = None
+    hostname: Optional[str] = None
+    mac: Optional[str] = None
+    vendor: Optional[str] = None
+    dismissed: bool = False
+
+
+class PingCandidateIds(BaseModel):
+    ids: List[int] = Field(..., max_length=5000)
 
 
 # ─── Topology Link ────────────────────────────────────────────────────────────

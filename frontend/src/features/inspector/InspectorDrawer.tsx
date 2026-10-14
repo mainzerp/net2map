@@ -14,7 +14,7 @@ import RackInspector from "./RackInspector";
 import { DURATION, fadePreset, slidePreset, useReducedMotion } from "../../theme/motion";
 
 const KIND_LABELS: Record<InspectorKind, string> = {
-  device: "Switch",
+  device: "Device",
   endpoint: "Endpoint",
   rack: "Rack",
 };

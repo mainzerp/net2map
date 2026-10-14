@@ -9,6 +9,13 @@ export { useRackItems, useCreateRackItem, useUpdateRackItem, useDeleteRackItem }
 export { useLogs, type LogEntry, type LogsParams } from "./useLogs";
 export { useSnmpProfiles } from "./useSnmpProfiles";
 export { useCredentials } from "./useCredentials";
+export {
+  useAdoptPingOnly,
+  usePingCandidates,
+  useDismissPingCandidates,
+  useRestorePingCandidates,
+  pingOnlySkipLabel,
+} from "./usePingOnly";
 export { useSwitchModels } from "./useSwitchModels";
 export { useSwitchClasses } from "./useSwitchClasses";
 export {

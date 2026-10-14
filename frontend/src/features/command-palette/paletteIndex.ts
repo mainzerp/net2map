@@ -39,7 +39,7 @@ const PAGES: PageDef[] = [
   { to: "/", label: "Dashboard", icon: "dashboard", keywords: "home overview" },
   { to: "/map", label: "Topology map", icon: "map", keywords: "map topology graph" },
   { to: "/devices", label: "Devices", icon: "devices", keywords: "endpoints clients hosts" },
-  { to: "/network", label: "Network", icon: "network", keywords: "switches infrastructure" },
+  { to: "/network", label: "Network", icon: "network", keywords: "devices switches infrastructure" },
   { to: "/racks", label: "Racks", icon: "racks", keywords: "rack elevation" },
   { to: "/logs", label: "Logs", icon: "logs", keywords: "audit events history" },
   { to: "/settings", label: "Settings", icon: "settings", keywords: "credentials snmp configuration" },
@@ -114,7 +114,7 @@ export function buildPaletteIndex(
     group: "switches",
     label: switchLabel(node),
     detail: node.ip,
-    hint: "Switch",
+    hint: "Device",
     fields: [
       { text: node.hostname },
       { text: node.sys_name },

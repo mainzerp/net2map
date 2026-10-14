@@ -37,7 +37,7 @@ PROFILE_BULK_FIELDS = [
 ]
 
 CREDENTIAL_BULK_FIELDS = [
-    "label", "ip", "priority", "snmp_port", "enabled",
+    "label", "ip", "priority", "snmp_port", "enabled", "snmp_enabled",
     "snmp_version", "community",
     "v3_security_level", "v3_username",
     "v3_auth_protocol", "v3_auth_password",
@@ -52,6 +52,19 @@ def _normalize_bool(value):
         return value
     txt = str(value or "").strip().lower()
     return txt in {"1", "true", "yes", "y", "on"}
+
+
+def normalize_snmp_enabled(row: dict) -> None:
+    """Normalize an imported snmp_enabled value; missing or empty means True.
+
+    Imports created before ping-only credentials existed carry no
+    snmp_enabled field (or an empty CSV cell) and must stay SNMP credentials.
+    """
+    value = row.get("snmp_enabled")
+    if value is None or (isinstance(value, str) and not value.strip()):
+        row.pop("snmp_enabled", None)
+    else:
+        row["snmp_enabled"] = _normalize_bool(value)
 
 
 def _normalize_optional_int(value):
@@ -123,6 +136,7 @@ def _parse_bulk_rows(kind: str, body: BulkImportRequest) -> List[dict]:
                     del row["priority"]
             if "enabled" in row:
                 row["enabled"] = _normalize_bool(row.get("enabled"))
+            normalize_snmp_enabled(row)
         normalized.append(row)
 
     return normalized
@@ -181,6 +195,7 @@ def bulk_export(kind: str, request: Request, fmt: str = "json", db: Session = De
                 "priority": c.priority,
                 "snmp_port": c.snmp_port,
                 "enabled": bool(c.enabled),
+                "snmp_enabled": c.snmp_enabled is not False,
                 "snmp_version": c.snmp_version,
                 "community": MASK_EXPORT if c.community else "",
                 "v3_security_level": c.v3_security_level,

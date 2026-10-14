@@ -18,6 +18,36 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
+- Adopt ping-only devices from endpoints and discovery candidates (unreleased, migration 028) · priority: P2 · area: full-stack
+  `POST /credentials/ping-only` (bulk, creates credential + device at once); scan
+  records range hosts with ping ok / SNMP failed in `ping_candidates`; endpoint
+  inspector button, endpoint table bulk action, candidate list in Settings >
+  Network Devices. Passed: ruff, 898 backend tests, typecheck, 346 frontend tests.
+  Open: candidate `vendor` is always null (no OUI data), column shows empty;
+  existing Ignore/Edit/Delete buttons are still visible to viewers.
+  User to verify: local build, adopt an endpoint, set a discovery range, scan,
+  candidates appear, adopt/dismiss/restore.
+
+- Ping-only devices via credential flag (unreleased, migration 027) · priority: P2 · area: full-stack
+  `credentials.snmp_enabled=false` -> scan only pings, creates a `ping_only` device
+  (type `other`) even if unreachable; SNMP credential on the same IP wins.
+  Passed: ruff, 882 backend tests, typecheck, 332 frontend tests.
+  Open: "other" devices in a rack still get the port faceplate, not a plain plate.
+  User to verify: local build, add a ping-only credential, scan, device appears with
+  badge, rack/latency work.
+- Rack front/rear side by side and full-depth (unreleased, migration 027) · priority: P2 · area: full-stack
+  `rack_side` + `full_depth` on devices and rack items; shared rule in
+  `backend/shared/rack_space.py`; `/meta` and `bulk-meta` now 409 on overlap.
+  Open: bulk "assign to rack" keeps old U positions and may now 409; rack body
+  narrowed to 440px; hatch styling not checked in a browser.
+  User to verify: /racks, drag devices to Rear, toggle full depth, conflicts refused.
+- Rack item palette with drag and drop (unreleased) · priority: P2 · area: frontend
+  Palette above the tray replaces "+ Add item"; existing items draggable.
+  User to verify: drag several patch panels into a rack, move one, click opens dialog.
+- Rename Switches -> Devices, searchable assign picker (unreleased) · priority: P2 · area: frontend
+  Settings tab "Network Devices"; `Combobox` primitive + `utils/deviceSearch.ts`.
+  User to verify: Settings > Racks, type part of an IP, assign several in a row.
+
 - Attention card ignores allow_outside_rack (released v3.5.0) · priority: P2 · area: frontend
   "N switches not assigned to a rack" counted every unracked device; now skips devices
   whose switch class has `allow_outside_rack` (classless unracked devices still count).

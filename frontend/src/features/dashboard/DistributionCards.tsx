@@ -130,8 +130,8 @@ export function DistributionPanel({ vendors, switchTotal, speeds, linkTotal }: D
         title="Vendors"
         segments={vendorSegments}
         total={vendorSum || switchTotal}
-        unit="switches"
-        emptyText="No switches discovered"
+        unit="devices"
+        emptyText="No devices discovered"
       />
       <Block
         title="Link speeds"

@@ -120,7 +120,7 @@ describe("InspectorDrawer", () => {
   it("shows a friendly empty state for unknown ids", async () => {
     renderDrawer("/?inspect=device:999");
 
-    expect(await screen.findByRole("dialog", { name: "Switch not found" })).toBeTruthy();
+    expect(await screen.findByRole("dialog", { name: "Device not found" })).toBeTruthy();
     expect(screen.getByText("It may have been removed or the link is out of date.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(locationText()).toBe("/"));

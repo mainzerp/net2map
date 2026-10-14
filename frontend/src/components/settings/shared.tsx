@@ -1,6 +1,7 @@
-import type { ReactNode } from "react";
-import { Button, Modal, Select, Spinner } from "../ui";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Button, Combobox, Modal, Spinner } from "../ui";
 import type { TopologyNode } from "../../types";
+import { deviceDisplayName, filterDevices } from "../../utils/deviceSearch";
 
 // Shared building blocks for the settings tabs: uniform form rows, section
 // headers, async states and the destructive-action confirm dialog.
@@ -60,21 +61,39 @@ export function ConfirmDeleteModal({ open, title, message, busy = false, onConfi
 }
 
 // Shared assignment block used by the rack/class/model tabs: lists the devices
-// currently assigned to an entry and offers a picker to assign a free device.
+// currently assigned to an entry and offers a type-to-filter picker to assign
+// free devices (several in a row; the search input keeps focus).
 interface DeviceAssignmentProps {
   assigned: TopologyNode[];
   available: TopologyNode[];
-  selVal: string;
-  onSelect: (val: string) => void;
-  onAssign: () => void;
+  onAssign: (devId: number) => void;
   onUnassign: (devId: number) => void;
 }
 
-export function DeviceAssignment({ assigned, available, selVal, onSelect, onAssign, onUnassign }: DeviceAssignmentProps) {
+export function DeviceAssignment({ assigned, available, onAssign, onUnassign }: DeviceAssignmentProps) {
+  const [query, setQuery] = useState("");
+  // Devices picked but not yet gone from `available` (mutation + refetch in
+  // flight) are hidden so a fast second pick never hits the same device.
+  const [pending, setPending] = useState<Set<number>>(() => new Set());
+  const availableKey = available.map((d) => d.id).join(",");
+  useEffect(() => { setPending(new Set()); }, [availableKey]);
+
+  const candidates = useMemo(
+    () => available.filter((d) => !pending.has(d.id)),
+    [available, pending],
+  );
+  const { matches, total } = useMemo(() => filterDevices(candidates, query), [candidates, query]);
+  const more = total - matches.length;
+
+  const assign = (d: TopologyNode) => {
+    setPending((prev) => new Set(prev).add(d.id));
+    onAssign(d.id);
+  };
+
   return (
     <div className="mt-2.5 border-t border-line pt-2">
       <div className="text-muted text-[10px] tracking-[1px] mb-1.5 select-none">
-        ASSIGNED SWITCHES ({assigned.length})
+        ASSIGNED DEVICES ({assigned.length})
       </div>
       {assigned.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-2">
@@ -87,18 +106,33 @@ export function DeviceAssignment({ assigned, available, selVal, onSelect, onAssi
                 onClick={() => onUnassign(d.id)}
                 className="text-muted hover:text-danger cursor-pointer leading-none"
                 title="Unassign"
+                aria-label={`Unassign ${d.sys_name || d.ip}`}
               >x</button>
             </span>
           ))}
         </div>
       )}
-      <div className="flex gap-1.5">
-        <Select value={selVal} onChange={(e) => onSelect(e.target.value)} className="flex-1">
-          <option value="">-- Assign switch --</option>
-          {available.map((d) => <option key={d.id} value={d.id}>{d.sys_name || d.ip} ({d.ip})</option>)}
-        </Select>
-        <Button size="sm" variant="primary" disabled={!selVal} onClick={onAssign}>Assign</Button>
-      </div>
+      <Combobox
+        query={query}
+        onQueryChange={setQuery}
+        items={matches}
+        getKey={(d) => d.id}
+        onSelect={assign}
+        ariaLabel="Assign device"
+        placeholder={candidates.length === 0 ? "No unassigned devices" : "Search by name, IP, vendor, model..."}
+        disabled={candidates.length === 0}
+        emptyText="No matching devices"
+        footer={more > 0 ? `${more} more, refine search` : undefined}
+        renderItem={(d) => (
+          <span className="flex items-baseline gap-2 min-w-0">
+            <span className="font-semibold truncate">{deviceDisplayName(d)}</span>
+            <span className="text-muted tabular-nums">{d.ip}</span>
+            {(d.vendor || d.model) && (
+              <span className="text-muted truncate ml-auto">{[d.vendor, d.model].filter(Boolean).join(" ")}</span>
+            )}
+          </span>
+        )}
+      />
     </div>
   );
 }

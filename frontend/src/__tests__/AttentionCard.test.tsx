@@ -92,7 +92,7 @@ describe("AttentionCard", () => {
       makeNode({ id: 22, ip: "10.0.0.22", rack_id: null, class_id: null }),
     ];
     renderWithRouter(<AttentionCard nodes={nodes} classes={classes} />);
-    expect(screen.getByRole("button", { name: /2 switches not assigned to a rack/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /2 devices not assigned to a rack/ })).toBeTruthy();
   });
 
   it("hides the rack row when every unracked device may stay outside a rack", () => {

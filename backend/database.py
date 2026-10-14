@@ -120,6 +120,9 @@ class RackItem(Base):
     label           = Column(String, nullable=False, default="", server_default="")
     rack_u_position = Column(Integer, nullable=False)   # 1-based bottom U
     u_height        = Column(Integer, nullable=False, default=1, server_default="1")
+    # Mounting side ("front" | "rear"); full_depth occupies both sides.
+    rack_side       = Column(String(8), nullable=False, default="front", server_default="front")
+    full_depth      = Column(Boolean, nullable=False, default=False, server_default="false")
     note            = Column(Text, nullable=True)
     created_at      = Column(DateTime, server_default=func.now())
     updated_at      = Column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -188,6 +191,8 @@ class Credential(Base):
     priority    = Column(Integer, default=0)               # lower = tried first
     snmp_port   = Column(Integer, default=161)
     enabled     = Column(Boolean, default=True)
+    # False registers a ping-only host: the scan never tries SNMP for this IP.
+    snmp_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
     created_at  = Column(DateTime, server_default=func.now())
     updated_at  = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -259,6 +264,13 @@ class Device(Base):
     # and the number of rack units the device occupies.
     rack_u_position = Column(Integer, nullable=True)
     u_height        = Column(Integer, nullable=False, server_default="1")
+    # Mounting side ("front" | "rear"); full_depth occupies the U range on both sides.
+    rack_side       = Column(String(8), nullable=False, default="front", server_default="front")
+    full_depth      = Column(Boolean, nullable=False, default=False, server_default="false")
+
+    # True while the device is monitored by ping only (its credential has
+    # snmp_enabled=False); maintained by the scan engine.
+    ping_only    = Column(Boolean, nullable=False, default=False, server_default="false")
 
     # Consolidation fields (metadata now lives here, not on Credential)
     label        = Column(String, default="")
@@ -283,7 +295,8 @@ class Device(Base):
     stp_at        = Column(DateTime, nullable=True)
 
     # Device kind derived from the detected vendor scanner during a scan:
-    # "switch" | "firewall" | "ups" | "server". Editable via the meta PATCH.
+    # "switch" | "firewall" | "ups" | "server" | "other" ("other" is used for
+    # ping-only devices). Editable via the meta PATCH.
     device_type   = Column(String(16), nullable=False, default="switch", server_default="switch")
     # Normalized health snapshot (see scanners.health), NULL when the device
     # reports none; health_updated_at is the collection time (naive UTC).
@@ -483,6 +496,22 @@ class LatencySample(Base):
     jitter_ms  = Column(Float, nullable=True)
     loss_pct   = Column(Float, nullable=False)
     probes     = Column(Integer, nullable=False)                             # echo requests sent
+
+
+class PingCandidate(Base):
+    """Discovery-range host that answered ping but no SNMP profile.
+
+    Written by the scan finalize step; the UI offers these hosts for adoption
+    as ping-only devices (POST /credentials/ping-only) or dismissal.
+    """
+    __tablename__ = "ping_candidates"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    ip         = Column(String, nullable=False, unique=True, index=True)
+    rtt_ms     = Column(Integer, nullable=True)
+    first_seen = Column(DateTime, server_default=func.now())
+    last_seen  = Column(DateTime, server_default=func.now())
+    dismissed  = Column(Boolean, nullable=False, default=False, server_default="false")
 
 
 def _seed_default_settings():

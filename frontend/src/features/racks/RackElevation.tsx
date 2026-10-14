@@ -6,16 +6,22 @@
 // label column right of the rack (device name + model as plan annotations with
 // leader lines), a port legend, pointer-based drag-and-drop placement and an
 // unassigned tray.
+// Front and rear faces are drawn side by side on the same U scale; each
+// object renders on its own face, and full-depth objects additionally render
+// as a hatched, non-draggable "shadow" on the opposite face. An item palette
+// above the tray creates rack items by dragging them onto either face.
 // Faceplate styling lives in the "Rack faceplates (phase 4)" block of
 // index.css; all colors come from theme tokens or theme/visual.ts.
 
 import { memo, useCallback, useMemo, useRef, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { GripVertical, Layers, X } from "lucide-react";
 import { speedColor } from "../../theme/visual";
-import { Badge, Button, StatusDot } from "../../components/ui";
+import { Badge, StatusDot } from "../../components/ui";
 import VendorBadge from "../../components/map/VendorBadge";
-import { useRackItems } from "../../hooks/api";
-import type { PortInfo, RackInfo, RackItem, TopologyNode } from "../../types";
+import { useCreateRackItem, useRackItems, useUpdateRackItem } from "../../hooks/api";
+import { extractErrorMessage } from "../../api";
+import { useToast } from "../../components/ToastProvider";
+import type { PortInfo, RackInfo, RackItem, RackItemKind, RackSide, TopologyNode } from "../../types";
 import {
   HEALTH_STATUS_LABEL,
   clampPercent,
@@ -26,16 +32,22 @@ import {
   isPowerOrServer,
 } from "../../utils/deviceHealth";
 import {
+  RACK_SIDES,
   U_PX,
   deviceUHeight,
+  fullDepthOf,
   itemBlocks,
+  oppositeSide,
+  placementValid,
   placementsFromNodes,
   rackHeightU,
-  rangesOverlap,
   rowFromTop,
+  sideOf,
+  topmostFreeU,
   usedUnits,
+  type DropTarget,
 } from "./rackLayout";
-import RackItemDialog, { rackItemKindLabel } from "./RackItemDialog";
+import RackItemDialog, { RACK_ITEM_KINDS, rackItemDefaultU, rackItemKindLabel } from "./RackItemDialog";
 import {
   activityTiming,
   layoutPortSockets,
@@ -44,7 +56,14 @@ import {
   portTitle,
   type SocketGroup,
 } from "./portSockets";
-import { useRackDrag, useRackLayout } from "./useRackLayout";
+import {
+  dragPayloadKey,
+  useRackDrag,
+  useRackLayout,
+  type RackBodyRefs,
+  type RackDragPayload,
+  type RackDragSource,
+} from "./useRackLayout";
 import { useInspector } from "../../hooks/useInspector";
 
 interface RackElevationProps {
@@ -351,7 +370,7 @@ function RackEar({ side }: { side: "left" | "right" }) {
 }
 
 // ── Side rail with square mounting holes and U numbers ──────────────────────
-function RackRail({ side, rows }: { side: "left" | "right"; rows: number[] }) {
+function RackRail({ side, rows, testId }: { side: "left" | "right"; rows: number[]; testId: string }) {
   const holes = (
     <span className="rack-rail-holes" aria-hidden="true">
       <span className="rack-rail-hole" />
@@ -360,7 +379,7 @@ function RackRail({ side, rows }: { side: "left" | "right"; rows: number[] }) {
     </span>
   );
   return (
-    <div className={`rack-rail rack-rail-${side} flex flex-col w-7 shrink-0`} data-testid={`rack-rail-${side}`}>
+    <div className={`rack-rail rack-rail-${side} flex flex-col w-7 shrink-0`} data-testid={testId}>
       {rows.map((u) => (
         <div key={u} className="rack-rail-unit flex items-stretch" style={{ height: U_PX }}>
           {side === "right" && holes}
@@ -420,6 +439,45 @@ function UHeightControl({
         +
       </button>
     </div>
+  );
+}
+
+// ── Full-depth toggle ───────────────────────────────────────────────────────
+// Sits next to the U-height stepper: pressed = the device blocks its U range
+// on both the front and the rear face.
+function FullDepthToggle({
+  device,
+  readOnly,
+  onToggle,
+}: {
+  device: TopologyNode;
+  readOnly: boolean;
+  onToggle: () => void;
+}) {
+  const on = fullDepthOf(device);
+  const name = deviceName(device);
+  return (
+    <button
+      type="button"
+      data-testid={`full-depth-toggle-${device.id}`}
+      aria-pressed={on}
+      aria-label={`Full depth for ${name}`}
+      title={on ? "Full depth: blocks this U range on front and rear" : "Mark as full depth (blocks front and rear)"}
+      disabled={readOnly}
+      onPointerDown={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+      className={`w-3.5 h-3.5 shrink-0 inline-flex items-center justify-center rounded-[3px] border cursor-pointer disabled:cursor-default focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent ${
+        on
+          ? "border-accent bg-accent-soft text-accent"
+          : "border-line-strong bg-panel text-muted hover:text-primary hover:border-accent disabled:opacity-30 disabled:hover:text-muted disabled:hover:border-line-strong"
+      }`}
+    >
+      <Layers size={9} strokeWidth={2} aria-hidden="true" />
+    </button>
   );
 }
 
@@ -537,6 +595,7 @@ function Faceplate({
   heightU,
   onPointerDown,
   onUHeight,
+  onFullDepth,
   onOpen,
   activity,
   highlighted,
@@ -549,6 +608,7 @@ function Faceplate({
   heightU: number;
   onPointerDown: (e: React.PointerEvent) => void;
   onUHeight: (uHeight: number) => void;
+  onFullDepth: () => void;
   onOpen: () => void;
   activity: boolean;
   // Remove the device from the rack; omitted (no button) in read-only mode.
@@ -620,6 +680,7 @@ function Faceplate({
           />
         )}
         <UHeightControl device={device} heightU={heightU} readOnly={readOnly} onChange={onUHeight} />
+        <FullDepthToggle device={device} readOnly={readOnly} onToggle={onFullDepth} />
         {!readOnly && onRemove && <RemoveFromRackButton device={device} reveal onRemove={onRemove} />}
       </div>
       <RackEar side="right" />
@@ -631,7 +692,8 @@ function Faceplate({
 // Muted, dashed plate without status LED or live ports: a patch panel shows a
 // row of dimmed port-like squares per U (at most two rows), a cable manager a
 // row of slots, a shelf a tray lip; blank and other plates stay plain. Items
-// are not draggable; a click opens the item dialog.
+// are draggable like faceplates (U position and side); a click below the drag
+// threshold opens the item dialog.
 const PATCH_PANEL_PORTS = 24;
 const CABLE_MANAGER_SLOTS = 10;
 
@@ -676,27 +738,37 @@ function RackItemFace({ item }: { item: RackItem }) {
 function RackItemPlate({
   item,
   readOnly,
+  dragging,
   highlighted,
   onHighlight,
+  onPointerDown,
   onOpen,
 }: {
   item: RackItem;
   readOnly: boolean;
+  dragging: boolean;
   highlighted: boolean;
   onHighlight: (on: boolean) => void;
+  onPointerDown: (e: React.PointerEvent) => void;
   onOpen: () => void;
 }) {
   const name = item.label || rackItemKindLabel(item.kind);
   const action = readOnly ? "view details" : "edit";
+  const title = item.note ? `${name} - ${item.note}` : name;
   return (
     <div
       data-testid={`rack-item-${item.id}`}
       data-kind={item.kind}
+      data-side={sideOf(item)}
+      data-full-depth={fullDepthOf(item) ? "1" : "0"}
       role="button"
       tabIndex={0}
       aria-label={`${name} (${rackItemKindLabel(item.kind)}) - ${action}`}
-      title={item.note ? `${name} - ${item.note}` : name}
-      onClick={onOpen}
+      title={readOnly ? title : `${title} - click to edit, drag to move`}
+      onPointerDown={onPointerDown}
+      // Read-only racks have no drag gesture, so a plain click opens the
+      // dialog; editable racks open via the click-vs-drag threshold.
+      onClick={readOnly ? onOpen : undefined}
       onMouseEnter={() => onHighlight(true)}
       onMouseLeave={() => onHighlight(false)}
       onFocus={() => onHighlight(true)}
@@ -707,9 +779,10 @@ function RackItemPlate({
           onOpen();
         }
       }}
-      className={`flex items-stretch h-full w-full rounded-[2px] border border-dashed bg-panel-2 overflow-hidden select-none cursor-pointer transition-colors duration-[120ms] motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent ${
+      className={`flex items-stretch h-full w-full rounded-[2px] border border-dashed bg-panel-2 overflow-hidden select-none transition-colors duration-[120ms] motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent ${
         highlighted ? "border-accent" : "border-line-strong hover:border-accent"
-      }`}
+      } ${readOnly ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"} ${dragging ? "opacity-40" : ""}`}
+      style={{ touchAction: "none" }}
     >
       <RackEar side="left" />
       <div className="flex items-stretch gap-1.5 px-1.5 py-px flex-1 min-w-0">
@@ -769,18 +842,116 @@ function RackItemLabel({
   );
 }
 
-// Topmost free 1U slot (for the "Add item" default), or 1 when the rack is full.
-function topmostFreeU(heightU: number, occupied: { pos: number; uHeight: number }[]): number {
-  for (let u = heightU; u >= 1; u--) {
-    if (!occupied.some((o) => rangesOverlap(o.pos, o.uHeight, u, 1))) return u;
-  }
-  return 1;
+// ── Full-depth shadow (opposite face) ───────────────────────────────────────
+// Hatched, muted placeholder drawn on the face opposite a full-depth object
+// so the blocked U range is visible there. Never draggable; a click opens
+// the object's inspector / dialog.
+function RackShadowPlate({
+  testId,
+  name,
+  mountedSide,
+  highlighted,
+  onHighlight,
+  onOpen,
+}: {
+  testId: string;
+  name: string;
+  mountedSide: RackSide;
+  highlighted: boolean;
+  onHighlight: (on: boolean) => void;
+  onOpen: () => void;
+}) {
+  const sideLabel = mountedSide === "front" ? "front" : "rear";
+  return (
+    <div
+      data-testid={testId}
+      data-shadow="1"
+      role="button"
+      tabIndex={0}
+      aria-label={`${name} (full depth, mounted on the ${sideLabel}) - open details`}
+      title={`${name} - full depth, mounted on the ${sideLabel}`}
+      onClick={onOpen}
+      onMouseEnter={() => onHighlight(true)}
+      onMouseLeave={() => onHighlight(false)}
+      onFocus={() => onHighlight(true)}
+      onBlur={() => onHighlight(false)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && e.target === e.currentTarget) {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+      className={`flex items-center justify-center h-full w-full rounded-[2px] border border-dashed bg-panel-2 bg-[image:repeating-linear-gradient(135deg,var(--line-strong)_0_1px,transparent_1px_7px)] overflow-hidden select-none cursor-pointer opacity-70 hover:opacity-100 transition-opacity duration-[120ms] motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent ${
+        highlighted ? "border-accent opacity-100" : "border-line-strong"
+      }`}
+    >
+      <span className="px-1.5 rounded-[2px] bg-panel-2 text-[10px] leading-4 text-muted truncate max-w-[90%]">
+        {name} - full depth ({sideLabel})
+      </span>
+    </div>
+  );
 }
+
+// ── Item palette ─────────────────────────────────────────────────────────────
+// One entry per rack item kind with its default height. Dragging an entry
+// onto either face creates an item there immediately; a click or Enter opens
+// the item dialog prefilled with that kind.
+function RackItemPalette({
+  draggingKind,
+  onPointerDown,
+  onOpen,
+}: {
+  draggingKind: RackItemKind | null;
+  onPointerDown: (e: React.PointerEvent, kind: RackItemKind, uHeight: number) => void;
+  onOpen: (kind: RackItemKind) => void;
+}) {
+  return (
+    <div data-testid="rack-item-palette" className="border border-line rounded-card bg-panel">
+      <div className="px-3 py-2 border-b border-line text-[11px] font-semibold text-muted">Rack items</div>
+      <div className="grid grid-cols-2 gap-1 p-1.5">
+        {RACK_ITEM_KINDS.map((k) => (
+          <div
+            key={k.value}
+            data-testid={`palette-item-${k.value}`}
+            role="button"
+            tabIndex={0}
+            aria-label={`Add ${k.label} (${k.defaultU}U)`}
+            title={`${k.label} (${k.defaultU}U) - drag onto the front or rear, or click to add with details`}
+            onPointerDown={(e) => onPointerDown(e, k.value, k.defaultU)}
+            onKeyDown={(e) => {
+              if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
+                e.preventDefault();
+                onOpen(k.value);
+              }
+            }}
+            className={`flex items-center gap-1.5 px-2 py-1.5 rounded border border-dashed border-line-strong bg-panel-2 text-[11px] select-none cursor-grab active:cursor-grabbing hover:border-accent focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent ${
+              draggingKind === k.value ? "opacity-40" : ""
+            }`}
+            style={{ touchAction: "none" }}
+          >
+            <GripVertical size={12} className="text-muted shrink-0" aria-hidden="true" />
+            <span className="text-primary truncate">{k.label}</span>
+            <span className="text-muted text-[10px] ml-auto shrink-0">{k.defaultU}U</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function uRangeLabel(pos: number, uHeight: number): string {
+  return uHeight <= 1 ? `U${pos}` : `U${pos}-U${pos + uHeight - 1}`;
+}
+
+const SIDE_LABEL: Record<RackSide, string> = { front: "Front", rear: "Rear" };
 
 // ── RackElevation ────────────────────────────────────────────────────────────
 export default function RackElevation({ rack, nodes, readOnly = false, activity = false }: RackElevationProps) {
   const heightU = rackHeightU(rack);
-  const bodyRef = useRef<HTMLDivElement>(null);
+  const frontBodyRef = useRef<HTMLDivElement>(null);
+  const rearBodyRef = useRef<HTMLDivElement>(null);
+  const bodyRefs: RackBodyRefs = useMemo(() => ({ front: frontBodyRef, rear: rearBodyRef }), []);
+  const { addToast } = useToast();
 
   // Placements are clamped/dropped when out of range (placementsFromNodes),
   // so a device that cannot fit inside the rack lands in the tray instead of
@@ -798,8 +969,8 @@ export default function RackElevation({ rack, nodes, readOnly = false, activity 
     [nodes],
   );
 
-  // Manual rack items (patch panels, blanks, ...): rendered at their U range,
-  // counted as used and treated as occupied by device drag-and-drop.
+  // Manual rack items (patch panels, blanks, ...): rendered at their U range
+  // and face, counted as used and treated as occupied by drag-and-drop.
   const { data: rackItemData } = useRackItems(rack.id);
   const rackItems = useMemo(() => rackItemData ?? [], [rackItemData]);
   const blocks = useMemo(() => itemBlocks(rackItems, heightU), [rackItems, heightU]);
@@ -809,75 +980,357 @@ export default function RackElevation({ rack, nodes, readOnly = false, activity 
       .filter((i) => visible.has(i.id))
       .map((item) => {
         const uHeight = Math.max(1, item.u_height);
-        return { item, uHeight, top: rowFromTop(heightU, item.rack_u_position, uHeight) * U_PX + 1 };
+        return {
+          item,
+          uHeight,
+          side: sideOf(item),
+          fullDepth: fullDepthOf(item),
+          top: rowFromTop(heightU, item.rack_u_position, uHeight) * U_PX + 1,
+        };
       });
   }, [rackItems, blocks, heightU]);
 
-  const used = usedUnits(placements, blocks);
-
-  const [itemDialog, setItemDialog] = useState<{ open: boolean; item: RackItem | null }>({ open: false, item: null });
+  const [itemDialog, setItemDialog] = useState<{ open: boolean; item: RackItem | null; kind: RackItemKind }>({
+    open: false,
+    item: null,
+    kind: "patch_panel",
+  });
   const closeItemDialog = useCallback(() => setItemDialog((d) => ({ ...d, open: false })), []);
-  const defaultItemPos = useMemo(() => topmostFreeU(heightU, [...placements, ...blocks]), [heightU, placements, blocks]);
+  const openItem = useCallback((item: RackItem) => setItemDialog({ open: true, item, kind: item.kind }), []);
+  const openNewItem = useCallback((kind: RackItemKind) => setItemDialog({ open: true, item: null, kind }), []);
+  const defaultItemPos = useMemo(
+    () => topmostFreeU(heightU, [...placements, ...blocks], { side: "front" }, rackItemDefaultU(itemDialog.kind)),
+    [heightU, placements, blocks, itemDialog.kind],
+  );
   const [hoveredItemId, setHoveredItemId] = useState<number | null>(null);
   const highlightItem = useCallback((id: number, on: boolean) => {
     setHoveredItemId((cur) => (on ? id : cur === id ? null : cur));
   }, []);
 
-  const { moveDevice, assignDevice, setUHeight, removeDevice, saving } = useRackLayout(rack.id);
+  const { moveDevice, assignDevice, setUHeight, setFullDepth, removeDevice, saving } = useRackLayout(rack.id);
+  const createItem = useCreateRackItem(rack.id);
+  const updateItem = useUpdateRackItem(rack.id, { optimistic: true });
   const trayRef = useRef<HTMLDivElement>(null);
 
+  const createItemMutate = createItem.mutate;
+  const updateItemMutate = updateItem.mutate;
   const onDrop = useCallback(
-    (device: TopologyNode, source: "rack" | "tray", pos: number, uHeight: number) => {
-      if (source === "tray" && device.rack_id !== rack.id) {
-        assignDevice(device, pos, uHeight);
-      } else {
-        moveDevice(device, pos, uHeight);
+    (payload: RackDragPayload, source: RackDragSource, target: DropTarget, uHeight: number) => {
+      const { pos, side } = target;
+      if (payload.type === "device") {
+        const device = payload.device;
+        if (source === "tray" && device.rack_id !== rack.id) {
+          assignDevice(device, pos, uHeight, side);
+        } else {
+          moveDevice(device, pos, uHeight, side);
+        }
+        return;
       }
+      if (payload.type === "item") {
+        const item = payload.item;
+        if (item.rack_u_position === pos && sideOf(item) === side) return;
+        updateItemMutate(
+          { id: item.id, rack_u_position: pos, rack_side: side },
+          { onError: (ex) => addToast(`Rack item not saved: ${extractErrorMessage(ex)}`, "error") },
+        );
+        return;
+      }
+      createItemMutate(
+        {
+          kind: payload.kind,
+          label: "",
+          rack_u_position: pos,
+          u_height: uHeight,
+          rack_side: side,
+          full_depth: false,
+          note: null,
+        },
+        { onError: (ex) => addToast(`Rack item not created: ${extractErrorMessage(ex)}`, "error") },
+      );
     },
-    [assignDevice, moveDevice, rack.id],
+    [assignDevice, moveDevice, rack.id, updateItemMutate, createItemMutate, addToast],
   );
 
   const { open: openInspector } = useInspector();
   const openDevice = useCallback((device: TopologyNode) => openInspector("device", device.id), [openInspector]);
+
+  const onDragClick = useCallback(
+    (payload: RackDragPayload) => {
+      if (payload.type === "device") openDevice(payload.device);
+      else if (payload.type === "item") openItem(payload.item);
+      else openNewItem(payload.kind);
+    },
+    [openDevice, openItem, openNewItem],
+  );
 
   const { drag, startDrag } = useRackDrag({
     rackId: rack.id,
     heightU,
     nodes,
     blocked: blocks,
-    bodyRef,
+    bodyRefs,
     trayRef,
     readOnly,
     onDrop,
     onRemove: removeDevice,
-    onClick: openDevice,
+    onClick: onDragClick,
   });
+  const dragKey = drag ? dragPayloadKey(drag.payload) : null;
   // A placed device is being dragged: the tray turns into a removal target.
-  const trayDropActive = drag?.source === "rack";
+  const trayDropActive = drag?.source === "rack" && drag.payload.type === "device";
+
+  // Full-depth toggle: refuse locally when the opposite face is occupied.
+  const toggleFullDepth = useCallback(
+    (device: TopologyNode) => {
+      const next = !fullDepthOf(device);
+      const pl = placementById.get(device.id);
+      if (next && pl) {
+        const side = pl.side ?? "front";
+        if (!placementValid(placements, device.id, pl.pos, pl.uHeight, heightU, blocks, { side, fullDepth: true })) {
+          addToast(
+            `Cannot make ${deviceName(device)} full depth: ${uRangeLabel(pl.pos, pl.uHeight)} on the ${oppositeSide(side)} is occupied`,
+            "error",
+          );
+          return;
+        }
+      }
+      setFullDepth(device, next);
+    },
+    [placementById, placements, heightU, blocks, addToast, setFullDepth],
+  );
 
   const scaleRows = Array.from({ length: heightU }, (_, i) => heightU - i); // top row shows heightU
 
-  // Pixel top of every placed device, shared by its faceplate and its label.
+  // Pixel top of every placed device, shared by its faceplate, its shadow
+  // and its label.
   const placedRows = useMemo(
     () =>
       placed.map((device) => {
         const pl = placementById.get(device.id);
         const uHeight = pl?.uHeight ?? deviceUHeight(device);
         const pos = pl?.pos ?? (device.rack_u_position as number);
-        return { device, uHeight, top: rowFromTop(heightU, pos, uHeight) * U_PX + 1 };
+        return {
+          device,
+          uHeight,
+          side: pl?.side ?? sideOf(device),
+          fullDepth: pl?.fullDepth ?? fullDepthOf(device),
+          top: rowFromTop(heightU, pos, uHeight) * U_PX + 1,
+        };
       }),
     [placed, placementById, heightU],
   );
 
-  // Shared hover/focus highlight between a faceplate and its label. Leaving
-  // one element only clears the highlight it set, so moving between the
-  // faceplate and the label never flickers another device. Suppressed while
-  // a drag is in progress.
+  // Shared hover/focus highlight between a faceplate, its shadow and its
+  // label. Leaving one element only clears the highlight it set, so moving
+  // between them never flickers another device. Suppressed while a drag is
+  // in progress.
   const [hoveredId, setHoveredId] = useState<number | null>(null);
   const highlight = useCallback((id: number, on: boolean) => {
     setHoveredId((cur) => (on ? id : cur === id ? null : cur));
   }, []);
   const highlightId = drag ? null : hoveredId;
+
+  const renderGhost = (side: RackSide) => {
+    const target = drag?.target;
+    if (!drag || !target) return null;
+    const primary = target.side === side;
+    // A full-depth drag also previews the blocked range on the other face.
+    if (!primary && !drag.fullDepth) return null;
+    const tone = target.valid ? "border-accent bg-accent/15" : "border-danger bg-danger/15";
+    return (
+      <div
+        data-testid={primary ? "drop-ghost" : "drop-ghost-shadow"}
+        data-valid={target.valid ? "1" : "0"}
+        data-side={side}
+        className={`absolute inset-x-1 rounded pointer-events-none border ${tone} ${
+          primary ? "" : "border-dashed opacity-60"
+        }`}
+        style={{
+          top: target.row * U_PX + 1,
+          height: drag.uHeight * U_PX - 2,
+        }}
+      >
+        <span className="absolute right-1 top-0 text-[9px] text-muted">
+          U{target.pos}
+          {primary ? "" : " (full depth)"}
+        </span>
+      </div>
+    );
+  };
+
+  const renderSide = (side: RackSide) => {
+    const used = usedUnits(placements, blocks, side);
+    const deviceRows = placedRows.filter((r) => r.side === side);
+    const deviceShadows = placedRows.filter((r) => r.fullDepth && r.side !== side);
+    const itemRows = placedItems.filter((r) => r.side === side);
+    const itemShadows = placedItems.filter((r) => r.fullDepth && r.side !== side);
+    return (
+      <div key={side} data-testid={`rack-side-${side}`} className="flex flex-col gap-1.5 min-w-0 max-w-full">
+        <div className="flex items-baseline gap-2 h-5">
+          <span className="text-primary text-[11px] font-semibold uppercase tracking-wide">{SIDE_LABEL[side]}</span>
+          <span className="text-muted text-[11px]">
+            {used}/{heightU} U used - {heightU - used} U free
+          </span>
+        </div>
+        {/* Rack face + label column share one horizontal scroll container so
+            label rows stay aligned with their faceplates on narrow screens. */}
+        <div data-testid={`rack-scroll-${side}`} className="min-w-0 max-w-full overflow-x-auto pb-1">
+          <div className="flex items-start w-max">
+            {/* Rack frame: top cap, rails + interior, bottom cap */}
+            <div className="rack-frame flex flex-col shrink-0">
+              <div className="rack-cap" aria-hidden="true" />
+              <div className="flex">
+                <RackRail side="left" rows={scaleRows} testId={`rack-rail-${side}-left`} />
+
+                <div
+                  ref={bodyRefs[side]}
+                  data-testid={`rack-body-${side}`}
+                  aria-label={`${SIDE_LABEL[side]} of ${rack.label}`}
+                  className="rack-interior relative w-[440px]"
+                  style={{ height: heightU * U_PX }}
+                >
+                  {/* Blanking plates for every slot (devices render on top) */}
+                  {Array.from({ length: heightU }, (_, i) => (
+                    <div
+                      key={i}
+                      className="rack-blank absolute inset-x-0"
+                      style={{ top: i * U_PX, height: U_PX }}
+                      aria-hidden="true"
+                    />
+                  ))}
+
+                  {/* Full-depth shadows of objects mounted on the other face */}
+                  {deviceShadows.map(({ device, top, uHeight }) => (
+                    <div
+                      key={`shadow-device-${device.id}`}
+                      className={`absolute ${dragKey === `device-${device.id}` ? "opacity-40" : ""}`}
+                      style={{ top, height: uHeight * U_PX - 2, left: 0, right: 0 }}
+                    >
+                      <RackShadowPlate
+                        testId={`rack-shadow-device-${device.id}`}
+                        name={deviceName(device)}
+                        mountedSide={oppositeSide(side)}
+                        highlighted={highlightId === device.id}
+                        onHighlight={(on) => highlight(device.id, on)}
+                        onOpen={() => openDevice(device)}
+                      />
+                    </div>
+                  ))}
+                  {itemShadows.map(({ item, top, uHeight }) => (
+                    <div
+                      key={`shadow-item-${item.id}`}
+                      className={`absolute ${dragKey === `item-${item.id}` ? "opacity-40" : ""}`}
+                      style={{ top, height: uHeight * U_PX - 2, left: 0, right: 0 }}
+                    >
+                      <RackShadowPlate
+                        testId={`rack-shadow-item-${item.id}`}
+                        name={item.label || rackItemKindLabel(item.kind)}
+                        mountedSide={oppositeSide(side)}
+                        highlighted={!drag && hoveredItemId === item.id}
+                        onHighlight={(on) => highlightItem(item.id, on)}
+                        onOpen={() => openItem(item)}
+                      />
+                    </div>
+                  ))}
+
+                  {/* Placed devices */}
+                  {deviceRows.map(({ device, top, uHeight }) => (
+                    <div
+                      key={device.id}
+                      className="absolute"
+                      style={{
+                        top,
+                        height: uHeight * U_PX - 2,
+                        left: 0,
+                        right: 0,
+                      }}
+                    >
+                      <Faceplate
+                        device={device}
+                        readOnly={readOnly}
+                        dragging={dragKey === `device-${device.id}`}
+                        heightU={heightU}
+                        onPointerDown={(e) => startDrag(e, { type: "device", device }, "rack")}
+                        onUHeight={(h) => setUHeight(device, h)}
+                        onFullDepth={() => toggleFullDepth(device)}
+                        onOpen={() => openDevice(device)}
+                        activity={activity}
+                        highlighted={highlightId === device.id}
+                        onHighlight={(on) => highlight(device.id, on)}
+                        onRemove={readOnly ? undefined : () => removeDevice(device)}
+                      />
+                    </div>
+                  ))}
+
+                  {/* Manual rack items (draggable; click opens the item dialog) */}
+                  {itemRows.map(({ item, top, uHeight }) => (
+                    <div
+                      key={`item-${item.id}`}
+                      className="absolute"
+                      style={{ top, height: uHeight * U_PX - 2, left: 0, right: 0 }}
+                    >
+                      <RackItemPlate
+                        item={item}
+                        readOnly={readOnly}
+                        dragging={dragKey === `item-${item.id}`}
+                        highlighted={!drag && hoveredItemId === item.id}
+                        onHighlight={(on) => highlightItem(item.id, on)}
+                        onPointerDown={(e) => startDrag(e, { type: "item", item }, "rack")}
+                        onOpen={() => openItem(item)}
+                      />
+                    </div>
+                  ))}
+
+                  {renderGhost(side)}
+                </div>
+
+                <RackRail side="right" rows={scaleRows} testId={`rack-rail-${side}-right`} />
+              </div>
+              <div className="rack-cap" aria-hidden="true" />
+              {side === "front" && (
+                <div className="pt-2">
+                  <PortLegend />
+                </div>
+              )}
+            </div>
+
+            {/* Label column: one annotation per object mounted on this face,
+                offset by the top cap so each label top equals its faceplate
+                top. The dragged device's label is dimmed in place (like its
+                faceplate) instead of following the ghost. Shadows have no
+                label; the label lives on the mounted face. */}
+            <div
+              data-testid={`rack-label-column-${side}`}
+              className="relative shrink-0"
+              style={{ marginTop: RACK_CAP_PX, height: heightU * U_PX, width: "clamp(160px, 16vw, 280px)" }}
+            >
+              {deviceRows.map(({ device, top }) => (
+                <RackLabel
+                  key={device.id}
+                  device={device}
+                  top={top}
+                  highlighted={highlightId === device.id}
+                  dragging={dragKey === `device-${device.id}`}
+                  onHighlight={(on) => highlight(device.id, on)}
+                  onOpen={() => openDevice(device)}
+                />
+              ))}
+              {itemRows.map(({ item, top }) => (
+                <RackItemLabel
+                  key={`item-${item.id}`}
+                  item={item}
+                  top={top}
+                  highlighted={!drag && hoveredItemId === item.id}
+                  onHighlight={(on) => highlightItem(item.id, on)}
+                  onOpen={() => openItem(item)}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="flex flex-col gap-3">
@@ -886,213 +1339,77 @@ export default function RackElevation({ rack, nodes, readOnly = false, activity 
         <span className="text-primary font-semibold text-sm">{rack.label}</span>
         {rack.room && <span className="text-muted text-[11px]">{rack.room}</span>}
         <Badge tone="accent">{heightU}U</Badge>
-        <span className="text-muted text-[11px]">
-          {used}/{heightU} U used - {heightU - used} U free
-        </span>
         {saving && <span className="text-muted text-[11px]">Saving...</span>}
         {readOnly && (
           <span className="text-warning text-[11px]">
             View-only: sign in as operator or admin to rearrange devices
           </span>
         )}
-        {!readOnly && (
-          <Button
-            size="sm"
-            variant="secondary"
-            className="ml-auto"
-            data-testid="rack-add-item"
-            onClick={() => setItemDialog({ open: true, item: null })}
-          >
-            <Plus size={12} aria-hidden="true" />
-            Add item
-          </Button>
-        )}
       </div>
 
       <div className="flex gap-4 items-start flex-wrap">
-        {/* Rack + label column share one horizontal scroll container so label
-            rows stay aligned with their faceplates on narrow screens. */}
-        <div data-testid="rack-scroll" className="min-w-0 max-w-full overflow-x-auto pb-1">
-        <div className="flex items-start w-max">
-        {/* Rack frame: top cap, rails + interior, bottom cap */}
-        <div className="rack-frame flex flex-col shrink-0">
-          <div className="rack-cap" aria-hidden="true" />
-          <div className="flex">
-          {/* Left rail with U scale */}
-          <RackRail side="left" rows={scaleRows} />
+        {/* Front and rear faces side by side on the same U scale; they wrap
+            below each other when the viewport is too narrow. */}
+        <div data-testid="rack-sides" className="flex flex-wrap gap-x-6 gap-y-4 items-start min-w-0 max-w-full">
+          {RACK_SIDES.map((side) => renderSide(side))}
+        </div>
 
-          {/* Rack interior */}
+        <div className="flex flex-col gap-3 min-w-[240px] flex-1 max-w-[360px]">
+          {!readOnly && (
+            <RackItemPalette
+              draggingKind={drag?.payload.type === "palette" ? drag.payload.kind : null}
+              onPointerDown={(e, kind, uHeight) => startDrag(e, { type: "palette", kind, uHeight }, "palette")}
+              onOpen={openNewItem}
+            />
+          )}
+
+          {/* Unassigned devices tray; doubles as the "remove from rack" drop
+              target while a placed device is dragged. */}
           <div
-            ref={bodyRef}
-            data-testid="rack-body"
-            className="rack-interior relative w-[480px]"
-            style={{ height: heightU * U_PX }}
+            ref={trayRef}
+            data-testid="rack-tray"
+            data-drop-active={trayDropActive ? "1" : "0"}
+            data-drop-over={trayDropActive && drag?.overTray ? "1" : "0"}
+            className={`flex flex-col gap-3 rounded-card transition-colors duration-[120ms] motion-reduce:transition-none ${
+              trayDropActive
+                ? `outline-2 outline-dashed outline-offset-4 ${drag?.overTray ? "outline-accent bg-accent/10" : "outline-line-strong"}`
+                : ""
+            }`}
           >
-            {/* Blanking plates for every slot (devices render on top) */}
-            {Array.from({ length: heightU }, (_, i) => (
+            {trayDropActive && (
               <div
-                key={i}
-                className="rack-blank absolute inset-x-0"
-                style={{ top: i * U_PX, height: U_PX }}
-                aria-hidden="true"
-              />
-            ))}
-
-            {/* Placed devices */}
-            {placedRows.map(({ device, top, uHeight }) => (
-              <div
-                key={device.id}
-                className="absolute"
-                style={{
-                  top,
-                  height: uHeight * U_PX - 2,
-                  left: 0,
-                  right: 0,
-                }}
-              >
-                <Faceplate
-                  device={device}
-                  readOnly={readOnly}
-                  dragging={drag?.device.id === device.id}
-                  heightU={heightU}
-                  onPointerDown={(e) => startDrag(e, device, "rack")}
-                  onUHeight={(h) => setUHeight(device, h)}
-                  onOpen={() => openDevice(device)}
-                  activity={activity}
-                  highlighted={highlightId === device.id}
-                  onHighlight={(on) => highlight(device.id, on)}
-                  onRemove={readOnly ? undefined : () => removeDevice(device)}
-                />
-              </div>
-            ))}
-
-            {/* Manual rack items (not draggable; click opens the item dialog) */}
-            {placedItems.map(({ item, top, uHeight }) => (
-              <div
-                key={`item-${item.id}`}
-                className="absolute"
-                style={{ top, height: uHeight * U_PX - 2, left: 0, right: 0 }}
-              >
-                <RackItemPlate
-                  item={item}
-                  readOnly={readOnly}
-                  highlighted={!drag && hoveredItemId === item.id}
-                  onHighlight={(on) => highlightItem(item.id, on)}
-                  onOpen={() => setItemDialog({ open: true, item })}
-                />
-              </div>
-            ))}
-
-            {/* Drop ghost */}
-            {drag?.target && (
-              <div
-                data-testid="drop-ghost"
-                data-valid={drag.target.valid ? "1" : "0"}
-                className={`absolute inset-x-1 rounded pointer-events-none border ${
-                  drag.target.valid
-                    ? "border-accent bg-accent/15"
-                    : "border-danger bg-danger/15"
+                data-testid="rack-tray-drop-hint"
+                className={`px-3 py-2 rounded-card border border-dashed text-[11px] font-semibold text-center ${
+                  drag?.overTray ? "border-accent text-accent bg-accent/15" : "border-line-strong text-muted bg-panel"
                 }`}
-                style={{
-                  top: drag.target.row * U_PX + 1,
-                  height: drag.uHeight * U_PX - 2,
-                }}
               >
-                <span className="absolute right-1 top-0 text-[9px] text-muted">
-                  U{drag.target.pos}
-                </span>
+                Drop here to remove from rack
+              </div>
+            )}
+            <TraySection
+              title="Unplaced in this rack"
+              devices={trayInRack}
+              readOnly={readOnly}
+              dragDeviceId={drag?.payload.type === "device" ? drag.payload.device.id : null}
+              onDragStart={(e, d) => startDrag(e, { type: "device", device: d }, "tray")}
+              onRemove={readOnly ? undefined : removeDevice}
+            />
+            <TraySection
+              title="No rack assigned"
+              devices={trayNoRack}
+              readOnly={readOnly}
+              dragDeviceId={drag?.payload.type === "device" ? drag.payload.device.id : null}
+              onDragStart={(e, d) => startDrag(e, { type: "device", device: d }, "tray")}
+            />
+            {!readOnly && (
+              <div className="text-muted text-[10px]">
+                Drag a device or rack item onto the front or rear to place it. Red preview means
+                the position conflicts with another object on that side (full-depth objects block
+                both sides) or is out of range. Drag a placed device onto this list to remove it
+                from the rack.
               </div>
             )}
           </div>
-
-          {/* Right rail with U scale */}
-          <RackRail side="right" rows={scaleRows} />
-          </div>
-          <div className="rack-cap" aria-hidden="true" />
-          <div className="pt-2">
-            <PortLegend />
-          </div>
-        </div>
-
-        {/* Label column: one annotation per placed device, offset by the top
-            cap so each label top equals its faceplate top. The dragged
-            device's label is dimmed in place (like its faceplate) instead of
-            following the ghost; other labels stay put. */}
-        <div
-          data-testid="rack-label-column"
-          className="relative shrink-0"
-          style={{ marginTop: RACK_CAP_PX, height: heightU * U_PX, width: "clamp(180px, 24vw, 320px)" }}
-        >
-          {placedRows.map(({ device, top }) => (
-            <RackLabel
-              key={device.id}
-              device={device}
-              top={top}
-              highlighted={highlightId === device.id}
-              dragging={drag?.device.id === device.id}
-              onHighlight={(on) => highlight(device.id, on)}
-              onOpen={() => openDevice(device)}
-            />
-          ))}
-          {placedItems.map(({ item, top }) => (
-            <RackItemLabel
-              key={`item-${item.id}`}
-              item={item}
-              top={top}
-              highlighted={!drag && hoveredItemId === item.id}
-              onHighlight={(on) => highlightItem(item.id, on)}
-              onOpen={() => setItemDialog({ open: true, item })}
-            />
-          ))}
-        </div>
-        </div>
-        </div>
-
-        {/* Unassigned devices tray; doubles as the "remove from rack" drop
-            target while a placed device is dragged. */}
-        <div
-          ref={trayRef}
-          data-testid="rack-tray"
-          data-drop-active={trayDropActive ? "1" : "0"}
-          data-drop-over={trayDropActive && drag?.overTray ? "1" : "0"}
-          className={`flex flex-col gap-3 min-w-[240px] flex-1 max-w-[360px] rounded-card transition-colors duration-[120ms] motion-reduce:transition-none ${
-            trayDropActive
-              ? `outline-2 outline-dashed outline-offset-4 ${drag?.overTray ? "outline-accent bg-accent/10" : "outline-line-strong"}`
-              : ""
-          }`}
-        >
-          {trayDropActive && (
-            <div
-              data-testid="rack-tray-drop-hint"
-              className={`px-3 py-2 rounded-card border border-dashed text-[11px] font-semibold text-center ${
-                drag?.overTray ? "border-accent text-accent bg-accent/15" : "border-line-strong text-muted bg-panel"
-              }`}
-            >
-              Drop here to remove from rack
-            </div>
-          )}
-          <TraySection
-            title="Unplaced in this rack"
-            devices={trayInRack}
-            readOnly={readOnly}
-            dragDeviceId={drag?.device.id ?? null}
-            onDragStart={(e, d) => startDrag(e, d, "tray")}
-            onRemove={readOnly ? undefined : removeDevice}
-          />
-          <TraySection
-            title="No rack assigned"
-            devices={trayNoRack}
-            readOnly={readOnly}
-            dragDeviceId={drag?.device.id ?? null}
-            onDragStart={(e, d) => startDrag(e, d, "tray")}
-          />
-          {!readOnly && (
-            <div className="text-muted text-[10px]">
-              Drag a device onto the rack to place it. Red preview means the position
-              overlaps another device or rack item, or is out of range. Drag a placed
-              device onto this list to remove it from the rack.
-            </div>
-          )}
         </div>
       </div>
 
@@ -1103,6 +1420,7 @@ export default function RackElevation({ rack, nodes, readOnly = false, activity 
         heightU={heightU}
         item={itemDialog.item}
         defaultPos={defaultItemPos}
+        defaultKind={itemDialog.kind}
         placements={placements}
         items={rackItems}
         readOnly={readOnly}

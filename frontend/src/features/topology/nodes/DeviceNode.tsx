@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { BatteryCharging, Server, type LucideIcon } from "lucide-react";
+import { BatteryCharging, Box, Server, type LucideIcon } from "lucide-react";
 import { StatusDot } from "../../../components/ui";
 import VendorBadge from "../../../components/map/VendorBadge";
 import { VENDOR_COLOR, speedColor } from "../../../theme/visual";
@@ -29,8 +29,9 @@ const handleStyle: React.CSSProperties = { opacity: 0, pointerEvents: "none" };
 // Upper bound for the mini port strip; larger chassis show the first ports.
 export const PORT_STRIP_MAX = 52;
 
-// Type icon next to the vendor badge; switches and firewalls need none.
-const TYPE_ICON: Partial<Record<DeviceType, LucideIcon>> = { ups: BatteryCharging, server: Server };
+// Type icon next to the vendor badge; switches and firewalls need none,
+// "other" (generic / ping-only devices) gets a neutral box.
+const TYPE_ICON: Partial<Record<DeviceType, LucideIcon>> = { ups: BatteryCharging, server: Server, other: Box };
 
 function pingToStatus(ping: string | undefined): "up" | "down" | "unknown" {
   if (ping === "online") return "up";

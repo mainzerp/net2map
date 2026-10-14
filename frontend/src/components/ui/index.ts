@@ -15,3 +15,4 @@ export {
   type DataTableSortDirection,
 } from "./DataTable";
 export { Sparkline, sparklineGeometry, type SparklineProps, type SparklineTone, type SparklineGeometry } from "./Sparkline";
+export { Combobox, type ComboboxProps } from "./Combobox";

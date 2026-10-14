@@ -223,7 +223,12 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
       sortValue: (d) => (d.sys_name || d.ip || "").toLowerCase(),
       render: (d) => (
         <div>
-          <div className={`font-semibold ${d.ignored ? "text-muted" : "text-primary"}`}>{d.sys_name || d.ip}</div>
+          <div className="flex items-center gap-1.5">
+            <span className={`font-semibold ${d.ignored ? "text-muted" : "text-primary"}`}>{d.sys_name || d.ip}</span>
+            {d.ping_only === true && (
+              <Badge tone="neutral" title="Monitored by ping only, no SNMP polling">Ping only</Badge>
+            )}
+          </div>
           {d.vendor && (
             <div className="text-[10px] text-muted">
               {d.vendor}

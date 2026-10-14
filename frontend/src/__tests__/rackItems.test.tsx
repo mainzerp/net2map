@@ -2,7 +2,7 @@
  * Tests for manual rack items (patch panels, blanks, ...): the pure collision
  * helpers in rackLayout.ts and the item rendering / dialog in RackElevation.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderWithRouter } from "./test-utils";
 
@@ -100,7 +100,7 @@ describe("rackLayout rack item collision helpers", () => {
       ],
       12,
     );
-    expect(blocks).toEqual([{ id: 1, pos: 3, uHeight: 2 }]);
+    expect(blocks).toEqual([{ id: 1, pos: 3, uHeight: 2, side: "front", fullDepth: false }]);
   });
 
   it("placementValid rejects device positions overlapping a blocked range", () => {
@@ -132,6 +132,30 @@ describe("rackLayout rack item collision helpers", () => {
     expect(usedUnits(placements, [{ pos: 5, uHeight: 3 }])).toBe(5);
   });
 });
+
+// jsdom has no PointerEvent; without it fireEvent.pointer* builds a plain
+// Event that drops button/clientX/clientY. A MouseEvent subclass is enough.
+beforeAll(() => {
+  if (typeof window.PointerEvent === "undefined") {
+    class PointerEventPolyfill extends MouseEvent {
+      constructor(type: string, init?: PointerEventInit) {
+        super(type, init);
+      }
+    }
+    vi.stubGlobal("PointerEvent", PointerEventPolyfill);
+  }
+});
+
+afterAll(() => {
+  vi.unstubAllGlobals();
+});
+
+// Editable item plates and palette entries open via the click-vs-drag
+// threshold of the pointer drag, not via a native click.
+function pressAndRelease(el: HTMLElement) {
+  fireEvent.pointerDown(el, { button: 0, clientX: 100, clientY: 100 });
+  fireEvent.pointerUp(window, { button: 0, clientX: 101, clientY: 100 });
+}
 
 describe("RackElevation rack items", () => {
   beforeEach(() => {
@@ -165,11 +189,12 @@ describe("RackElevation rack items", () => {
     expect(screen.getByText("5/12 U used - 7 U free")).toBeTruthy();
   });
 
-  it("creates an item through the Add item dialog", async () => {
+  it("creates an item through the dialog opened from the item palette", async () => {
     renderWithRouter(<RackElevation rack={RACK} nodes={NODES} />);
     await screen.findByTestId("rack-item-7");
+    expect(screen.queryByTestId("rack-add-item")).toBeNull();
 
-    fireEvent.click(screen.getByTestId("rack-add-item"));
+    pressAndRelease(screen.getByTestId("palette-item-patch_panel"));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Add rack item")).toBeTruthy();
     // Topmost free U in a 12U rack with U10 taken is U12
@@ -184,6 +209,8 @@ describe("RackElevation rack items", () => {
         label: "PP-02",
         rack_u_position: 12,
         u_height: 1,
+        rack_side: "front",
+        full_depth: false,
         note: null,
       }),
     );
@@ -191,7 +218,7 @@ describe("RackElevation rack items", () => {
 
   it("blocks saving an overlapping position in the dialog", async () => {
     renderWithRouter(<RackElevation rack={RACK} nodes={NODES} />);
-    fireEvent.click(await screen.findByTestId("rack-item-7"));
+    pressAndRelease(await screen.findByTestId("rack-item-7"));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Edit rack item")).toBeTruthy();
 
@@ -202,7 +229,7 @@ describe("RackElevation rack items", () => {
 
   it("deletes an item after confirmation", async () => {
     renderWithRouter(<RackElevation rack={RACK} nodes={NODES} />);
-    fireEvent.click(await screen.findByTestId("rack-item-7"));
+    pressAndRelease(await screen.findByTestId("rack-item-7"));
     const dialog = await screen.findByRole("dialog");
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
@@ -215,6 +242,12 @@ describe("RackElevation rack items", () => {
     renderWithRouter(<RackElevation rack={RACK} nodes={NODES} readOnly />);
     const pp = await screen.findByTestId("rack-item-7");
     expect(screen.queryByTestId("rack-add-item")).toBeNull();
+    expect(screen.queryByTestId("rack-item-palette")).toBeNull();
+
+    // No drag in read-only mode: a press does not dim the plate.
+    fireEvent.pointerDown(pp, { button: 0, clientX: 100, clientY: 100 });
+    expect(pp.className).not.toContain("opacity-40");
+    fireEvent.pointerUp(window, { button: 0, clientX: 100, clientY: 100 });
 
     fireEvent.click(pp);
     const dialog = await screen.findByRole("dialog");

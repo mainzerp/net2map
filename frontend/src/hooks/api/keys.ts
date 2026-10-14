@@ -13,6 +13,9 @@ export const queryKeys = {
   logs: (params?: Record<string, unknown>) => ["logs", params ?? {}] as QueryKey,
   snmpProfiles: ["snmp-profiles"] as QueryKey,
   credentials: ["credentials"] as QueryKey,
+  // Prefix ["ping-candidates"] matches both the default and include_dismissed lists.
+  pingCandidates: (includeDismissed?: boolean) =>
+    (includeDismissed == null ? ["ping-candidates"] : ["ping-candidates", includeDismissed]) as QueryKey,
   switchModels: ["switch-models"] as QueryKey,
   switchClasses: ["switch-classes"] as QueryKey,
   scanSettings: ["scan-settings"] as QueryKey,

@@ -362,7 +362,7 @@ export default function MapPage() {
           </div>
           {topology.nodes.length === 0 && !topologyQuery.isPending && (
             <p className="text-center text-muted text-[11px] mb-2">
-              No switches found - add credentials in Settings and run Scan
+              No devices found - add credentials in Settings and run Scan
             </p>
           )}
         </div>

@@ -1,29 +1,42 @@
 // ── RackItemDialog ───────────────────────────────────────────────────────────
 // Create, edit or delete a manually maintained rack item (patch panel, blank,
 // cable manager, shelf, other). Items only occupy U space: no ports, no
-// cabling, never scanned. Placement is validated client-side with the same
-// rules as the backend (fit inside the rack, no overlap with devices or other
-// items); server errors are shown inline.
+// cabling, never scanned. Items sit on the front or rear face and may be
+// full depth (blocking both faces). Placement is validated client-side with
+// the same rules as the backend (fit inside the rack, no conflict with
+// devices or other items, see footprintsConflict); server errors are shown
+// inline.
 
 import { useEffect, useId, useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { extractErrorMessage } from "../../api";
 import { Button, Input, Modal, Select } from "../../components/ui";
 import { useCreateRackItem, useDeleteRackItem, useUpdateRackItem } from "../../hooks/api";
-import type { RackItem, RackItemKind } from "../../types";
-import { itemPlacementError, type Placement } from "./rackLayout";
+import type { RackItem, RackItemKind, RackSide } from "../../types";
+import { fullDepthOf, itemPlacementError, sideOf, type Placement } from "./rackLayout";
 
-export const RACK_ITEM_KINDS: { value: RackItemKind; label: string }[] = [
-  { value: "patch_panel", label: "Patch panel" },
-  { value: "blank", label: "Blank panel" },
-  { value: "cable_manager", label: "Cable manager" },
-  { value: "shelf", label: "Shelf" },
-  { value: "other", label: "Other" },
+// Item kinds with their default height (used by the create form and the
+// drag-and-drop item palette).
+export const RACK_ITEM_KINDS: { value: RackItemKind; label: string; defaultU: number }[] = [
+  { value: "patch_panel", label: "Patch panel", defaultU: 1 },
+  { value: "blank", label: "Blank panel", defaultU: 1 },
+  { value: "cable_manager", label: "Cable manager", defaultU: 1 },
+  { value: "shelf", label: "Shelf", defaultU: 2 },
+  { value: "other", label: "Other", defaultU: 1 },
 ];
 
 export function rackItemKindLabel(kind: string): string {
   return RACK_ITEM_KINDS.find((k) => k.value === kind)?.label ?? "Other";
 }
+
+export function rackItemDefaultU(kind: string): number {
+  return RACK_ITEM_KINDS.find((k) => k.value === kind)?.defaultU ?? 1;
+}
+
+export const RACK_SIDE_OPTIONS: { value: RackSide; label: string }[] = [
+  { value: "front", label: "Front" },
+  { value: "rear", label: "Rear" },
+];
 
 interface RackItemDialogProps {
   open: boolean;
@@ -34,6 +47,9 @@ interface RackItemDialogProps {
   item: RackItem | null;
   // Suggested U position for a new item.
   defaultPos: number;
+  // Prefilled kind for a new item (e.g. from the item palette); its default
+  // height is used as the initial U height.
+  defaultKind?: RackItemKind;
   placements: Placement[];
   items: RackItem[];
   readOnly: boolean;
@@ -44,20 +60,32 @@ interface FormState {
   label: string;
   pos: string;
   uHeight: string;
+  side: RackSide;
+  fullDepth: boolean;
   note: string;
 }
 
-function initialForm(item: RackItem | null, defaultPos: number): FormState {
+function initialForm(item: RackItem | null, defaultPos: number, defaultKind: RackItemKind): FormState {
   if (item) {
     return {
       kind: item.kind,
       label: item.label,
       pos: String(item.rack_u_position),
       uHeight: String(item.u_height),
+      side: sideOf(item),
+      fullDepth: fullDepthOf(item),
       note: item.note ?? "",
     };
   }
-  return { kind: "patch_panel", label: "", pos: String(defaultPos), uHeight: "1", note: "" };
+  return {
+    kind: defaultKind,
+    label: "",
+    pos: String(defaultPos),
+    uHeight: String(rackItemDefaultU(defaultKind)),
+    side: "front",
+    fullDepth: false,
+    note: "",
+  };
 }
 
 export default function RackItemDialog({
@@ -67,11 +95,12 @@ export default function RackItemDialog({
   heightU,
   item,
   defaultPos,
+  defaultKind = "patch_panel",
   placements,
   items,
   readOnly,
 }: RackItemDialogProps) {
-  const [form, setForm] = useState<FormState>(() => initialForm(item, defaultPos));
+  const [form, setForm] = useState<FormState>(() => initialForm(item, defaultPos, defaultKind));
   const [serverError, setServerError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const idPrefix = useId();
@@ -80,11 +109,11 @@ export default function RackItemDialog({
   // background refetch never discards in-progress edits.
   useEffect(() => {
     if (open) {
-      setForm(initialForm(item, defaultPos));
+      setForm(initialForm(item, defaultPos, defaultKind));
       setServerError(null);
       setConfirmDelete(false);
     }
-  }, [open, item?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, item?.id, defaultKind]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const createMutation = useCreateRackItem(rackId);
   const updateMutation = useUpdateRackItem(rackId);
@@ -94,8 +123,12 @@ export default function RackItemDialog({
   const pos = Number(form.pos);
   const uHeight = Number(form.uHeight);
   const placementError = useMemo(
-    () => itemPlacementError(pos, uHeight, heightU, placements, items, item?.id ?? null),
-    [pos, uHeight, heightU, placements, items, item],
+    () =>
+      itemPlacementError(pos, uHeight, heightU, placements, items, item?.id ?? null, {
+        side: form.side,
+        fullDepth: form.fullDepth,
+      }),
+    [pos, uHeight, heightU, placements, items, item, form.side, form.fullDepth],
   );
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -110,6 +143,8 @@ export default function RackItemDialog({
       label: form.label.trim(),
       rack_u_position: pos,
       u_height: uHeight,
+      rack_side: form.side,
+      full_depth: form.fullDepth,
       note: form.note.trim() ? form.note.trim() : null,
     };
     const options = {
@@ -145,7 +180,11 @@ export default function RackItemDialog({
             id={fieldId("kind")}
             value={form.kind}
             disabled={readOnly}
-            onChange={(e) => set("kind", e.target.value as RackItemKind)}
+            onChange={(e) => {
+              const kind = e.target.value as RackItemKind;
+              // New items follow the kind's default height; edits keep theirs.
+              setForm((f) => ({ ...f, kind, uHeight: item ? f.uHeight : String(rackItemDefaultU(kind)) }));
+            }}
           >
             {RACK_ITEM_KINDS.map((k) => (
               <option key={k.value} value={k.value}>{k.label}</option>
@@ -190,6 +229,36 @@ export default function RackItemDialog({
               onChange={(e) => set("uHeight", e.target.value)}
             />
           </div>
+        </div>
+        <div className="flex gap-3 items-end">
+          <div className="flex flex-col gap-1 flex-1">
+            <label htmlFor={fieldId("side")} className={labelCls}>Side</label>
+            <Select
+              id={fieldId("side")}
+              value={form.side}
+              disabled={readOnly}
+              onChange={(e) => set("side", e.target.value as RackSide)}
+            >
+              {RACK_SIDE_OPTIONS.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </Select>
+          </div>
+          <label
+            htmlFor={fieldId("full-depth")}
+            className="flex items-center gap-2 flex-1 h-8 text-xs text-primary cursor-pointer"
+            title="A full-depth item blocks its U range on both the front and the rear"
+          >
+            <input
+              id={fieldId("full-depth")}
+              type="checkbox"
+              className="accent-accent"
+              checked={form.fullDepth}
+              disabled={readOnly}
+              onChange={(e) => set("fullDepth", e.target.checked)}
+            />
+            Full depth
+          </label>
         </div>
         <div className="flex flex-col gap-1">
           <label htmlFor={fieldId("note")} className={labelCls}>Note (optional)</label>

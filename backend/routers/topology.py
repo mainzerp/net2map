@@ -22,6 +22,14 @@ from schemas import (
 from shared.audit import log_audit
 from shared.auth import require_role
 from shared.errors import api_error
+from shared.rack_space import (
+    RackSlot,
+    collect_rack_slots,
+    conflict_details,
+    device_slot,
+    find_conflict,
+    find_pairwise_conflict,
+)
 from shared.redis_client import get_redis
 
 router = APIRouter()
@@ -168,6 +176,55 @@ def update_rack_position(
     return rack
 
 
+def _check_device_slot(db: Session, rack: RackModel, slot: RackSlot, exclude_device_ids) -> None:
+    """Reject a device placement outside the rack or conflicting with occupied U space (409)."""
+    if slot.top > rack.height_u:
+        api_error(
+            409, "U_POSITION_OUT_OF_RANGE",
+            f"Device {slot.obj_id} occupies U{slot.position}-U{slot.top} "
+            f"but rack {rack.id} only has {rack.height_u}U",
+        )
+    conflict = find_conflict(slot, collect_rack_slots(db, rack.id, exclude_device_ids=exclude_device_ids))
+    if conflict:
+        side = "both sides" if slot.full_depth else f"the {slot.side} side"
+        api_error(
+            409, "U_OVERLAP",
+            f"Device {slot.obj_id} at U{slot.position}-U{slot.top} ({side}) overlaps {conflict.label}",
+            details=conflict_details(slot, conflict),
+        )
+
+
+def _validate_bulk_placement(db: Session, device_ids, updates: dict) -> None:
+    """Validate the rack placement resulting from a bulk meta update.
+
+    Only devices that end up in a rack with a U position are checked: against
+    the rack's other occupants and against each other.
+    """
+    targets = db.query(Device).filter(Device.id.in_(device_ids)).all()
+    by_rack: dict = {}
+    for d in targets:
+        rack_id = updates.get("rack_id", d.rack_id)
+        if rack_id is None or d.rack_u_position is None:
+            continue
+        slot = device_slot(d, side=updates.get("rack_side"), full_depth=updates.get("full_depth"))
+        by_rack.setdefault(rack_id, []).append(slot)
+    moved_ids = [d.id for d in targets]
+    for rack_id, slots in by_rack.items():
+        rack = db.query(RackModel).filter(RackModel.id == rack_id).first()
+        if not rack:
+            continue
+        for slot in slots:
+            _check_device_slot(db, rack, slot, moved_ids)
+        pair = find_pairwise_conflict(slots)
+        if pair:
+            a, b = pair
+            api_error(
+                409, "U_OVERLAP",
+                f"Devices {a.obj_id} and {b.obj_id} would overlap in U-space on the same rack side",
+                details=conflict_details(a, b),
+            )
+
+
 @router.patch("/topology/devices/bulk-meta",
               dependencies=[require_role("admin", "operator")])
 def bulk_update_device_meta(body: BulkDeviceMetaUpdate, request: Request, db: Session = Depends(get_db)):
@@ -203,8 +260,14 @@ def bulk_update_device_meta(body: BulkDeviceMetaUpdate, request: Request, db: Se
         if not db.query(Floor).filter(Floor.id == body.floor_id).first():
             api_error(404, "FLOOR_NOT_FOUND", "Floor not found")
         updates["floor_id"] = body.floor_id
+    if body.rack_side is not None:
+        updates["rack_side"] = body.rack_side
+    if body.full_depth is not None:
+        updates["full_depth"] = body.full_depth
     if not updates:
         api_error(400, "NO_FIELDS", "No fields to update")
+    if not body.clear_rack and {"rack_id", "rack_side", "full_depth"} & updates.keys():
+        _validate_bulk_placement(db, body.device_ids, updates)
     count = db.query(Device).filter(Device.id.in_(body.device_ids)).update(updates, synchronize_session="fetch")
 
     db.commit()
@@ -243,6 +306,24 @@ def update_device_meta(
 
     if payload.get("floor_id") is not None and not db.query(Floor).filter(Floor.id == payload["floor_id"]).first():
         api_error(404, "FLOOR_NOT_FOUND", "Floor not found")
+
+    # Validate the resulting rack placement before mutating the device
+    placement_fields = {"rack_id", "rack_u_position", "u_height", "rack_side", "full_depth"}
+    if target_rack_id is not None and placement_fields & payload.keys():
+        if "rack_u_position" in payload:
+            target_position = payload["rack_u_position"]
+        else:
+            target_position = device.rack_u_position
+        if target_position is not None:
+            slot = device_slot(
+                device,
+                position=target_position,
+                height=payload.get("u_height"),
+                side=payload.get("rack_side"),
+                full_depth=payload.get("full_depth"),
+            )
+            rack = db.query(RackModel).filter(RackModel.id == target_rack_id).first()
+            _check_device_slot(db, rack, slot, [device.id])
 
     if "location" in payload:
         device.location = payload["location"]
@@ -285,6 +366,10 @@ def update_device_meta(
         device.rack_u_position = payload["rack_u_position"]
     if "u_height" in payload and payload["u_height"] is not None:
         device.u_height = payload["u_height"]
+    if payload.get("rack_side") is not None:
+        device.rack_side = payload["rack_side"]
+    if payload.get("full_depth") is not None:
+        device.full_depth = payload["full_depth"]
     if "latency_monitored" in payload and payload["latency_monitored"] is not None:
         device.latency_monitored = payload["latency_monitored"]
     if "device_type" in payload and payload["device_type"] is not None:

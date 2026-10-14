@@ -345,3 +345,19 @@
   for the first floor (keeps the change MINOR). Migration 026 creates "Main building" /
   "Ground floor" and moves existing racks, unracked devices and the background there.
 - Items without a floor (new scan results) appear on an "Unassigned" pseudo-floor.
+
+## Ping-only devices and two-sided racks (2026-10-14)
+
+- **Ping-only via a credential flag** (user decision): `credentials.snmp_enabled=false`
+  instead of a separate "add device" flow, so there is still one way to register IPs.
+  The scan creates the device even if it is unreachable (the user registered it on
+  purpose). An SNMP credential on the same IP wins. Type `other`, flag `devices.ping_only`.
+  Manual links for ping-only devices are out of scope for now.
+- **Front and rear side by side** (user decision), not a toggle. Each device or item
+  has `rack_side` and `full_depth`; full depth takes both sides. One occupancy rule
+  in `backend/shared/rack_space.py` (mirrored in `frontend/src/features/racks/rackLayout.ts`),
+  now also enforced on `/meta` and `bulk-meta`.
+- **Item palette instead of "+ Add item"** (user decision): drag-create without a dialog
+  is faster when you place many patch panels; the dialog stays for click/keyboard.
+- **UI says "devices"** (user decision): visible "switch(es)" texts became
+  "device(s)"; identifiers, file names and API paths stay `switch*`.

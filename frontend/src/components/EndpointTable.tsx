@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { api, normPort, extractErrorMessage } from "../api";
+import { api, normPort, extractErrorMessage, getStoredUser } from "../api";
 import { useToast } from "./ToastProvider";
 import useNet2MapStore from "../store";
-import { useEndpoints, useInvalidateApi } from "../hooks/api";
+import { useAdoptPingOnly, useEndpoints, useInvalidateApi } from "../hooks/api";
 import { queryKeys } from "../hooks/api";
 import { Button, Card, DataTable, Input, type DataTableColumn } from "./ui";
 import { formatTimestamp } from "../utils/datetime";
@@ -21,6 +21,8 @@ export default function EndpointTable() {
   const [selected, setSelected] = useState<Set<string | number>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
   const { addToast } = useToast();
+  const canEdit = (getStoredUser()?.role ?? "viewer") !== "viewer";
+  const adoptMutation = useAdoptPingOnly();
 
   // Search lives in the URL so dashboard deep links (?q=) work.
   const [searchParams, setSearchParams] = useSearchParams();
@@ -63,6 +65,30 @@ export default function EndpointTable() {
     } finally {
       setBulkLoading(false);
     }
+  };
+
+  // Selected endpoints that can be adopted (an IP is required).
+  const adoptable = useMemo(
+    () => endpoints.filter((e) => selected.has(e.id) && !!e.ip?.trim()),
+    [endpoints, selected],
+  );
+
+  const bulkAdoptPingOnly = () => {
+    if (adoptable.length === 0) return;
+    const entries = adoptable.map((e) => {
+      const label = e.hostname?.trim() || "";
+      const ip = (e.ip as string).trim();
+      return label ? { ip, label } : { ip };
+    });
+    adoptMutation.mutate(entries, {
+      onSuccess: (result) => {
+        setSelected(new Set());
+        const added = result.created.length;
+        const skipped = result.skipped.length;
+        addToast(`${added} added, ${skipped} skipped`, added > 0 ? "success" : "warning");
+      },
+      onError: (ex) => addToast(`Failed to add ping-only devices: ${extractErrorMessage(ex)}`, "error"),
+    });
   };
 
   const goToPort = (ep: Endpoint) => {
@@ -177,7 +203,7 @@ export default function EndpointTable() {
     <div className="max-w-[1400px] mx-auto flex flex-col gap-4">
       <div>
         <h1 className="text-lg font-bold text-primary">Devices</h1>
-        <p className="text-xs text-muted mt-0.5">End devices discovered on the network (not managed switches)</p>
+        <p className="text-xs text-muted mt-0.5">End devices discovered on the network (not managed network devices)</p>
       </div>
 
       {endpointsQuery.isError ? (
@@ -223,6 +249,20 @@ export default function EndpointTable() {
               <Button variant="primary" size="sm" disabled={bulkLoading} onClick={() => bulkIgnore(false)}>
                 Re-enable Selected
               </Button>
+              {canEdit && (
+                <Button
+                  size="sm"
+                  disabled={adoptable.length === 0 || adoptMutation.isPending}
+                  onClick={bulkAdoptPingOnly}
+                  title={
+                    adoptable.length === 0
+                      ? "None of the selected endpoints has an IP address"
+                      : `Add ${adoptable.length} endpoint(s) with an IP as ping-only devices`
+                  }
+                >
+                  {adoptMutation.isPending ? "Adding..." : "Adopt as ping-only"}
+                </Button>
+              )}
               <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
                 Clear
               </Button>

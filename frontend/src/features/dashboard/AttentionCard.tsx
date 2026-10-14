@@ -134,7 +134,7 @@ export function AttentionCard({ nodes, lastRun = null, classes = [], className =
           </span>
           <div className="text-sm font-semibold text-primary">All devices reachable</div>
           <div className="text-[11px] text-muted max-w-xs">
-            No offline switches, no failed scans and every switch is placed in a rack. Nothing needs your attention.
+            No offline devices, no failed scans and every device is placed in a rack. Nothing needs your attention.
           </div>
         </div>
       ) : (
@@ -188,7 +188,7 @@ export function AttentionCard({ nodes, lastRun = null, classes = [], className =
               tone="warning"
               icon={TriangleAlert}
               chip="No rack"
-              title={`${unassignedCount} switch${unassignedCount === 1 ? "" : "es"} not assigned to a rack`}
+              title={`${unassignedCount} device${unassignedCount === 1 ? "" : "s"} not assigned to a rack`}
               onClick={() => navigate("/network")}
             />
           )}

@@ -113,7 +113,7 @@ describe("CommandPalette", () => {
     const input = screen.getByRole("combobox");
 
     fireEvent.change(input, { target: { value: "core" } });
-    await screen.findByText("Switches");
+    await screen.findByText("Devices");
     expect(screen.queryByText("access-sw1")).toBeNull();
     expect(activeOptionText(input)).toContain("core-sw1");
 

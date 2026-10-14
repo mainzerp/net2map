@@ -71,7 +71,7 @@ export const GROUP_LABELS: Record<PaletteGroupId, string> = {
   recent: "Recent",
   pages: "Pages",
   actions: "Actions",
-  switches: "Switches",
+  switches: "Devices",
   endpoints: "Endpoints",
   racks: "Racks",
   ports: "Ports",

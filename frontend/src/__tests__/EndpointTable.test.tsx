@@ -23,6 +23,7 @@ vi.mock("../api", () => ({
     invalidate: vi.fn(),
   },
   API: "",
+  getStoredUser: () => ({ username: "admin", role: "admin" }),
   extractErrorMessage: (ex: unknown) => (ex instanceof Error ? ex.message : String(ex)),
   normPort: (p: string | null) => (p || "").trim().toLowerCase(),
 }));

@@ -87,7 +87,7 @@ describe("DashboardPage", () => {
 
     // Headline status sentence derived from the data (1 online, 1 offline)
     const headline = screen.getByRole("heading", { level: 1 });
-    expect(headline.textContent).toBe("1 switch online. 1 needs attention.");
+    expect(headline.textContent).toBe("1 device online. 1 needs attention.");
 
     // Secondary fact line renders the key counts as deep links
     await waitFor(() => {
@@ -122,7 +122,7 @@ describe("DashboardPage", () => {
     renderWithRouter(<DashboardPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("All 2 switches online.");
+      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("All 2 devices online.");
     });
     expect(screen.getByText("All devices reachable")).toBeTruthy();
   });

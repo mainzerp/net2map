@@ -93,15 +93,19 @@ describe("RacksPage / RackElevation", () => {
   it("renders the rack header, U scale and occupancy", async () => {
     renderWithRouter(<RacksPage />, { route: "/racks?rack=1" });
 
-    await screen.findByTestId("rack-body");
+    await screen.findByTestId("rack-body-front");
     expect(screen.getByText("Rack A")).toBeTruthy();
     expect(screen.getByText("RZ-01")).toBeTruthy();
     expect(screen.getByText("12U")).toBeTruthy();
     // used = 2 (device 1) + 1 (device 2, default u_height) = 3
     expect(screen.getByText("3/12 U used - 9 U free")).toBeTruthy();
-    // U numbers appear on both scale columns
-    expect(screen.getAllByText("12").length).toBe(2);
-    expect(screen.getAllByText("1").length).toBeGreaterThanOrEqual(2);
+    // Front and rear faces side by side, each with its own occupancy and
+    // both scale columns.
+    expect(screen.getByTestId("rack-side-front").textContent).toContain("Front");
+    expect(screen.getByTestId("rack-side-rear").textContent).toContain("Rear");
+    expect(screen.getByText("0/12 U used - 12 U free")).toBeTruthy();
+    expect(screen.getAllByText("12").length).toBe(4);
+    expect(screen.getAllByText("1").length).toBeGreaterThanOrEqual(4);
   });
 
   it("renders placed devices at the correct rows (U1 at the bottom)", async () => {
@@ -141,7 +145,7 @@ describe("RacksPage / RackElevation", () => {
     });
 
     renderWithRouter(<RacksPage />, { route: "/racks?rack=1" });
-    const column = await screen.findByTestId("rack-label-column");
+    const column = await screen.findByTestId("rack-label-column-front");
 
     // Only placed devices get a label; tray devices do not.
     expect(column.querySelectorAll("[data-testid^='rack-label-button-']")).toHaveLength(2);
@@ -198,7 +202,7 @@ describe("RacksPage / RackElevation", () => {
   it("lists unplaced and rack-less devices in the tray, not in the rack", async () => {
     renderWithRouter(<RacksPage />, { route: "/racks?rack=1" });
 
-    await screen.findByTestId("rack-body");
+    await screen.findByTestId("rack-body-front");
     expect(screen.getByTestId("tray-item-3")).toBeTruthy();
     expect(screen.getByTestId("tray-item-4")).toBeTruthy();
     expect(screen.getByText("Unplaced in this rack (1)")).toBeTruthy();
@@ -209,12 +213,14 @@ describe("RacksPage / RackElevation", () => {
 
   it("draws rails with three mounting holes per U and blanking plates", async () => {
     renderWithRouter(<RacksPage />, { route: "/racks?rack=1" });
-    const body = await screen.findByTestId("rack-body");
-    for (const side of ["left", "right"]) {
-      const rail = screen.getByTestId(`rack-rail-${side}`);
-      expect(rail.querySelectorAll(".rack-rail-hole")).toHaveLength(12 * 3);
+    await screen.findByTestId("rack-body-front");
+    for (const face of ["front", "rear"]) {
+      for (const side of ["left", "right"]) {
+        const rail = screen.getByTestId(`rack-rail-${face}-${side}`);
+        expect(rail.querySelectorAll(".rack-rail-hole")).toHaveLength(12 * 3);
+      }
+      expect(screen.getByTestId(`rack-body-${face}`).querySelectorAll(".rack-blank")).toHaveLength(12);
     }
-    expect(body.querySelectorAll(".rack-blank")).toHaveLength(12);
   });
 
   it("renders stylized port tiles with status attributes for up and down ports", async () => {
@@ -300,7 +306,7 @@ describe("RacksPage / RackElevation", () => {
 
   it("renders a port legend under the rack using the same tile style", async () => {
     renderWithRouter(<RacksPage />, { route: "/racks?rack=1" });
-    await screen.findByTestId("rack-body");
+    await screen.findByTestId("rack-body-front");
     const legend = screen.getByTestId("rack-port-legend");
     for (const label of ["<1G", "1G", "10G", "25G+", "down", "endpoints", "uplink"]) {
       expect(within(legend).getByText(label)).toBeTruthy();
@@ -477,16 +483,16 @@ describe("rackLayout pure functions", () => {
 
   it("buildLayoutEntries produces a sorted layout payload", () => {
     expect(buildLayoutEntries(placements)).toEqual([
-      { device_id: 1, rack_u_position: 1, u_height: 2 },
-      { device_id: 2, rack_u_position: 5, u_height: 1 },
+      { device_id: 1, rack_u_position: 1, u_height: 2, rack_side: "front", full_depth: false },
+      { device_id: 2, rack_u_position: 5, u_height: 1, rack_side: "front", full_depth: false },
     ]);
   });
 
   it("placementsFromNodes picks up only positioned devices of the rack", () => {
     const result = placementsFromNodes(TOPOLOGY.nodes, 1, 12);
     expect(result).toEqual([
-      { deviceId: 1, pos: 1, uHeight: 2 },
-      { deviceId: 2, pos: 5, uHeight: 1 }, // undefined u_height defaults to 1
+      { deviceId: 1, pos: 1, uHeight: 2, side: "front", fullDepth: false },
+      { deviceId: 2, pos: 5, uHeight: 1, side: "front", fullDepth: false }, // undefined u_height defaults to 1
     ]);
   });
 
@@ -500,8 +506,8 @@ describe("rackLayout pure functions", () => {
       makeNode({ id: 10, rack_id: 1, rack_u_position: 12, u_height: 2 }), // 12-13 exceeds the top
     ];
     expect(placementsFromNodes(nodes, 1, 12)).toEqual([
-      { deviceId: 5, pos: 1, uHeight: 12 },
-      { deviceId: 9, pos: 11, uHeight: 2 },
+      { deviceId: 5, pos: 1, uHeight: 12, side: "front", fullDepth: false },
+      { deviceId: 9, pos: 11, uHeight: 2, side: "front", fullDepth: false },
     ]);
   });
 

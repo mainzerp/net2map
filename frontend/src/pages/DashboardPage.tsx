@@ -44,18 +44,18 @@ function StatusHeadline({ monitored, offline }: { monitored: number; offline: nu
   const online = monitored - offline;
   let content: ReactNode;
   if (monitored === 0) {
-    content = "No switches discovered yet.";
+    content = "No devices discovered yet.";
   } else if (offline === 0) {
     content = (
       <>
         All <strong className="font-semibold text-success tabular-nums">{monitored}</strong>{" "}
-        {plural(monitored, "switch", "switches")} online.
+        {plural(monitored, "device", "devices")} online.
       </>
     );
   } else {
     content = (
       <>
-        <strong className="font-semibold tabular-nums">{online}</strong> {plural(online, "switch", "switches")} online.{" "}
+        <strong className="font-semibold tabular-nums">{online}</strong> {plural(online, "device", "devices")} online.{" "}
         <strong className="font-semibold text-danger tabular-nums">{offline}</strong>{" "}
         {plural(offline, "needs", "need")} attention.
       </>

@@ -153,7 +153,7 @@ export default function MapToolbar({
     <div className="flex items-center gap-3 px-3 py-2 border-b border-line bg-surface flex-wrap">
       {/* Live stats */}
       <div className="flex items-center gap-3 text-[11px] text-muted shrink-0">
-        <span><span className="text-success">|</span> {stats.switches} Switches</span>
+        <span><span className="text-success">|</span> {stats.switches} Devices</span>
         <span><span className="text-accent">|</span> {stats.fast} x {">="}10G</span>
         <span><span className="text-muted">|</span> {stats.gig} x 1G</span>
       </div>

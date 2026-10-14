@@ -41,7 +41,6 @@ function RacksTabContent({ newEntryTrigger }: RacksTabContentProps) {
   const [editState, setEditState] = useState<EditState>({ id: null, open: false });
   const [form, setForm] = useState<RackForm>({ ...EMPTY_RACK_FORM });
   const [err, setErr] = useState<string>("");
-  const [assignSel, setAssignSel] = useState<Record<number, string>>({});
   const [deleteTarget, setDeleteTarget] = useState<RackInfo | null>(null);
 
   useEffect(() => {
@@ -95,10 +94,8 @@ function RacksTabContent({ newEntryTrigger }: RacksTabContentProps) {
   const assignMutation = useMutation({
     mutationFn: ({ devId, rackId }: { devId: string; rackId: number | null }) =>
       api.patch(`/api/topology/devices/${devId}/meta`, { rack_id: rackId }),
-    onSuccess: (_data, vars) => {
+    onSuccess: () => {
       invalidate(queryKeys.topology, queryKeys.racks, queryKeys.devices, queryKeys.credentials);
-      const rackId = vars.rackId;
-      if (rackId != null) setAssignSel((prev) => ({ ...prev, [rackId]: "" }));
     },
   });
 
@@ -160,7 +157,7 @@ function RacksTabContent({ newEntryTrigger }: RacksTabContentProps) {
       <ConfirmDeleteModal
         open={deleteTarget != null}
         title="Delete Rack"
-        message={deleteTarget ? `Delete rack "${deleteTarget.label}"? Assigned switches are unassigned, not deleted.` : ""}
+        message={deleteTarget ? `Delete rack "${deleteTarget.label}"? Assigned devices are unassigned, not deleted.` : ""}
         busy={deleteMutation.isPending}
         onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
         onCancel={() => setDeleteTarget(null)}
@@ -176,7 +173,6 @@ function RacksTabContent({ newEntryTrigger }: RacksTabContentProps) {
           {racks.map((rack) => {
             const assigned = devices.filter((d) => d.rack_id === rack.id);
             const available = devices.filter((d) => d.rack_id == null && !d.ignored);
-            const selVal = assignSel[rack.id] || "";
             const floor = findFloor(buildings, rack.floor_id);
             return (
               <Card key={rack.id}>
@@ -211,9 +207,7 @@ function RacksTabContent({ newEntryTrigger }: RacksTabContentProps) {
                 <DeviceAssignment
                   assigned={assigned}
                   available={available}
-                  selVal={selVal}
-                  onSelect={(val) => setAssignSel((p) => ({ ...p, [rack.id]: val }))}
-                  onAssign={() => assignMutation.mutate({ devId: selVal, rackId: rack.id })}
+                  onAssign={(devId) => assignMutation.mutate({ devId: String(devId), rackId: rack.id })}
                   onUnassign={(devId) => assignMutation.mutate({ devId: String(devId), rackId: null })}
                 />
               </Card>

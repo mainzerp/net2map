@@ -209,13 +209,16 @@ Key fields only; see OpenAPI for the full list.
 ### DeviceOut
 
 Fields from `DeviceBase`: `sys_name`, `ip`, `sys_descr`, `model`, `firmware`,
-`vendor`, `location`, `ping_status`, `ping_rtt_ms`, `map_x`, `map_y`, `ignored`,
+`vendor`, `location`, `ping_status`, `ping_rtt_ms`, `ping_only`, `map_x`, `map_y`, `ignored`,
 `label`, `enabled`, `vendor_override`, `latency_monitored` (opt-in for the latency
 monitor in `latency_mode=selected`). Plus:
 
+- `ping_only: bool` (default false): the device is monitored by ping only because
+  its credential has `snmp_enabled=false` (see [Rack occupancy and ping-only devices](#rack-occupancy-and-ping-only-devices)).
 - `id`, `last_seen`, `ports: PortOut[]`
 - `rack_id`, `class_id`, `model_id`, `rack_u_position` (1..48 or null = not placed),
-  `u_height` (default 1)
+  `u_height` (default 1), `rack_side` (`front|rear`, default `front`), `full_depth`
+  (bool, default false: occupies its U range on both sides)
 - `floor_id`: floor of an unracked device, or null. A racked device's effective
   floor is its rack's `floor_id` (computed by the client); rack changes never
   modify `floor_id`.
@@ -226,7 +229,8 @@ monitor in `latency_mode=selected`). Plus:
   root bridge), `is_root`. `null` when no STP data was collected. The raw
   `stp_*` device columns are input-only and excluded from the output.
 - `vlan_names: {vlan_id_string: name}`: always an object (empty when unknown).
-- `device_type`: `switch|firewall|ups|server` (default `switch`). Derived during a
+- `device_type`: `switch|firewall|ups|server|other` (default `switch`; ping-only
+  devices are created as `other`). Derived during a
   scan from the detected vendor scanner (OPNsense `firewall`; Eaton / HPE UPS
   `ups`; HPE iLO `server`; a generic device answering RFC 1628
   `upsIdentManufacturer` `ups`). A generic switch fallback never overwrites a
@@ -276,6 +280,51 @@ are non-ignored devices.
 `racks: RackOut[]`, `classes: SwitchClassOut[]`, `models: SwitchModelOut[]`,
 `buildings: BuildingOut[]` (sorted by `sort_order`, then `id`; see the floors router).
 
+### Rack occupancy and ping-only devices
+
+Rack occupancy (shared rule in `backend/shared/rack_space.py`): a placed device or
+rack item occupies `[rack_u_position, rack_u_position + u_height - 1]` on its
+`rack_side`; with `full_depth=true` it occupies that range on both sides. Two
+objects conflict iff their U ranges overlap and their occupied sides intersect
+(a front and a rear object may share a U). Every placement write applies the rule:
+`PATCH /racks/{id}/layout`, rack item create/update, `PATCH
+/topology/devices/{id}/meta` and `PATCH /topology/devices/bulk-meta`. Conflicts
+return `409`:
+
+```json
+{"error": {"code": "U_OVERLAP", "message": "Device 7 at U10-U11 (the front side) overlaps device 3",
+           "details": [{"device_ids": [7, 3], "rack_item_ids": []}]}}
+```
+
+A placement that does not fit inside the rack returns `409 U_POSITION_OUT_OF_RANGE`.
+
+Ping-only devices: a credential with `snmp_enabled=false` is never queried via
+SNMP. Every scan (any type) pings it; when no device with that IP exists, one is
+created regardless of the ping result (`sys_name` = credential label or the IP,
+`sys_descr` "Ping-only device (SNMP disabled)", empty `vendor`, `device_type`
+`other`, `ping_only=true`) and linked to the credential. An existing device only
+gets `ping_only=true` and its ping state (`ping_status`, `ping_rtt_ms`,
+`last_ping`, `last_seen` on a reply); name, vendor, rack, class and floor are
+kept. When the IP also has an enabled SNMP credential, the SNMP credential wins.
+After switching the credential back to `snmp_enabled=true`, the next scan clears
+`ping_only` and runs the normal SNMP path. The latency monitor probes ping-only
+devices like any other enabled, non-ignored device.
+
+Ping candidates (table `ping_candidates`, migration 028): when a discovery or full
+scan finishes without being cancelled, every discovery-range probe host that
+answered ping but no SNMP profile, and has neither a device nor a credential, is
+upserted as a candidate (`ip` unique, `rtt_ms`, `first_seen`, `last_seen`,
+`dismissed`). A repeat sighting refreshes `last_seen` and `rtt_ms` and keeps
+`dismissed`. Credential targets never become candidates. `GET /ping-candidates`
+hides candidates whose IP meanwhile has a device or a credential.
+`POST /credentials/ping-only` adopts hosts in bulk: per entry it creates a
+credential (`snmp_enabled=false`, `enabled=true`, label or empty) and immediately
+creates the ping-only device (`ping_status` `unknown` until the next scan) or marks
+an existing device `ping_only` (metadata and ping state kept), links
+`credential.device_id`, deletes the matching candidate and writes one audit entry
+(`create` / `credential`, `details.ping_only=true`). The topology version is bumped
+when anything was created.
+
 ### Secret masking
 
 `CredentialOut` and `SnmpProfileOut` mask `community`, `v3_auth_password` and
@@ -285,7 +334,7 @@ back on update mean "unchanged" and are never stored.
 ## Routers
 
 Infrastructure routes are listed first, then the API routers in `main.py` mount
-order. 21 router modules total (`health` and `ws` are unversioned).
+order. 22 router modules total (`health` and `ws` are unversioned).
 
 ### health (`routers/health.py`) -- unversioned
 
@@ -326,9 +375,10 @@ SNMP credentials (per IP or device, with priority and optional profile).
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
 | GET | `/credentials` | any | List credentials (secrets masked). | `CredentialOut[]` |
-| POST | `/credentials` | op+ | Create credential; secrets encrypted with `ENCRYPTION_KEY` when set. | `CredentialCreate` -> `CredentialOut` (201) |
-| PUT | `/credentials/{cred_id}` | op+ | Update; mask sentinels mean "unchanged". | `CredentialUpdate` -> `CredentialOut` |
+| POST | `/credentials` | op+ | Create credential; secrets encrypted with `ENCRYPTION_KEY` when set. Optional `snmp_enabled` (default true; false = ping-only host). | `CredentialCreate` -> `CredentialOut` (201) |
+| PUT | `/credentials/{cred_id}` | op+ | Update; mask sentinels mean "unchanged". `snmp_enabled` optional (explicit null leaves it unchanged). | `CredentialUpdate` -> `CredentialOut` |
 | DELETE | `/credentials/{cred_id}` | admin | Delete. | 204 |
+| POST | `/credentials/ping-only` | op+ | Bulk-register ping-only hosts (see [Rack occupancy and ping-only devices](#rack-occupancy-and-ping-only-devices)). Body `{"entries": [{"ip", "label"?}]}`, max 500 entries (more -> 422). Each IP is validated like `CredentialCreate.ip`; skipped with reason `invalid` (bad IP), `exists` (any credential with that IP, enabled or not) or `duplicate` (repeat within the batch). 10/min. | -> `{"created": [{"ip", "credential_id", "device_id"}], "skipped": [{"ip", "reason"}]}` (200) |
 
 ### snmp_profiles (`routers/snmp_profiles.py`)
 
@@ -351,7 +401,7 @@ Physical racks and rack elevation layout.
 | POST | `/racks` | op+ | Create (`height_u` 6..60, default 42; optional `floor_id`, unknown -> 404 `FLOOR_NOT_FOUND`). | `RackCreate` -> `RackOut` (201) |
 | PUT | `/racks/{rack_id}` | op+ | Update. A `height_u` that would exclude a placed device or a rack item -> 409 `U_POSITION_OUT_OF_RANGE`. `floor_id`: unknown -> 404 `FLOOR_NOT_FOUND`, explicit null clears it (other null fields are ignored). | `RackUpdate` -> `RackOut` |
 | DELETE | `/racks/{rack_id}` | admin | Delete; detaches its devices and deletes its rack items. | 204 |
-| PATCH | `/racks/{rack_id}/layout` | op+ | Set U positions/heights of devices in this rack. Omitted devices stay in place. Rejects duplicates and devices not in the rack (422), unknown devices (404), out-of-range placements and U overlaps with other devices or rack items (409 `U_POSITION_OUT_OF_RANGE`, `U_OVERLAP`). | `RackLayoutIn` `{entries: [{device_id, rack_u_position, u_height}]}` -> `{"updated": n}` |
+| PATCH | `/racks/{rack_id}/layout` | op+ | Set U positions/heights (and optionally side/depth) of devices in this rack. Omitted devices stay in place; omitted `rack_side` / `full_depth` keep the stored values. Rejects duplicates and devices not in the rack (422), unknown devices (404), out-of-range placements and side-aware U overlaps with other devices or rack items (409 `U_POSITION_OUT_OF_RANGE`, `U_OVERLAP`). | `RackLayoutIn` `{entries: [{device_id, rack_u_position, u_height, rack_side?, full_depth?}]}` -> `{"updated": n}` |
 
 ### rack_items (`routers/rack_items.py`)
 
@@ -359,15 +409,17 @@ Manually maintained rack placeholders (patch panels, blanks, cable managers,
 shelves) shown in the rack elevation. Placeholder only: no ports, no cabling,
 no IP, never scanned. `kind` is one of `patch_panel` (default), `blank`,
 `cable_manager`, `shelf`, `other`; `rack_u_position` is the 1-based bottom U
-(1..48) and `u_height` 1..60. Every placement must fit inside the rack
-(409 `U_POSITION_OUT_OF_RANGE`) and must not overlap placed devices or other
-items (409 `U_OVERLAP`). Writes bump the topology version and are audit-logged
-(`rack_item`).
+(1..48) and `u_height` 1..60; `rack_side` is `front` (default) or `rear`,
+`full_depth` (default false) occupies both sides. Every placement must fit inside
+the rack (409 `U_POSITION_OUT_OF_RANGE`) and must not conflict with placed devices
+or other items under the side-aware rule (409 `U_OVERLAP`, see
+[Rack occupancy](#rack-occupancy-and-ping-only-devices)). Writes bump the topology
+version and are audit-logged (`rack_item`).
 
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
 | GET | `/racks/{rack_id}/items` | any | List the rack's items, top to bottom. Unknown rack -> 404 `RACK_NOT_FOUND`. | `RackItemOut[]` |
-| POST | `/racks/{rack_id}/items` | op+ | Create an item. | `RackItemCreate` `{kind, label, rack_u_position, u_height, note}` -> `RackItemOut` (201) |
+| POST | `/racks/{rack_id}/items` | op+ | Create an item. | `RackItemCreate` `{kind, label, rack_u_position, u_height, rack_side, full_depth, note}` -> `RackItemOut` (201, includes `rack_side`, `full_depth`) |
 | PATCH | `/rack-items/{item_id}` | op+ | Partial update; explicit null is ignored except for `note` (clears it). Unknown item -> 404 `RACK_ITEM_NOT_FOUND`. | `RackItemUpdate` -> `RackItemOut` |
 | DELETE | `/rack-items/{item_id}` | op+ | Delete an item. | 204 |
 
@@ -467,8 +519,8 @@ version (invalidates the `GET /topology` ETag cache).
 | GET | `/devices` | any | All devices including ignored, ordered by IP. ETag/304. | `DeviceOut[]` |
 | PATCH | `/topology/devices/{device_id}/position` | op+ | Persist drag-and-drop position. | `DevicePositionUpdate` `{map_x, map_y}` -> `DeviceOut` |
 | PATCH | `/topology/racks/{rack_id}/position` | op+ | Persist rack position on the map. | `RackPositionUpdate` -> `RackOut` |
-| PATCH | `/topology/devices/bulk-meta` | op+ | Bulk set `ignored`, `rack_id` / `clear_rack`, `class_id` (enforces `allow_outside_rack`), `floor_id` / `clear_floor` (unknown floor -> 404 `FLOOR_NOT_FOUND`). | `BulkDeviceMetaUpdate` -> `{"updated": n}` |
-| PATCH | `/topology/devices/{device_id}/meta` | op+ | Partial update of location, sys_name, vendor (sets `vendor_override`), model, rack/class/model ids, `floor_id` (explicit null clears, unknown -> 404 `FLOOR_NOT_FOUND`; rack changes keep it), ignored, label, enabled, `rack_u_position` (null unplaces), `u_height`, `vendor_override`, `latency_monitored`, `device_type` (`switch|firewall|ups|server`, other values 422). Audit-logged with the changed field names. | `DeviceMetaUpdate` -> `DeviceOut` |
+| PATCH | `/topology/devices/bulk-meta` | op+ | Bulk set `ignored`, `rack_id` / `clear_rack`, `class_id` (enforces `allow_outside_rack`), `floor_id` / `clear_floor` (unknown floor -> 404 `FLOOR_NOT_FOUND`), `rack_side`, `full_depth`. When `rack_id`, `rack_side` or `full_depth` change, the resulting placement of every listed device that keeps a U position is validated (side-aware, against the rack and each other): 409 `U_OVERLAP` / `U_POSITION_OUT_OF_RANGE`, nothing is written. | `BulkDeviceMetaUpdate` -> `{"updated": n}` |
+| PATCH | `/topology/devices/{device_id}/meta` | op+ | Partial update of location, sys_name, vendor (sets `vendor_override`), model, rack/class/model ids, `floor_id` (explicit null clears, unknown -> 404 `FLOOR_NOT_FOUND`; rack changes keep it), ignored, label, enabled, `rack_u_position` (null unplaces), `u_height`, `rack_side` (`front|rear`), `full_depth`, `vendor_override`, `latency_monitored`, `device_type` (`switch|firewall|ups|server|other`, other values 422). When the device ends up placed in a rack and any of `rack_id`, `rack_u_position`, `u_height`, `rack_side`, `full_depth` is sent, the placement is validated first: 409 `U_OVERLAP` (side-aware conflict with a device or rack item) or 409 `U_POSITION_OUT_OF_RANGE`; nothing is written. Audit-logged with the changed field names. | `DeviceMetaUpdate` -> `DeviceOut` |
 
 ### map_bg (`routers/map_bg.py`)
 
@@ -505,7 +557,8 @@ Scan tuning, discovery ranges and DNS resolvers.
 ### bulk (`routers/bulk.py`)
 
 CSV/JSON export and import of credentials and SNMP profiles. `kind` is
-`credentials` or `profiles`.
+`credentials` or `profiles`. Credential rows include `snmp_enabled`; a missing or
+empty value on import means `true` (older exports stay SNMP credentials).
 
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
@@ -515,6 +568,8 @@ CSV/JSON export and import of credentials and SNMP profiles. `kind` is
 ### config (`routers/config.py`)
 
 Global configuration export/import (app settings, profiles, credentials).
+Credential rows include `snmp_enabled` (missing on import -> `true`). Racks, rack
+items and device placement are not part of this export.
 
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
@@ -571,6 +626,22 @@ they were seen on.
 `EndpointOut`: `id`, `mac`, `ip`, `hostname`, `first_seen`, `last_seen`, `ignored`,
 `notes`, `found_on: EndpointPortInfo[]` (`port_id`, `switch_ip`, `switch_name`,
 `port_name`, `vlan_id`, `last_seen`).
+
+### ping_candidates (`routers/ping_candidates.py`)
+
+Discovery-range hosts that answered ping but no SNMP profile, offered for adoption as
+ping-only devices (see [Rack occupancy and ping-only devices](#rack-occupancy-and-ping-only-devices)).
+
+| Method | Path | Role | Description | Schema |
+|---|---|---|---|---|
+| GET | `/ping-candidates` | any | Non-dismissed candidates whose IP has no device and no credential, sorted by IP (numeric). `?include_dismissed=true` also returns dismissed ones. | `PingCandidateOut[]` |
+| POST | `/ping-candidates/dismiss` | op+ | Set `dismissed=true`; `n` counts rows that changed (unknown or already dismissed ids are ignored). Audit `dismiss` / `ping_candidate`. | `{"ids": [int]}` -> `{"dismissed": n}` |
+| POST | `/ping-candidates/restore` | op+ | Set `dismissed=false`; `n` counts rows that changed. Audit `restore` / `ping_candidate`. | `{"ids": [int]}` -> `{"restored": n}` |
+
+`PingCandidateOut`: `id`, `ip`, `rtt_ms` (null when unknown), `first_seen`, `last_seen`,
+`hostname`, `mac`, `vendor`, `dismissed` (always present). `hostname` and `mac` come from
+the most recently seen endpoint with the same IP (`endpoints.hostname`, `endpoints.mac`;
+null without one). `vendor` is currently always null (endpoints store no OUI vendor).
 
 ### latency (`routers/latency.py`)
 

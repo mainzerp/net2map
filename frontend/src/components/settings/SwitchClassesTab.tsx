@@ -37,7 +37,6 @@ function ClassesTabContent({ newEntryTrigger }: ClassesTabContentProps) {
   const [editState, setEditState] = useState<EditState>({ id: null, open: false });
   const [form, setForm] = useState<ClassForm>({ ...EMPTY_CLASS_FORM });
   const [err, setErr] = useState<string>("");
-  const [assignSel, setAssignSel] = useState<Record<number, string>>({});
   const [deleteTarget, setDeleteTarget] = useState<SwitchClass | null>(null);
 
   useEffect(() => {
@@ -80,10 +79,8 @@ function ClassesTabContent({ newEntryTrigger }: ClassesTabContentProps) {
   const assignMutation = useMutation({
     mutationFn: ({ devId, classId }: { devId: string; classId: number | null }) =>
       api.patch(`/api/topology/devices/${devId}/meta`, { class_id: classId }),
-    onSuccess: (_data, vars) => {
+    onSuccess: () => {
       invalidate(queryKeys.topology, queryKeys.devices, queryKeys.credentials);
-      const classId = vars.classId;
-      if (classId != null) setAssignSel((prev) => ({ ...prev, [classId]: "" }));
     },
     onError: (ex) => setErr(extractErrorMessage(ex)),
   });
@@ -140,7 +137,7 @@ function ClassesTabContent({ newEntryTrigger }: ClassesTabContentProps) {
       <ConfirmDeleteModal
         open={deleteTarget != null}
         title="Delete Class"
-        message={deleteTarget ? `Delete class "${deleteTarget.label}"? Assigned switches are unassigned, not deleted.` : ""}
+        message={deleteTarget ? `Delete class "${deleteTarget.label}"? Assigned devices are unassigned, not deleted.` : ""}
         busy={deleteMutation.isPending}
         onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
         onCancel={() => setDeleteTarget(null)}
@@ -157,7 +154,6 @@ function ClassesTabContent({ newEntryTrigger }: ClassesTabContentProps) {
           {classes.map((sc) => {
             const assigned = devices.filter((d) => d.class_id === sc.id);
             const available = devices.filter((d) => d.class_id == null && !d.ignored);
-            const selVal = assignSel[sc.id] || "";
             return (
               <Card key={sc.id} className="border-l-2" style={{ borderLeftColor: sc.color }}>
                 <div className="flex items-start gap-2">
@@ -179,9 +175,7 @@ function ClassesTabContent({ newEntryTrigger }: ClassesTabContentProps) {
                 <DeviceAssignment
                   assigned={assigned}
                   available={available}
-                  selVal={selVal}
-                  onSelect={(val) => setAssignSel((p) => ({ ...p, [sc.id]: val }))}
-                  onAssign={() => assignMutation.mutate({ devId: selVal, classId: sc.id })}
+                  onAssign={(devId) => assignMutation.mutate({ devId: String(devId), classId: sc.id })}
                   onUnassign={(devId) => assignMutation.mutate({ devId: String(devId), classId: null })}
                 />
               </Card>

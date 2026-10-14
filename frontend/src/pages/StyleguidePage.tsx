@@ -243,7 +243,7 @@ export default function StyleguidePage() {
         <Card>
           <div className="flex flex-col gap-3">
             <div className="eyebrow">Eyebrow label</div>
-            <div className="text-2xl font-semibold tracking-tight">All 23 switches online.</div>
+            <div className="text-2xl font-semibold tracking-tight">All 23 devices online.</div>
             <div className="text-lg font-semibold">Section heading</div>
             <div className="text-sm">Body text at 14px for longer reading.</div>
             <div className="text-xs">Dense UI text at 12px (app default).</div>

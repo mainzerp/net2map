@@ -264,7 +264,7 @@ Rules of thumb:
   broadcast), `scanners/` (vendor SNMP scanners: aruba_cx, cisco, eaton, fs_scanner, generic,
   hpe_ilo, hpe_ups, opnsense, unifi; plus detection/parsing helpers and `health.py`, the
   pysnmp-free UPS / server health normalization), `shared/`
-  (auth, crypto, audit, metrics, redis_client, state), `alembic/versions/` (migrations 001-026), `latency/` (latency monitor: probe,
+  (auth, crypto, audit, metrics, redis_client, state), `alembic/versions/` (migrations 001-028), `latency/` (latency monitor: probe,
   stats, store, `monitor.py` run as the `latency-monitor` compose service),
   `tests/` (pytest suite), plus `config.py`, `database.py`, `schemas.py`,
   `celery_app.py`, `tasks.py`, legacy `snmp_scanner.py` (the demo seed `seed_db.py` and

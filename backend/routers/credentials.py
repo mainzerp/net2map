@@ -6,13 +6,22 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
-from database import Credential, Device, get_db
+from database import Credential, Device, PingCandidate, get_db
 from routers.topology import _bump_topo_version
-from schemas import MASK_SENTINELS, CredentialCreate, CredentialOut, CredentialUpdate
+from schemas import (
+    MASK_SENTINELS,
+    CredentialCreate,
+    CredentialOut,
+    CredentialUpdate,
+    PingOnlyAdoptRequest,
+    PingOnlyAdoptResult,
+    validate_credential_ip,
+)
 from shared.audit import log_audit
 from shared.auth import require_role
 from shared.crypto import encrypt
 from shared.errors import api_error
+from shared.ping_only import upsert_ping_only_device
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
@@ -70,8 +79,61 @@ def create_credential(body: CredentialCreate, request: Request, db: Session = De
     db.commit()
     db.refresh(cred)
     _bump_topo_version()
-    log_audit(request, "create", "credential", str(cred.id), {"ip": cred.ip, "label": cred.label})
+    log_audit(request, "create", "credential", str(cred.id),
+              {"ip": cred.ip, "label": cred.label, "snmp_enabled": bool(cred.snmp_enabled)})
     return cred
+
+
+def _new_device_position(index: int) -> tuple:
+    """Map position for the n-th device created by one adoption batch (small grid)."""
+    return 100.0 + 60.0 * (index % 10), 100.0 + 60.0 * (index // 10)
+
+
+@router.post("/credentials/ping-only", response_model=PingOnlyAdoptResult,
+             dependencies=[require_role("admin", "operator")])
+@limiter.limit("10/minute")
+def create_ping_only_credentials(body: PingOnlyAdoptRequest, request: Request, db: Session = Depends(get_db)):
+    """Register hosts as ping-only devices (credential snmp_enabled=False).
+
+    Each entry is validated on its own: invalid IPs, IPs that already have a
+    credential and repeats within the batch are skipped with a reason. For
+    every created credential the Device is created (ping_status "unknown"
+    until the next scan) or an existing Device is marked ping_only; a matching
+    ping candidate is removed.
+    """
+    created: list = []
+    skipped: list = []
+    seen: set = set()
+    for entry in body.entries:
+        raw_ip = entry.ip if isinstance(entry.ip, str) else ""
+        try:
+            ip = validate_credential_ip(raw_ip)
+        except ValueError:
+            skipped.append({"ip": raw_ip, "reason": "invalid"})
+            continue
+        if ip in seen:
+            skipped.append({"ip": ip, "reason": "duplicate"})
+            continue
+        seen.add(ip)
+        if db.query(Credential.id).filter(Credential.ip == ip).first():
+            skipped.append({"ip": ip, "reason": "exists"})
+            continue
+        label = (entry.label or "").strip()
+        cred = Credential(ip=ip, label=label, enabled=True, snmp_enabled=False)
+        db.add(cred)
+        db.flush()
+        device = db.query(Device).filter(Device.ip == ip).first()
+        device = upsert_ping_only_device(
+            db, ip, device, cred, label, None, 0, _new_device_position(len(created)),
+        )
+        db.query(PingCandidate).filter(PingCandidate.ip == ip).delete(synchronize_session=False)
+        log_audit(request, "create", "credential", str(cred.id),
+                  {"ip": ip, "label": label, "snmp_enabled": False, "ping_only": True}, db=db)
+        created.append({"ip": ip, "credential_id": cred.id, "device_id": device.id})
+    db.commit()
+    if created:
+        _bump_topo_version()
+    return {"created": created, "skipped": skipped}
 
 
 @router.put("/credentials/{cred_id}", response_model=CredentialOut,
@@ -83,6 +145,9 @@ def update_credential(cred_id: int, body: CredentialUpdate, request: Request, db
         api_error(404, "CREDENTIAL_NOT_FOUND", "Credential not found")
     updates = body.model_dump(exclude_unset=True)
     _strip_mask_sentinels(updates)
+    if updates.get("snmp_enabled", True) is None:
+        # NOT NULL column: an explicit null leaves the flag unchanged
+        del updates["snmp_enabled"]
     if "community" in updates and updates["community"]:
         updates["community"] = encrypt(updates["community"])
     if "v3_auth_password" in updates and updates["v3_auth_password"]:

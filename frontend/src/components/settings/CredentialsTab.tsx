@@ -14,6 +14,7 @@ import { Badge, Button, Card, EmptyState, Input, Modal, Select, StatusDot } from
 import { ConfirmDeleteModal, Field, SectionHeader, TabLoading } from "./shared";
 import { normalizeEngineId, validateEngineId } from "./engineId";
 import { formatRelativeTime, formatTimestamp } from "../../utils/datetime";
+import PingCandidatesSection from "./PingCandidatesSection";
 
 // ── Local interfaces ────────────────────────────────────────────────────────
 interface CredentialForm {
@@ -22,6 +23,8 @@ interface CredentialForm {
   priority: number;
   snmp_port: number;
   enabled: boolean;
+  /** False = ping only: no SNMP polling, SNMP fields are ignored. */
+  snmp_enabled: boolean;
   profile_id: number | null;
   device_id: number | null;
   snmp_version: string;
@@ -47,6 +50,7 @@ interface CredentialsTabContentProps {
 // ── CredentialsTabContent ────────────────────────────────────────────────────
 const EMPTY_FORM: CredentialForm = {
   label: "", ip: "", priority: 0, snmp_port: 161, enabled: true,
+  snmp_enabled: true,
   profile_id: null,
   device_id: null,
   snmp_version: "v2c", community: "public",
@@ -93,6 +97,7 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
     const unmask = (v: string) => (v === "***" ? "" : v);
     setForm({
       label: c.label, ip: c.ip, priority: c.priority ?? 0, snmp_port: c.snmp_port, enabled: c.enabled,
+      snmp_enabled: c.snmp_enabled !== false,
       profile_id: c.profile_id ?? null,
       device_id: c.device_id ?? null,
       snmp_version: c.snmp_version, community: unmask(c.community),
@@ -148,12 +153,15 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
 
   const F = form;
   const set = <K extends keyof CredentialForm>(k: K, v: CredentialForm[K]) => setForm((p) => ({ ...p, [k]: v }));
-  const isV3 = F.snmp_version === "v3";
+  const pingOnly = !F.snmp_enabled;
+  const isV3 = !pingOnly && F.snmp_version === "v3";
   const needAuth = isV3 && F.v3_security_level !== "noAuthNoPriv";
   const needPriv = isV3 && F.v3_security_level === "authPriv";
   // Engine ID override applies to v3 only; with a profile the profile's version decides.
   const selectedProfile = F.profile_id != null ? profiles.find((p) => p.id === F.profile_id) : null;
-  const effectiveV3 = F.profile_id != null ? selectedProfile?.snmp_version === "v3" : isV3;
+  const effectiveV3 = pingOnly
+    ? false
+    : F.profile_id != null ? selectedProfile?.snmp_version === "v3" : isV3;
   const engineIdError = effectiveV3 ? validateEngineId(F.v3_engine_id) : "";
 
   const submit = (e: React.FormEvent) => {
@@ -185,7 +193,7 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
           <div className="flex flex-col gap-3">
             <div className="grid grid-cols-2 gap-2">
               <Field label="Label *">
-                <Input required value={F.label} onChange={(e) => set("label", e.target.value)} placeholder="Core Switch RZ-01" />
+                <Input required value={F.label} onChange={(e) => set("label", e.target.value)} placeholder="Core Router RZ-01" />
               </Field>
               <Field label="IP address *">
                 <Input required value={F.ip} onChange={(e) => set("ip", e.target.value)} placeholder="192.168.1.1" />
@@ -193,24 +201,42 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
               <Field label="Priority (0 = primary)">
                 <Input type="number" min="0" value={F.priority} onChange={(e) => set("priority", +e.target.value)} />
               </Field>
-              <Field label="SNMP Port">
-                <Input type="number" value={F.snmp_port} onChange={(e) => set("snmp_port", +e.target.value)} />
-              </Field>
+              {!pingOnly && (
+                <Field label="SNMP Port">
+                  <Input type="number" value={F.snmp_port} onChange={(e) => set("snmp_port", +e.target.value)} />
+                </Field>
+              )}
             </div>
-            <Field label="Credential profile (optional)">
-              <Select
-                value={F.profile_id ?? ""}
-                onChange={(e) => set("profile_id", e.target.value ? +e.target.value : null)}
-              >
-                <option value="">-- No profile (manual settings) --</option>
-                {profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label} - {p.snmp_version === "v3" ? `v3 / ${p.v3_security_level}` : `v2c / ${p.community}`}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            {F.profile_id == null && (
+            <label className="flex items-start gap-1.5 text-[11px] text-muted cursor-pointer select-none">
+              <input
+                type="checkbox"
+                className="accent-accent mt-0.5"
+                checked={pingOnly}
+                onChange={(e) => set("snmp_enabled", !e.target.checked)}
+              />
+              <span>
+                <span className="text-primary">Ping only (no SNMP)</span>
+                <span className="block text-[10px]">
+                  Monitor reachability and latency only, for devices without SNMP (printers, cameras, APs, ...).
+                </span>
+              </span>
+            </label>
+            {!pingOnly && (
+              <Field label="Credential profile (optional)">
+                <Select
+                  value={F.profile_id ?? ""}
+                  onChange={(e) => set("profile_id", e.target.value ? +e.target.value : null)}
+                >
+                  <option value="">-- No profile (manual settings) --</option>
+                  {profiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label} - {p.snmp_version === "v3" ? `v3 / ${p.v3_security_level}` : `v2c / ${p.community}`}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+            {!pingOnly && F.profile_id == null && (
               <>
                 <div>
                   <div className="text-[10px] text-muted mb-1 select-none">SNMP Version</div>
@@ -340,11 +366,12 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
       {isLoading ? (
         <TabLoading />
       ) : creds.length === 0 ? (
-        <EmptyState title="No entries yet" hint="Add switch credentials with + New Entry above." />
+        <EmptyState title="No entries yet" hint="Add device credentials with + New Entry above." />
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2 mb-5">
           {[...creds].sort((a, b) => (a.label || "").localeCompare(b.label || "")).map((c) => {
-            const v3 = c.snmp_version === "v3";
+            const pingOnly = c.snmp_enabled === false;
+            const v3 = !pingOnly && c.snmp_version === "v3";
             const assignedProfile = c.profile_id ? profiles.find((p) => p.id === c.profile_id) : null;
             const matchedDevice = devices.find((d) => d.ip === c.ip);
             const assignedRack = matchedDevice?.rack_id ? racks.find((r) => r.id === matchedDevice.rack_id) : null;
@@ -355,7 +382,11 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <StatusDot status={c.enabled ? "up" : "unknown"} />
                       <span className="text-primary font-semibold text-xs truncate">{c.label}</span>
-                      <Badge tone={v3 ? "accent" : "neutral"}>{c.snmp_version}</Badge>
+                      {pingOnly ? (
+                        <Badge tone="warning" title="Ping only: no SNMP polling">Ping only</Badge>
+                      ) : (
+                        <Badge tone={v3 ? "accent" : "neutral"}>{c.snmp_version}</Badge>
+                      )}
                       {assignedRack ? (
                         <Badge tone="accent" title={`Rack: ${assignedRack.label}${assignedRack.room ? ` / ${assignedRack.room}` : ""}`}>
                           {assignedRack.label}{assignedRack.room ? ` / ${assignedRack.room}` : ""}
@@ -367,8 +398,10 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
                       {matchedDevice?.ignored && <Badge tone="danger">ignored</Badge>}
                     </div>
                     <div className="text-muted text-[10px] mt-1 pl-3.5">
-                      {c.ip}:{c.snmp_port}
-                      {assignedProfile
+                      {pingOnly ? c.ip : <>{c.ip}:{c.snmp_port}</>}
+                      {pingOnly
+                        ? null
+                        : assignedProfile
                         ? <> - <span className="text-accent">{assignedProfile.label}</span></>
                         : !v3
                           ? <> - {c.community}</>
@@ -453,6 +486,7 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
           </div>
         );
       })()}
+      <PingCandidatesSection />
     </div>
   );
 }

@@ -7,11 +7,12 @@ export const DEVICE_TYPE_LABEL: Record<DeviceType, string> = {
   firewall: "Firewall",
   ups: "UPS",
   server: "Server",
+  other: "Other device",
 };
 
 export function deviceTypeOf(device: Pick<TopologyNode, "device_type">): DeviceType {
   const t = device.device_type;
-  return t === "firewall" || t === "ups" || t === "server" ? t : "switch";
+  return t === "firewall" || t === "ups" || t === "server" || t === "other" ? t : "switch";
 }
 
 // Devices whose ports are not the point of the faceplate / map node.

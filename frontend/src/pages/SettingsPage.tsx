@@ -31,10 +31,10 @@ const NAV_GROUPS: NavGroup[] = [
   {
     group: "INFRASTRUCTURE",
     items: [
-      { tab:"credentials", label:"Switches", desc:"Credentials" },
+      { tab:"credentials", label:"Network Devices", desc:"Credentials" },
       { tab:"racks",       label:"Racks",    desc:"Rack definitions" },
       { tab:"classes",     label:"Classes",  desc:"Device roles / classes" },
-      { tab:"models",      label:"Models",   desc:"Switch models & port layout" },
+      { tab:"models",      label:"Models",   desc:"Device models & port layout" },
     ],
   },
   {

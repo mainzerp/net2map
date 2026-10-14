@@ -35,11 +35,33 @@ export function useCreateRackItem(rackId: number) {
   });
 }
 
-export function useUpdateRackItem(rackId: number) {
+type RackItemPatch = Partial<RackItemInput> & { id: number };
+
+interface RackItemsSnapshot {
+  previous: RackItem[] | undefined;
+}
+
+// optimistic: patch the cached item list immediately (drag moves in the rack
+// elevation) and restore the snapshot on error; callers report the error
+// themselves (toast or inline message) via mutate's onError.
+export function useUpdateRackItem(rackId: number, { optimistic = false }: { optimistic?: boolean } = {}) {
+  const queryClient = useQueryClient();
   const onSettled = useInvalidateRackItems(rackId);
-  return useMutation({
-    mutationFn: ({ id, ...body }: Partial<RackItemInput> & { id: number }) =>
-      api.patch<RackItem>(`/api/rack-items/${id}`, body),
+  const key = queryKeys.rackItems(rackId);
+  return useMutation<RackItem, unknown, RackItemPatch, RackItemsSnapshot>({
+    mutationFn: ({ id, ...body }: RackItemPatch) => api.patch<RackItem>(`/api/rack-items/${id}`, body),
+    onMutate: async ({ id, ...body }) => {
+      if (!optimistic) return { previous: undefined };
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<RackItem[]>(key);
+      queryClient.setQueryData<RackItem[]>(key, (old) =>
+        old?.map((item) => (item.id === id ? { ...item, ...body } : item)),
+      );
+      return { previous };
+    },
+    onError: (_ex, _vars, context) => {
+      if (optimistic && context?.previous) queryClient.setQueryData(key, context.previous);
+    },
     onSettled,
   });
 }

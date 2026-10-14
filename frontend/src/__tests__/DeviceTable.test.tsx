@@ -65,6 +65,13 @@ describe("DeviceTable", () => {
     vi.clearAllMocks();
   });
 
+  it("shows a Ping only badge for ping-only devices", async () => {
+    mockApiSuccess([{ ...devices[0], ping_only: true }, devices[1]]);
+    renderWithRouter(<DeviceTable {...defaultProps} />);
+    await waitFor(() => expect(screen.getByText("core-sw-01")).toBeTruthy());
+    expect(screen.getAllByText("Ping only")).toHaveLength(1);
+  });
+
   it("renders device rows from API data", async () => {
     mockApiSuccess();
 

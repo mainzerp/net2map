@@ -88,3 +88,29 @@ describe("DeviceInspector logical layer data", () => {
     expect(screen.queryByText("Spanning tree")).toBeNull();
   });
 });
+
+describe("DeviceInspector ping-only devices", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    stubMemoryStorage();
+    const pingOnly: TopologyData = {
+      ...TOPOLOGY,
+      nodes: TOPOLOGY.nodes.map(n => (n.id === 2 ? { ...n, ping_only: true, device_type: "other", ports: [] } : n)),
+    };
+    mockApiGet.mockImplementation((path: string) =>
+      path === "/api/topology" ? Promise.resolve(pingOnly) : apiGetImpl(path),
+    );
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("shows the Ping only badge and the generic type, and skips the empty ports section", async () => {
+    renderWithRouter(<InspectorDrawer />, { route: "/?inspect=device:2" });
+    await screen.findByRole("dialog", { name: "core-sw2" });
+    expect(screen.getByTestId("ping-only").textContent).toBe("Ping only");
+    expect(screen.getByTestId("device-type").textContent).toBe("Other device");
+    expect(screen.queryByText("No ports recorded")).toBeNull();
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+});

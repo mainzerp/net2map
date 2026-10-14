@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from database import AppSetting, Credential, Device, SnmpProfile, get_db
-from routers.bulk import _normalize_bool, _normalize_optional_int
+from routers.bulk import _normalize_bool, _normalize_optional_int, normalize_snmp_enabled
 from schemas import (
     MASK_EXPORT,
     MASK_SENTINELS,
@@ -59,6 +59,7 @@ def export_global_config(request: Request, db: Session = Depends(get_db)):
                 "priority": c.priority,
                 "snmp_port": c.snmp_port,
                 "enabled": bool(c.enabled),
+                "snmp_enabled": c.snmp_enabled is not False,
                 "snmp_version": c.snmp_version,
                 "community": MASK_EXPORT if c.community else "",
                 "v3_security_level": c.v3_security_level,
@@ -127,6 +128,7 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
                     normalized[key] = _normalize_optional_int(normalized.get(key))
             if "enabled" in normalized:
                 normalized["enabled"] = _normalize_bool(normalized.get("enabled"))
+            normalize_snmp_enabled(normalized)
             validated = CredentialCreate(**normalized).model_dump()
             # FK references exported by newer versions are not schema fields;
             # carry them through so the write phase can resolve them.
