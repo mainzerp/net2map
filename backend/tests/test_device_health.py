@@ -397,6 +397,8 @@ def test_executor_old_switchdata_without_type(db, executor_mod):  # noqa: F811
     ("switch", "ups", "eaton", True, "ups"),           # override + default type upgrades
     ("switch", "switch", "generic", True, "switch"),
     (None, "firewall", "opnsense", False, "firewall"),
+    ("firewall", "switch", "mikrotik", False, "firewall"),  # MikroTik type is a guess
+    (None, "switch", "mikrotik", False, "switch"),
 ])
 def test_resolve_device_type(executor_mod, current, detected, vendor, override, expected):  # noqa: F811
     assert executor_mod._resolve_device_type(current, detected, vendor, override) == expected

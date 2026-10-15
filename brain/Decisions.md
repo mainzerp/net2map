@@ -393,7 +393,8 @@
 
 - **MikroTik is a `switch`.** `device_type()` has no sysDescr input, and CRS/RouterOS
   bridges run STP and expose a bridge FDB; routers (CCR/RB) can be retyped per device
-  via the meta PATCH. Virtual interfaces are matched by name prefix, like OPNsense,
+  via the meta PATCH; `DEVICE_TYPE_IS_GUESS` keeps that manual type across rescans
+  (v4.1.1, otherwise a specific vendor detection always wins). Virtual interfaces are matched by name prefix, like OPNsense,
   because RouterOS keeps the type prefix in default interface names.
 - **WatchGuard is a `firewall` without STP reads**, same as OPNsense.
 - **Vendor firmware OIDs as a scanner attribute** (`FIRMWARE_OIDS`): RouterOS has no

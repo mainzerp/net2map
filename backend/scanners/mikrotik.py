@@ -32,6 +32,8 @@ class MikroTikScanner(VendorScanner, vendor_id="mikrotik"):
     VIRTUAL_PORT_PATTERNS = _VIRTUAL_MIKROTIK
     # Prefix matching avoids false positives like "sfp-sfpplus1" matching "lo".
     VIRTUAL_PORT_MATCH = "prefix"
+    # CRS switches and CCR/RB routers share the vendor; "switch" is a default.
+    DEVICE_TYPE_IS_GUESS = True
 
     def fdb_strategy(self) -> str:
         # Bridge hosts are exposed via BRIDGE-MIB; the scan falls back to

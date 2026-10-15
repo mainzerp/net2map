@@ -35,6 +35,7 @@ from scan_engine.db_helpers import (
 )
 from scan_engine.dns import _resolve_host, _resolve_ip
 from scan_engine.ping import _build_ping_cmd
+from scanners import get_scanner
 from scanners.health import health_firmware, health_model
 from schemas import ScanResult, ScanSwitchMetric
 from shared.crypto import decrypt
@@ -881,12 +882,14 @@ def _resolve_device_type(current: Optional[str], detected: str, vendor: str, ven
     generic device answered the UPS-MIB probe (anything but generic/switch).
     - vendor_override set: keep the stored type; only a still-default
       "switch" is upgraded by a confident detection.
-    - otherwise a confident detection wins; the generic "switch" fallback
-      keeps the stored type so a manual correction (meta PATCH) survives.
+    - otherwise a confident detection wins; the generic "switch" fallback and
+      a vendor whose type is only a guess (DEVICE_TYPE_IS_GUESS) keep the
+      stored type so a manual correction (meta PATCH) survives.
     """
     current = current or "switch"
     detected = detected or "switch"
-    confident = not (vendor == "generic" and detected == "switch")
+    guess = vendor == "generic" or get_scanner(vendor).DEVICE_TYPE_IS_GUESS
+    confident = not (guess and detected == "switch")
     if vendor_override:
         return detected if current == "switch" and confident else current
     return detected if confident else current

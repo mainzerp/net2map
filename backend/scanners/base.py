@@ -23,6 +23,9 @@ class VendorScanner(ABC):
     # Vendor MIB scalars carrying the software version, read in order when
     # ENTITY-MIB reports none; sysDescr parsing is the last fallback.
     FIRMWARE_OIDS: tuple[str, ...] = ()
+    # True when device_type() is only a default for a vendor with mixed
+    # product lines: a manually set device type then survives rescans.
+    DEVICE_TYPE_IS_GUESS: bool = False
     # Lowercase markers of virtual interfaces for is_virtual_port.
     # VIRTUAL_PORT_MATCH is "contains" (marker anywhere in ifDescr) or
     # "prefix" (ifDescr starts with the marker).
