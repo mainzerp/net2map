@@ -8,6 +8,7 @@ import { useToast } from "../../components/ToastProvider";
 import FloorSelect from "../topology/FloorSelect";
 import { findFloor, flattenFloors } from "../topology/floors";
 import { stpProtocolName } from "../topology/overlays";
+import { deviceDisplayName } from "../../utils/deviceSearch";
 import { searchWithInspect, useInspector } from "../../hooks/useInspector";
 import useNet2MapStore from "../../store";
 import { speedLabel } from "../../theme/visual";
@@ -130,7 +131,7 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
   const upCount = ports.filter((p) => p.oper_status === 1).length;
   const downCount = ports.length - upCount;
   const upPercent = ports.length > 0 ? Math.round((upCount / ports.length) * 100) : 0;
-  const title = device.sys_name || device.hostname || device.ip;
+  const title = deviceDisplayName(device);
   const deviceType = deviceTypeOf(device);
   // Ping-only devices are never polled over SNMP: port and neighbor sections
   // would always be empty, so they are skipped unless data exists anyway.

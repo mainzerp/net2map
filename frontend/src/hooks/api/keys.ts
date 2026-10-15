@@ -22,7 +22,7 @@ export const queryKeys = {
   appSettings: ["app-settings"] as QueryKey,
   scanRuns: ["scan-runs"] as QueryKey,
   scanJob: (jobId: string | null) => ["scan-job", jobId] as QueryKey,
-  discoveryRanges: ["discovery-ranges"] as QueryKey,
+  scanRanges: ["scan-ranges"] as QueryKey,
   dnsSettings: ["dns-settings"] as QueryKey,
   buildings: ["buildings"] as QueryKey,
   latencySummary: ["latency", "summary"] as QueryKey,

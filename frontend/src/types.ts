@@ -436,11 +436,39 @@ export interface ScanRun {
   [key: string]: unknown;
 }
 
-// -- Discovery range (ScanSettingsTab) ----------------------------------------
-export interface DiscoveryRange {
+// -- Scan ranges (ScanSettingsTab) --------------------------------------------
+/**
+ * Discovery IP range with its own scan schedule (GET /api/scan-ranges).
+ * Timestamps are naive UTC ISO strings.
+ */
+export interface ScanRange {
   id: number;
-  range: string;
-  [key: string]: unknown;
+  cidr: string;
+  label: string;
+  enabled: boolean;
+  /** Seconds between scans; null = global discovery interval. */
+  interval_sec: number | null;
+  /** SNMP profiles to probe with; [] = all profiles. */
+  profile_ids: number[];
+  last_scan_at: string | null;
+  next_scan_at: string | null;
+  host_count: number;
+}
+
+/** Create (cidr required) or PATCH (any subset) payload for a scan range. */
+export interface ScanRangeSave {
+  cidr?: string;
+  label?: string;
+  enabled?: boolean;
+  /** 60..604800 seconds; null resets to the global discovery interval. */
+  interval_sec?: number | null;
+  profile_ids?: number[];
+}
+
+/** Response of the manual range scan endpoints. */
+export interface ScanRangeJob {
+  job_id: string;
+  status: string;
 }
 
 // -- Ping-only adoption and candidates ------------------------------------------

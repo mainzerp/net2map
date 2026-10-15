@@ -25,6 +25,7 @@ import {
   type StatusDotStatus,
 } from "./ui";
 import { formatTimestamp } from "../utils/datetime";
+import { deviceDisplayName } from "../utils/deviceSearch";
 import { useInspector } from "../hooks/useInspector";
 import type { DeviceTableProps, RackInfo, TopologyNode } from "../types";
 
@@ -213,11 +214,11 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
       key: "name",
       header: "Name",
       sortable: true,
-      sortValue: (d) => (d.sys_name || d.ip || "").toLowerCase(),
+      sortValue: (d) => deviceDisplayName(d).toLowerCase(),
       render: (d) => (
         <div>
           <div className="flex items-center gap-1.5">
-            <span className={`font-semibold ${d.ignored ? "text-muted" : "text-primary"}`}>{d.sys_name || d.ip}</span>
+            <span className={`font-semibold ${d.ignored ? "text-muted" : "text-primary"}`}>{deviceDisplayName(d)}</span>
             {d.ping_only === true && (
               <Badge tone="neutral" title="Monitored by ping only, no SNMP polling">Ping only</Badge>
             )}

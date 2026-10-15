@@ -47,4 +47,10 @@ describe("filterDevices", () => {
   it("falls back to the IP as display name", () => {
     expect(deviceDisplayName(DEVICES[2])).toBe("10.0.1.77");
   });
+
+  it("prefers the reverse DNS name over a sysName that only repeats the IP", () => {
+    expect(deviceDisplayName({ ip: "10.0.0.5", sys_name: "10.0.0.5", hostname: "printer.lan" })).toBe("printer.lan");
+    expect(deviceDisplayName({ ip: "10.0.0.5", sys_name: "core-sw", hostname: "printer.lan" })).toBe("core-sw");
+    expect(deviceDisplayName({ ip: "10.0.0.5", sys_name: "", hostname: "" })).toBe("10.0.0.5");
+  });
 });

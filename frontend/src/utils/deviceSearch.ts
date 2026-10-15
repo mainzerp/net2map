@@ -15,8 +15,11 @@ export interface DeviceFilterResult<T> {
 
 export const DEVICE_PICKER_LIMIT = 50;
 
-export function deviceDisplayName(d: SearchableDevice): string {
-  return d.sys_name || d.ip;
+// sysName, then the reverse DNS name, then the IP. A sysName that only repeats
+// the IP (ping-only devices without a label) yields to the DNS name.
+export function deviceDisplayName(d: Pick<SearchableDevice, "ip" | "sys_name" | "hostname">): string {
+  const sysName = d.sys_name && d.sys_name !== d.ip ? d.sys_name : "";
+  return sysName || d.hostname || d.ip;
 }
 
 function haystack(d: SearchableDevice): string {

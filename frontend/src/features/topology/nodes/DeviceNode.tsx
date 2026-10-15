@@ -13,6 +13,7 @@ import {
   healthStatusBg,
   isPowerOrServer,
 } from "../../../utils/deviceHealth";
+import { deviceDisplayName } from "../../../utils/deviceSearch";
 import { useScanPulse, useZoomTier } from "../zoomTier";
 import type { DeviceFlowNode } from "../flowTypes";
 import OverlayBadges from "./OverlayBadges";
@@ -83,7 +84,7 @@ function DeviceNode({ data, selected }: NodeProps<DeviceFlowNode>) {
   const ports = device.ports || [];
   const totalPorts = ports.length;
   const activePorts = ports.filter(p => p.oper_status === 1).length;
-  const name = device.sys_name || device.ip;
+  const name = deviceDisplayName(device);
   const deviceType = deviceTypeOf(device);
   const powerOrServer = isPowerOrServer(device);
   const health = healthOf(device);

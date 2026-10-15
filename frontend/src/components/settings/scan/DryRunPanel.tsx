@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { extractErrorMessage } from "../../../api";
-import { useCreateScanJob, useDiscoveryRanges, useScanJob } from "../../../hooks/api";
+import { useCreateScanJob, useScanJob, useScanRanges } from "../../../hooks/api";
 import { useToast } from "../../ToastProvider";
 import { Badge, Button } from "../../ui";
 
@@ -27,7 +27,9 @@ interface DryRunResult {
 const DRY_RUN_POLL = { intervalMs: 2000, maxErrors: 5, maxDurationMs: 5 * 60_000 };
 
 function DryRunPanel() {
-  const { data: discoveryRanges = [], isLoading: rangesLoading } = useDiscoveryRanges();
+  const { data: scanRanges = [], isLoading: rangesLoading } = useScanRanges();
+  // The dry run probes every enabled range; disabled ranges are skipped.
+  const enabledRangeCount = scanRanges.filter((r) => r.enabled).length;
   const [dryRunLoading, setDryRunLoading] = useState<boolean>(false);
   const [dryRunResult, setDryRunResult] = useState<DryRunResult | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -82,12 +84,18 @@ function DryRunPanel() {
         <Button
           variant="primary"
           onClick={runDryRun}
-          disabled={rangesLoading || dryRunLoading || discoveryRanges.length === 0}
+          disabled={rangesLoading || dryRunLoading || enabledRangeCount === 0}
         >
           {dryRunLoading ? "Scanning..." : "Dry Run"}
         </Button>
-        {discoveryRanges.length === 0 && !rangesLoading && (
-          <span className="text-muted text-[10px] opacity-70">Configure ranges above to enable a dry run</span>
+        {!rangesLoading && (
+          <span className="text-muted text-[10px] opacity-70">
+            {enabledRangeCount === 0
+              ? scanRanges.length === 0
+                ? "Configure ranges above to enable a dry run"
+                : "Enable at least one range above to run a dry run"
+              : `Probes ${enabledRangeCount} enabled range(s) without creating credentials`}
+          </span>
         )}
       </div>
       {dryRunResult && (
@@ -97,7 +105,7 @@ function DryRunPanel() {
             {dryRunResult.total_duration_ms != null ? ` - ${(dryRunResult.total_duration_ms / 1000).toFixed(1)}s` : ""}
           </div>
           {(dryRunResult.preview || []).length === 0 ? (
-            <div className="text-muted text-[11px]">No responding hosts found in configured ranges.</div>
+            <div className="text-muted text-[11px]">No responding hosts found in the enabled ranges.</div>
           ) : (
             <div className="flex flex-col gap-1">
               {(dryRunResult.preview || []).map((item, i) => (

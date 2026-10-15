@@ -17,6 +17,8 @@ function ScanEngineConfig() {
   const [snmpRetries, setSnmpRetries] = useState<number | string>(1);
   const [snmpBulkSize, setSnmpBulkSize] = useState<number | string>(25);
   const [endpointRetentionDays, setEndpointRetentionDays] = useState<number | string>(30);
+  const [probeWorkers, setProbeWorkers] = useState<number | string>(64);
+  const [probeSkipHours, setProbeSkipHours] = useState<number | string>(6);
   const [discoveryIntervalSec, setDiscoveryIntervalSec] = useState<number | string>(1800);
   const [linkUpdateIntervalSec, setLinkUpdateIntervalSec] = useState<number | string>(60);
   const [macUpdateIntervalSec, setMacUpdateIntervalSec] = useState<number | string>(300);
@@ -37,6 +39,8 @@ function ScanEngineConfig() {
     if (scanSettings?.snmp_retries != null) setSnmpRetries(Number(scanSettings.snmp_retries));
     if (scanSettings?.snmp_bulk_size != null) setSnmpBulkSize(Number(scanSettings.snmp_bulk_size));
     if (scanSettings?.endpoint_retention_days != null) setEndpointRetentionDays(Number(scanSettings.endpoint_retention_days));
+    if (scanSettings?.probe_workers != null) setProbeWorkers(Number(scanSettings.probe_workers));
+    if (scanSettings?.probe_skip_hours != null) setProbeSkipHours(Number(scanSettings.probe_skip_hours));
 
     const settingsList = appSettings ?? [];
     const discovery = settingsList.find((s) => s.key === "discovery_interval_sec");
@@ -61,6 +65,8 @@ function ScanEngineConfig() {
       setSnmpRetries(normalized.snmp_retries);
       setSnmpBulkSize(normalized.snmp_bulk_size);
       setEndpointRetentionDays(normalized.endpoint_retention_days);
+      setProbeWorkers(normalized.probe_workers);
+      setProbeSkipHours(normalized.probe_skip_hours);
       setDiscoveryIntervalSec(normalized.discovery_interval_sec);
       setLinkUpdateIntervalSec(normalized.link_update_interval_sec);
       setMacUpdateIntervalSec(normalized.mac_update_interval_sec);
@@ -75,6 +81,8 @@ function ScanEngineConfig() {
     // 0 is a valid retention (cleanup disabled); only an empty or invalid
     // field falls back to the default.
     const retention = Number(endpointRetentionDays);
+    // 0 is a valid skip window (always probe); empty or invalid falls back to 6.
+    const skipHours = Number(probeSkipHours);
     saveMutation.mutate({
       max_workers: Math.max(1, Math.min(128, Number(scanWorkers) || 1)),
       snmp_timeout: Math.max(1, Math.min(30, Number(snmpTimeout) || 3)),
@@ -84,6 +92,11 @@ function ScanEngineConfig() {
         String(endpointRetentionDays).trim() === "" || !Number.isFinite(retention)
           ? 30
           : Math.max(0, Math.min(3650, Math.round(retention))),
+      probe_workers: Math.max(1, Math.min(256, Math.round(Number(probeWorkers)) || 64)),
+      probe_skip_hours:
+        String(probeSkipHours).trim() === "" || !Number.isFinite(skipHours)
+          ? 6
+          : Math.max(0, Math.min(168, Math.round(skipHours))),
       discovery_interval_sec: Math.max(0, Math.min(86400, Number(discoveryIntervalSec) || 0)),
       link_update_interval_sec: Math.max(0, Math.min(3600, Number(linkUpdateIntervalSec) || 0)),
       mac_update_interval_sec: Math.max(0, Math.min(3600, Number(macUpdateIntervalSec) || 0)),
@@ -115,10 +128,12 @@ function ScanEngineConfig() {
     min: number,
     max: number,
     widthClass: string,
+    ariaLabel?: string,
   ) => (
     <div className={widthClass}>
       <Input
         type="number"
+        aria-label={ariaLabel}
         min={min}
         max={max}
         value={value}
@@ -175,8 +190,23 @@ function ScanEngineConfig() {
           discoveryIntervalSec,
           setDiscoveryIntervalSec,
           86400,
-          `current discovery schedule: ${discoveryLabel}`,
+          `current discovery schedule: ${discoveryLabel}; also the default interval for ranges without their own`,
         )}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-muted text-[10px]">Parallel Discovery Probes</span>
+          {numberInput(probeWorkers, setProbeWorkers, 1, 256, "w-[84px]", "Parallel discovery probes")}
+          <span className="text-muted text-[10px] opacity-70">
+            1-256 hosts probed at once while scanning discovery ranges
+          </span>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-muted text-[10px]">Ping-only Re-probe Skip (hours)</span>
+          {numberInput(probeSkipHours, setProbeSkipHours, 0, 168, "w-[84px]", "Ping-only re-probe skip hours")}
+          <span className="text-muted text-[10px] opacity-70">
+            Hosts that answered ping but not SNMP are not SNMP-probed again for this many hours (0-168). 0 always
+            probes.
+          </span>
+        </div>
       </div>
 
       <div className="p-3 rounded-card bg-surface border border-line flex flex-col gap-2">

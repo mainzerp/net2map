@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api";
 import { queryKeys } from "./keys";
 import { useApiMutation, type MutationHookOptions } from "./mutation";
+import type { ScanRange, ScanRangeJob, ScanRangeSave } from "../../types";
 
 // ── Scan engine configuration (ScanSettingsTab) ─────────────────────────────
 
@@ -13,6 +14,10 @@ export interface ScanSettings {
   snmp_bulk_size?: number;
   /** Days after which endpoints not seen are removed post-scan; 0 disables cleanup. */
   endpoint_retention_days?: number;
+  /** Parallel discovery probes (1-256). */
+  probe_workers?: number;
+  /** Hours a ping-only host (no SNMP answer) is not SNMP-probed again; 0 = always probe. */
+  probe_skip_hours?: number;
   [key: string]: unknown;
 }
 
@@ -74,17 +79,6 @@ export function useUpdateAppSettings() {
   });
 }
 
-export function useDiscoveryRanges() {
-  return useQuery<string[]>({
-    queryKey: queryKeys.discoveryRanges,
-    queryFn: async () => {
-      const data: unknown = await api.get("/api/discovery-ranges");
-      const ranges = (data as { ranges?: unknown } | null)?.ranges;
-      return Array.isArray(ranges) ? (ranges as string[]) : [];
-    },
-  });
-}
-
 export function useScanRuns(limit: number = 20) {
   return useQuery<ScanRunEntry[]>({
     // The limit is part of the fetch, so it must be part of the key;
@@ -97,14 +91,64 @@ export function useScanRuns(limit: number = 20) {
   });
 }
 
-/** PUT the discovery ranges; resolves with the normalized list the backend stored. */
-export function useUpdateDiscoveryRanges(options?: MutationHookOptions<string[], string[]>) {
-  return useApiMutation<string[], string[]>(
-    async (lines) => {
-      const resp = await api.put<{ ranges?: unknown } | null>("/api/discovery-ranges", { ranges: lines });
-      return Array.isArray(resp?.ranges) ? (resp.ranges as string[]) : lines;
+// ── Scan ranges (per-range discovery schedule) ──────────────────────────────
+
+export function useScanRanges() {
+  return useQuery<ScanRange[]>({
+    queryKey: queryKeys.scanRanges,
+    queryFn: async () => {
+      const data: unknown = await api.get("/api/scan-ranges");
+      return Array.isArray(data) ? (data as ScanRange[]) : [];
     },
-    [queryKeys.discoveryRanges],
+  });
+}
+
+export type ScanRangeCreate = ScanRangeSave & { cidr: string };
+
+export interface ScanRangeUpdate {
+  id: number;
+  patch: ScanRangeSave;
+}
+
+export function useCreateScanRange(options?: MutationHookOptions<ScanRange, ScanRangeCreate>) {
+  return useApiMutation<ScanRange, ScanRangeCreate>(
+    (payload) => api.post<ScanRange>("/api/scan-ranges", payload),
+    [queryKeys.scanRanges],
+    options,
+  );
+}
+
+export function useUpdateScanRange(options?: MutationHookOptions<ScanRange, ScanRangeUpdate>) {
+  return useApiMutation<ScanRange, ScanRangeUpdate>(
+    ({ id, patch }) => api.patch<ScanRange>(`/api/scan-ranges/${id}`, patch),
+    [queryKeys.scanRanges],
+    options,
+  );
+}
+
+export function useDeleteScanRange(options?: MutationHookOptions<void, number>) {
+  return useApiMutation<void, number>((id) => api.del(`/api/scan-ranges/${id}`), [queryKeys.scanRanges], options);
+}
+
+function toScanRangeJob(resp: Partial<ScanRangeJob> | null | undefined): ScanRangeJob {
+  if (!resp?.job_id) throw new Error("Range scan job could not be created");
+  return { job_id: resp.job_id, status: resp.status ?? "queued" };
+}
+
+/** POST /api/scan-ranges/{id}/scan; resolves with the created job. */
+export function useScanRangeNow(options?: MutationHookOptions<ScanRangeJob, number>) {
+  return useApiMutation<ScanRangeJob, number>(
+    async (id) => toScanRangeJob(await api.post<Partial<ScanRangeJob> | null>(`/api/scan-ranges/${id}/scan`, {})),
+    [queryKeys.scanRanges, queryKeys.scanRuns],
+    options,
+  );
+}
+
+/** POST /api/scan-ranges/scan (all enabled ranges); resolves with the created job. */
+export function useScanAllRanges(options?: MutationHookOptions<ScanRangeJob, void>) {
+  return useApiMutation<ScanRangeJob, void>(
+    async () => toScanRangeJob(await api.post<Partial<ScanRangeJob> | null>("/api/scan-ranges/scan", {})),
+    [queryKeys.scanRanges, queryKeys.scanRuns],
     options,
   );
 }
@@ -115,6 +159,8 @@ export interface ScanEngineConfigValues {
   snmp_retries: number;
   snmp_bulk_size: number;
   endpoint_retention_days: number;
+  probe_workers: number;
+  probe_skip_hours: number;
   discovery_interval_sec: number;
   link_update_interval_sec: number;
   mac_update_interval_sec: number;
@@ -137,6 +183,8 @@ export function useUpdateScanEngineConfig(
         snmp_retries: normalized.snmp_retries,
         snmp_bulk_size: normalized.snmp_bulk_size,
         endpoint_retention_days: normalized.endpoint_retention_days,
+        probe_workers: normalized.probe_workers,
+        probe_skip_hours: normalized.probe_skip_hours,
       });
       await api.put("/api/settings/discovery_interval_sec", { value: String(normalized.discovery_interval_sec) });
       await api.put("/api/settings/link_update_interval_sec", { value: String(normalized.link_update_interval_sec) });
