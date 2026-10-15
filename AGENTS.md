@@ -262,7 +262,7 @@ Rules of thumb:
 - `backend/` — FastAPI app: entry `main.py`; `routers/` (22 router modules), `scan_engine/`
   (background scan pipeline: executor, jobs, scheduler, event_loop, ping, dns,
   broadcast), `scanners/` (vendor SNMP scanners: aruba_cx, cisco, eaton, fs_scanner, generic,
-  hpe_ilo, hpe_ups, opnsense, unifi; plus detection/parsing helpers and `health.py`, the
+  hpe_ilo, hpe_ups, mikrotik, opnsense, unifi, watchguard; plus detection/parsing helpers and `health.py`, the
   pysnmp-free UPS / server health normalization), `shared/`
   (auth, crypto, audit, metrics, redis_client, state), `alembic/versions/` (migrations 001-029), `latency/` (latency monitor: probe,
   stats, store, `monitor.py` run as the `latency-monitor` compose service),

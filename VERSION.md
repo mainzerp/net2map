@@ -1,5 +1,27 @@
 # Version History
 
+## v4.1.0 -- MikroTik and WatchGuard scanners, STP protocol on the map
+
+**Type:** MINOR. Commits: 0bdfc41 (backend scanners), 38adf9d (frontend STP
+protocol badges). No migration.
+
+### Features
+
+- MikroTik scanner (`scanners/mikrotik.py`, vendor `mikrotik`): detection via
+  enterprise OID 14988 or sysDescr `RouterOS` / `SwOS` / `MikroTik`, board model from
+  sysDescr, firmware from MIKROTIK-MIB `mtxrLicVersion` (fallback
+  `mtxrFirmwareVersion`), RouterOS virtual interfaces (bridge, vlan, pppoe, tunnels,
+  bonding, ...) filtered by prefix. Device type `switch`, STP and FDB enabled.
+- WatchGuard scanner (`scanners/watchguard.py`, vendor `watchguard`): detection via
+  enterprise OID 3097 or sysDescr `WatchGuard` / `Fireware` / `Firebox`, Firebox model
+  and Fireware version from sysDescr. Device type `firewall`, no STP reads.
+- `VendorScanner.FIRMWARE_OIDS`: vendor MIB scalars read when ENTITY-MIB reports no
+  software version (before sysDescr parsing).
+- STP layer shows the spanning tree protocol (STP / RSTP / MSTP) as a badge on every
+  device and rack node, the legend lists devices per protocol and flags a protocol
+  mix; the device inspector header shows the protocol badge.
+- Vendor labels and badges for MikroTik (`MT`) and WatchGuard (`WG`).
+
 ## v4.0.0 -- Ping-only devices, rack rear view, security hardening
 
 **Type:** MAJOR (breaking configuration changes, see below). Commits: 5ca45b8

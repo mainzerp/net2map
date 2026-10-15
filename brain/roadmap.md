@@ -18,6 +18,15 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
+- MikroTik + WatchGuard SNMP scanners, STP protocol badges (released v4.1.0) · priority: P2 · area: full-stack
+  New vendors `mikrotik` (switch, firmware via MIKROTIK-MIB) and `watchguard`
+  (firewall, no STP); STP layer shows STP/RSTP/MSTP per node, legend counts and flags
+  mixed protocols, inspector header badge. Passed: ruff, backend pytest (7
+  snmp_driver local Python 3.13 only), typecheck, 356 frontend tests.
+  Not verified: real MikroTik / WatchGuard hardware, browser.
+  User to verify: scan a MikroTik and a Firebox, check vendor, model, firmware and
+  ports; map > Layer STP shows protocol badges and legend counts.
+
 - Code review hardening (released v4.0.0, migration 029) · priority: P1 · area: full-stack
   Fixes from the 2026-10-14 review: mandatory secrets, DB-backed revocation, refresh
   rotation, FK SET NULL, endpoint retention, scan loop off sync Redis/DB, LLDP ifIndex

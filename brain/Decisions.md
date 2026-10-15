@@ -388,3 +388,19 @@
   token and auth-disabled modes were dead code; compose, backend, WebSocket, the
   "Use an access token" login option and docs dropped them. `config.py` ignores
   unknown env keys so a leftover `SECRET_TOKEN` in `.env` does not break startup.
+
+## MikroTik and WatchGuard scanners, STP protocol badges (2026-10-15)
+
+- **MikroTik is a `switch`.** `device_type()` has no sysDescr input, and CRS/RouterOS
+  bridges run STP and expose a bridge FDB; routers (CCR/RB) can be retyped per device
+  via the meta PATCH. Virtual interfaces are matched by name prefix, like OPNsense,
+  because RouterOS keeps the type prefix in default interface names.
+- **WatchGuard is a `firewall` without STP reads**, same as OPNsense.
+- **Vendor firmware OIDs as a scanner attribute** (`FIRMWARE_OIDS`): RouterOS has no
+  ENTITY-MIB software revision and no version in sysDescr; one extra GET only for
+  vendors that define the attribute. Not verified against real hardware (OIDs from
+  MIKROTIK-MIB / WatchGuard enterprise registry).
+- **STP protocol visible on the map.** The protocol was already collected
+  (`dot1dStpVersion`); the STP layer now shows it per node and the legend counts it,
+  because mixed RSTP/MSTP regions are a common cause of unexpected topologies.
+  `unknown` gets no node badge (only a legend count) to avoid noise.
