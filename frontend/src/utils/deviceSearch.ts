@@ -22,11 +22,26 @@ export function deviceDisplayName(d: Pick<SearchableDevice, "ip" | "sys_name" | 
   return sysName || d.hostname || d.ip;
 }
 
-function haystack(d: SearchableDevice): string {
-  return [d.sys_name, d.hostname, d.ip, d.vendor, d.model, d.label]
+function joinFields(fields: readonly (string | null | undefined)[]): string {
+  return fields
     .filter((v): v is string => typeof v === "string" && v.length > 0)
     .join("\n")
     .toLowerCase();
+}
+
+function haystack(d: SearchableDevice): string {
+  return joinFields([d.sys_name, d.hostname, d.ip, d.vendor, d.model, d.label]);
+}
+
+/**
+ * True when every whitespace-separated token of ``query`` occurs
+ * (case-insensitive) in at least one of ``fields``; an empty query matches.
+ */
+export function matchesQuery(query: string, fields: readonly (string | null | undefined)[]): boolean {
+  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return true;
+  const text = joinFields(fields);
+  return tokens.every((t) => text.includes(t));
 }
 
 /**

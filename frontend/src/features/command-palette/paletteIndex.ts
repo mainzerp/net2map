@@ -39,7 +39,7 @@ interface PageDef {
 const PAGES: PageDef[] = [
   { to: "/", label: "Dashboard", icon: "dashboard", keywords: "home overview" },
   { to: "/map", label: "Topology map", icon: "map", keywords: "map topology graph" },
-  { to: "/devices", label: "Devices", icon: "devices", keywords: "endpoints clients hosts" },
+  { to: "/endpoints", label: "Endpoints", icon: "devices", keywords: "devices clients hosts" },
   { to: "/network", label: "Network", icon: "network", keywords: "devices switches infrastructure" },
   { to: "/racks", label: "Racks", icon: "racks", keywords: "rack elevation" },
   { to: "/logs", label: "Logs", icon: "logs", keywords: "audit events history" },

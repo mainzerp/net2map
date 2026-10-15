@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 const ROUTE_MAP: Record<string, string> = {
   "1": "/",
   "2": "/map",
-  "3": "/devices",
+  "3": "/endpoints",
   "4": "/network",
   "5": "/logs",
   "6": "/settings",

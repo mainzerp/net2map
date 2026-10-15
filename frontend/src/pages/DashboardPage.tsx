@@ -105,7 +105,7 @@ interface QuickLink {
 
 const QUICK_LINKS: QuickLink[] = [
   { to: "/map", icon: Waypoints, title: "Topology map", hint: "Rack grouping and cable tracing" },
-  { to: "/devices", icon: Server, title: "Devices", hint: "Discovered endpoints and ports" },
+  { to: "/endpoints", icon: Server, title: "Endpoints", hint: "Discovered end devices and their ports" },
   { to: "/settings", icon: Settings, title: "Settings", hint: "Credentials, SNMP profiles, racks" },
 ];
 
@@ -288,7 +288,7 @@ export default function DashboardPage() {
 
   const facts: FactItem[] = [
     { key: "devices", value: stats.switchCount, label: plural(stats.switchCount, "device", "devices"), to: "/network" },
-    { key: "endpoints", value: endpointCount ?? "-", label: plural(endpointCount ?? 0, "endpoint", "endpoints"), to: "/devices" },
+    { key: "endpoints", value: endpointCount ?? "-", label: plural(endpointCount ?? 0, "endpoint", "endpoints"), to: "/endpoints" },
     { key: "links", value: stats.linkCount, label: plural(stats.linkCount, "link", "links"), to: "/map" },
     { key: "ports", value: `${stats.activePorts}/${stats.totalPorts}`, label: "ports up", to: "/network" },
     { key: "racks", value: stats.rackCount, label: plural(stats.rackCount, "rack", "racks"), to: "/racks" },

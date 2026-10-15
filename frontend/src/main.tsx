@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { SESSION_CHANGED_EVENT } from "./api";
 import ErrorBoundary from "./components/ErrorBoundary";
+import LegacyRedirect from "./components/LegacyRedirect";
 import { ToastProvider } from "./components/ToastProvider";
 import { ThemeProvider } from "./theme/ThemeProvider";
 import { MotionProvider } from "./theme/MotionProvider";
@@ -62,7 +63,9 @@ createRoot(document.getElementById("root")!).render(
                 <Route element={<App />}>
                   <Route index element={lazyPage(<DashboardPage />)} />
                   <Route path="map" element={lazyPage(<MapPage />)} />
-                  <Route path="devices" element={lazyPage(<DevicesPage />)} />
+                  <Route path="endpoints" element={lazyPage(<DevicesPage />)} />
+                  {/* The endpoints page lived at /devices before v4.6.0. */}
+                  <Route path="devices" element={<LegacyRedirect to="/endpoints" />} />
                   <Route path="racks" element={lazyPage(<RacksPage />)} />
                   <Route path="network" element={lazyPage(<NetworkPage />)} />
                   <Route path="logs" element={lazyPage(<LogsPage />)} />

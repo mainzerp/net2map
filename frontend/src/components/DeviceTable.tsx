@@ -12,6 +12,7 @@ import {
   useUpdateDeviceMeta,
 } from "../hooks/api";
 import { flattenFloors } from "../features/topology/floors";
+import FloorSelect from "../features/topology/FloorSelect";
 import {
   Badge,
   Button,
@@ -41,9 +42,11 @@ interface FormState {
   rack_id: number | null;
   class_id: number | null;
   model_id: number | null;
+  /** Own floor; only used while the device is outside a rack. */
+  floor_id: number | null;
 }
 
-const EMPTY_FORM: FormState = { rack_id: null, class_id: null, model_id: null };
+const EMPTY_FORM: FormState = { rack_id: null, class_id: null, model_id: null, floor_id: null };
 
 // Map the dashboard deep-link alias to the stored ping_status value.
 function normalizeStatusParam(raw: string): string {
@@ -129,6 +132,10 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
   // Bulk "Move to floor": only affects devices outside racks (racked devices
   // follow their rack's floor). "none" clears the floor assignment.
   const floorEntries = useMemo(() => flattenFloors(buildingsQuery.data), [buildingsQuery.data]);
+  const floorLabel = (floorId: number | null) => {
+    const entry = floorEntries.find((e) => e.floor.id === floorId);
+    return entry ? `${entry.building.label} / ${entry.floor.label}` : "Unassigned";
+  };
   const bulkMoveFloor = async (value: string) => {
     if (!value) return;
     setBulkLoading(true);
@@ -157,6 +164,7 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
       rack_id: dev.rack_id ?? null,
       class_id: dev.class_id ?? null,
       model_id: dev.model_id ?? null,
+      floor_id: dev.floor_id ?? null,
     };
     setForm(snapshot);
     setInitialForm(snapshot);
@@ -493,7 +501,18 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
             <Select
               className="mt-1"
               value={form.rack_id ?? ""}
-              onChange={(e) => setForm((p) => ({ ...p, rack_id: e.target.value ? +e.target.value : null }))}
+              onChange={(e) => {
+                const rackId = e.target.value ? +e.target.value : null;
+                setForm((p) => {
+                  // Leaving the rack: preselect the rack's floor so the device
+                  // stays where it was on the map (the backend does the same).
+                  const leftRack = rackId == null && initialForm.rack_id != null ? rackMap[initialForm.rack_id] : null;
+                  const floorId = leftRack?.floor_id != null && p.floor_id === initialForm.floor_id
+                    ? leftRack.floor_id
+                    : p.floor_id;
+                  return { ...p, rack_id: rackId, floor_id: rackId == null ? floorId : p.floor_id };
+                });
+              }}
             >
               <option value="">-- No rack --</option>
               {racks.map((r) => (
@@ -504,6 +523,27 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
               ))}
             </Select>
           </label>
+          {floorEntries.length > 0 && (
+            form.rack_id != null ? (
+              <div className="text-[11px] text-muted" data-testid="edit-floor-from-rack">
+                Floor
+                <div className="mt-1 text-xs text-primary">
+                  {floorLabel(rackMap[form.rack_id]?.floor_id ?? null)} (from rack)
+                </div>
+              </div>
+            ) : (
+              <label className="block text-[11px] text-muted select-none">
+                Floor
+                <FloorSelect
+                  className="mt-1"
+                  aria-label="Floor"
+                  buildings={buildingsQuery.data ?? []}
+                  value={form.floor_id}
+                  onChange={(floorId) => setForm((p) => ({ ...p, floor_id: floorId }))}
+                />
+              </label>
+            )
+          )}
           <label className="block text-[11px] text-muted select-none">
             Class
             <Select

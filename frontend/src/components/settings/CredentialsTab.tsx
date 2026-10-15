@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { extractErrorMessage, AUTH_PROTOCOLS, PRIV_PROTOCOLS, SEC_LEVELS } from "../../api";
+import { matchesQuery } from "../../utils/deviceSearch";
 import type { Credential, TopologyNode } from "../../types";
 import {
   useCredentials,
@@ -75,6 +77,15 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
   const [err, setErr] = useState<string>("");
   const [deleteTarget, setDeleteTarget] = useState<Credential | null>(null);
   const [togglingIgnoreId, setTogglingIgnoreId] = useState<number | null>(null);
+  // Search over all three lists, kept in ?q= like the other list pages.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const query = searchParams.get("q") ?? "";
+  const setQuery = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set("q", value);
+    else next.delete("q");
+    setSearchParams(next, { replace: true });
+  };
 
   // Open the new-entry form whenever the parent increments the trigger
   useEffect(() => {
@@ -146,6 +157,24 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
     const engineId = effectiveV3 ? normalizeEngineId(F.v3_engine_id) : "";
     saveMutation.mutate({ id: editState.id, form: { ...form, v3_engine_id: engineId } });
   };
+
+  // Credentials with their discovered device, rack and profile, filtered by
+  // label, IP, profile, SNMP user, device names, vendor/model and rack.
+  const visibleCreds = [...creds]
+    .sort((a, b) => (a.label || "").localeCompare(b.label || ""))
+    .map((c) => {
+      const matchedDevice = devices.find((d) => d.ip === c.ip);
+      const assignedRack = matchedDevice?.rack_id ? racks.find((r) => r.id === matchedDevice.rack_id) : null;
+      const assignedProfile = c.profile_id ? profiles.find((p) => p.id === c.profile_id) : null;
+      return { c, matchedDevice, assignedRack, assignedProfile };
+    })
+    .filter(({ c, matchedDevice, assignedRack, assignedProfile }) =>
+      matchesQuery(query, [
+        c.label, c.ip, c.snmp_version, c.v3_username, c.snmp_enabled === false ? "ping only" : "",
+        assignedProfile?.label, matchedDevice?.sys_name, matchedDevice?.hostname, matchedDevice?.vendor,
+        matchedDevice?.model, assignedRack?.label, assignedRack?.room,
+      ]),
+    );
 
   const ignoreButton = (d: TopologyNode) => (
     <Button
@@ -337,18 +366,32 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
         onCancel={() => setDeleteTarget(null)}
       />
 
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search network devices..."
+          aria-label="Search network devices"
+          className="max-w-xs"
+        />
+        {query && (
+          <span className="text-[10px] text-muted" data-testid="credential-search-count">
+            {visibleCreds.length} of {creds.length} entries
+          </span>
+        )}
+      </div>
+
       {isLoading ? (
         <TabLoading />
       ) : creds.length === 0 ? (
         <EmptyState title="No entries yet" hint="Add device credentials with + New Entry above." />
+      ) : visibleCreds.length === 0 ? (
+        <EmptyState title="No entries match your search" className="mb-5" />
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2 mb-5">
-          {[...creds].sort((a, b) => (a.label || "").localeCompare(b.label || "")).map((c) => {
+          {visibleCreds.map(({ c, matchedDevice, assignedRack, assignedProfile }) => {
             const pingOnly = c.snmp_enabled === false;
             const v3 = !pingOnly && c.snmp_version === "v3";
-            const assignedProfile = c.profile_id ? profiles.find((p) => p.id === c.profile_id) : null;
-            const matchedDevice = devices.find((d) => d.ip === c.ip);
-            const assignedRack = matchedDevice?.rack_id ? racks.find((r) => r.id === matchedDevice.rack_id) : null;
             return (
               <Card key={c.id} className={c.enabled ? "" : "opacity-50"}>
                 <div className="flex items-start justify-between gap-2 mb-1.5">
@@ -420,7 +463,9 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
       )}
       {(() => {
         const credIps = new Set(creds.map((c) => c.ip));
-        const unassigned = devices.filter((d) => !credIps.has(d.ip));
+        const unassigned = devices.filter(
+          (d) => !credIps.has(d.ip) && matchesQuery(query, [d.sys_name, d.hostname, d.ip, d.vendor, d.model]),
+        );
         if (unassigned.length === 0) return null;
         return (
           <div className="mt-1">
@@ -460,7 +505,7 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
           </div>
         );
       })()}
-      <PingCandidatesSection />
+      <PingCandidatesSection search={query} />
     </div>
   );
 }

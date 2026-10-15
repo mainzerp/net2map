@@ -91,8 +91,8 @@ export default function PortDetailModal({ port, switchIp, onClose }: Props) {
       )}
       {endpointCount > 0 && (
         <div className="p-2 text-[11px]">
-          <Link to="/devices" className="text-accent hover:underline" onClick={onClose}>
-            Open Devices page for full details
+          <Link to="/endpoints" className="text-accent hover:underline" onClick={onClose}>
+            Open Endpoints page for full details
           </Link>
         </div>
       )}

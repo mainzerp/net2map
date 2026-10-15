@@ -41,7 +41,7 @@ const ICON_STROKE = 1.75;
 const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/map", label: "Topology", icon: Waypoints },
-  { to: "/devices", label: "Devices", icon: Server },
+  { to: "/endpoints", label: "Endpoints", icon: Server },
   { to: "/network", label: "Network", icon: Network },
   { to: "/racks", label: "Racks", icon: Container },
   { to: "/logs", label: "Logs", icon: ScrollText },

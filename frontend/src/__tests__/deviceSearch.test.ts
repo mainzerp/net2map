@@ -1,5 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { filterDevices, deviceDisplayName, DEVICE_PICKER_LIMIT } from "../utils/deviceSearch";
+import { filterDevices, deviceDisplayName, matchesQuery, DEVICE_PICKER_LIMIT } from "../utils/deviceSearch";
+
+describe("matchesQuery", () => {
+  it("needs every token in some field, case-insensitive", () => {
+    const fields = ["Core-SW1", "10.0.1.1", null, undefined, "Aruba"];
+    expect(matchesQuery("", fields)).toBe(true);
+    expect(matchesQuery("  core  ", fields)).toBe(true);
+    expect(matchesQuery("aruba 10.0.1", fields)).toBe(true);
+    expect(matchesQuery("aruba cisco", fields)).toBe(false);
+    expect(matchesQuery("x", [null, ""])).toBe(false);
+  });
+});
 
 const dev = (id: number, sys_name: string, ip: string, vendor = "", model = "", label?: string) => ({
   id, sys_name, ip, vendor, model, label,

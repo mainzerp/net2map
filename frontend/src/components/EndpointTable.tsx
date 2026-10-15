@@ -200,7 +200,7 @@ export default function EndpointTable() {
   return (
     <div className="max-w-[1400px] mx-auto flex flex-col gap-4">
       <div>
-        <h1 className="text-lg font-bold text-primary">Devices</h1>
+        <h1 className="text-lg font-bold text-primary">Endpoints</h1>
         <p className="text-xs text-muted mt-0.5">End devices discovered on the network (not managed network devices)</p>
       </div>
 

@@ -208,6 +208,46 @@ describe("DeviceTable", () => {
       expect(body).toEqual({ class_id: 6 });
     });
 
+    describe("floor field", () => {
+      const floor = (id: number, label: string) => ({
+        id, building_id: 1, label, sort_order: id, has_background: false, bg_version: 0,
+        bg_opacity: 1, bg_scale: 1, bg_color: "",
+      });
+      const BUILDINGS = [{ id: 1, label: "HQ", description: null, sort_order: 0, floors: [floor(11, "Ground"), floor(12, "First")] }];
+
+      function mockFloorApi(device: Record<string, unknown>) {
+        mockApiGet.mockImplementation((path: string) => {
+          if (path.startsWith("/api/devices")) return Promise.resolve([{ ...classifiedDevice, ...device }]);
+          if (path === "/api/racks") return Promise.resolve([{ id: 7, label: "Rack-A", room: "", floor_id: 12 }]);
+          if (path === "/api/switch-classes") return Promise.resolve([{ id: 5, label: "Core", color: "" }]);
+          if (path === "/api/buildings") return Promise.resolve(BUILDINGS);
+          return Promise.resolve([]);
+        });
+        mockApiPatch.mockResolvedValue({});
+      }
+
+      it("sets the floor of a device outside a rack", async () => {
+        mockFloorApi({ floor_id: null });
+        const { dialog } = await openEditModal();
+        fireEvent.change(await within(dialog).findByLabelText("Floor"), { target: { value: "11" } });
+        fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+        await waitFor(() => expect(mockApiPatch).toHaveBeenCalledTimes(1));
+        expect(mockApiPatch.mock.calls[0][1]).toEqual({ floor_id: 11 });
+      });
+
+      it("shows the rack's floor read-only and keeps it when the rack is removed", async () => {
+        mockFloorApi({ rack_id: 7, floor_id: 11 });
+        const { dialog, rackSelect } = await openEditModal();
+        expect((await within(dialog).findByTestId("edit-floor-from-rack")).textContent).toContain("HQ / First (from rack)");
+
+        fireEvent.change(rackSelect, { target: { value: "" } });
+        expect((within(dialog).getByLabelText("Floor") as HTMLSelectElement).value).toBe("12");
+        fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+        await waitFor(() => expect(mockApiPatch).toHaveBeenCalledTimes(1));
+        expect(mockApiPatch.mock.calls[0][1]).toEqual({ rack_id: null, floor_id: 12 });
+      });
+    });
+
     it("skips the request when nothing changed", async () => {
       mockEditApi();
       const { dialog } = await openEditModal();

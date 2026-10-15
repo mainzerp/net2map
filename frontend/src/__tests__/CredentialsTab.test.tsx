@@ -72,6 +72,64 @@ describe("engineId helpers", () => {
   });
 });
 
+describe("CredentialsTab search", () => {
+  const V2_CRED = { ...V3_CRED, id: 8, label: "Edge printer floor", ip: "10.0.9.8", snmp_version: "v2c",
+    v3_username: "", discovered_engine_id: null, engine_id_seen_at: null };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockApiGet.mockImplementation((path: string) => {
+      if (path === "/api/credentials") return Promise.resolve([V3_CRED, V2_CRED]);
+      if (path === "/api/devices") {
+        return Promise.resolve([
+          { id: 1, ip: "10.0.0.7", sys_name: "GA-CORE-VSF", vendor: "aruba_cx", ports: [] },
+          { id: 2, ip: "10.0.5.5", sys_name: "lonely-switch", vendor: "fs", ports: [] },
+        ]);
+      }
+      if (path.startsWith("/api/ping-candidates")) {
+        return Promise.resolve([
+          { id: 1, ip: "192.168.210.1", hostname: "GA-AP-Werkstatt.ad", mac: null, vendor: null, rtt_ms: 1, dismissed: false },
+          { id: 2, ip: "192.168.210.2", hostname: "GA-AP-Container.ad", mac: null, vendor: null, rtt_ms: 1, dismissed: false },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+  });
+
+  it("filters credentials by label, IP and discovered sysName", async () => {
+    const user = userEvent.setup();
+    renderWithQuery(<CredentialsTabContent newEntryTrigger={0} />);
+    await screen.findByText("Edge printer floor");
+    const search = screen.getByLabelText("Search network devices");
+
+    await user.type(search, "core-vsf");
+    await waitFor(() => expect(screen.queryByText("Edge printer floor")).toBeNull());
+    expect(screen.getByText("Core v3")).toBeTruthy();
+    expect(screen.getByTestId("credential-search-count").textContent).toBe("1 of 2 entries");
+
+    await user.clear(search);
+    await user.type(search, "10.0.9");
+    await waitFor(() => expect(screen.queryByText("Core v3")).toBeNull());
+    expect(screen.getByText("Edge printer floor")).toBeTruthy();
+
+    await user.clear(search);
+    await user.type(search, "nothing-matches");
+    expect(await screen.findByText("No entries match your search")).toBeTruthy();
+  });
+
+  it("also filters unassigned devices and ping candidates", async () => {
+    const user = userEvent.setup();
+    renderWithQuery(<CredentialsTabContent newEntryTrigger={0} />);
+    await screen.findByText("lonely-switch");
+    await screen.findByText("GA-AP-Container.ad");
+
+    await user.type(screen.getByLabelText("Search network devices"), "werkstatt");
+    await waitFor(() => expect(screen.queryByText("GA-AP-Container.ad")).toBeNull());
+    expect(screen.getByText("GA-AP-Werkstatt.ad")).toBeTruthy();
+    expect(screen.queryByText("lonely-switch")).toBeNull();
+  });
+});
+
 describe("CredentialsTab engine ID", () => {
   beforeEach(() => {
     vi.clearAllMocks();

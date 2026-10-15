@@ -10,12 +10,15 @@ import {
 import { Badge, Button, Card, DataTable, EmptyState, type DataTableColumn } from "../ui";
 import { useToast } from "../ToastProvider";
 import { formatTimestamp } from "../../utils/datetime";
+import { matchesQuery } from "../../utils/deviceSearch";
 import { SectionHeader, TabLoading } from "./shared";
 
 // Hosts in the discovery ranges that answered ping but not SNMP and are not
 // managed yet. Write users can adopt them as ping-only devices or dismiss
 // them; viewers see the list read-only.
-export default function PingCandidatesSection() {
+// ``search`` comes from the Network Devices search field and filters by IP,
+// DNS name and MAC.
+export default function PingCandidatesSection({ search = "" }: { search?: string }) {
   const canEdit = (getStoredUser()?.role ?? "viewer") !== "viewer";
   const [showDismissed, setShowDismissed] = useState(false);
   const [selected, setSelected] = useState<Set<string | number>>(new Set());
@@ -28,10 +31,12 @@ export default function PingCandidatesSection() {
 
   const sorted = useMemo(
     () =>
-      [...candidates].sort(
-        (a, b) => Number(a.dismissed) - Number(b.dismissed) || a.ip.localeCompare(b.ip, undefined, { numeric: true }),
-      ),
-    [candidates],
+      candidates
+        .filter((c) => matchesQuery(search, [c.ip, c.hostname, c.mac, c.vendor]))
+        .sort(
+          (a, b) => Number(a.dismissed) - Number(b.dismissed) || a.ip.localeCompare(b.ip, undefined, { numeric: true }),
+        ),
+    [candidates, search],
   );
   // Only active (not dismissed) candidates that are still listed count as selected.
   const selectedActive = useMemo(
@@ -199,9 +204,11 @@ export default function PingCandidatesSection() {
       ) : sorted.length === 0 ? (
         <Card>
           <EmptyState
-            title="No ping-only candidates"
+            title={search && candidates.length > 0 ? "No candidates match your search" : "No ping-only candidates"}
             hint={
-              showDismissed
+              search && candidates.length > 0
+                ? undefined
+                : showDismissed
                 ? "No hosts answered ping without SNMP in the discovery ranges."
                 : "No new hosts answered ping without SNMP. Dismissed hosts are hidden."
             }
