@@ -465,3 +465,7 @@
   jobs: ranges first (new SNMP hosts get credentials), then the full scan, under the
   same scan lock, so no other scan slips in between and the full scan already covers
   the new devices. "Run Scan" stays a plain full scan.
+- **Ping candidates carry their own DNS name** (`ping_candidates.hostname`,
+  migration 034), resolved by range scans. Live: 30 access points in 192.168.210.0/24
+  have PTR records but no SNMP, so they never became devices or endpoints with an IP
+  and showed no name anywhere.

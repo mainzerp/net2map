@@ -18,6 +18,14 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
+- DNS names for ping candidates (released v4.5.1, migration 034) · priority: P1 · area: backend
+  Range scans resolve PTR for ping-only range hosts and store it on the candidate.
+  Passed: ruff, 1122 backend tests, alembic 034 on postgres:16.
+  User to verify: after update, "Run Scan + Ranges", Settings > Network Devices >
+  candidates show GA-AP-* names for 192.168.210.x.
+  Open: client IPs (43 of 769 endpoints) need the ARP check output
+  (n2m_arp_check.py); switch PTRs in 192.168.98.x are missing in DNS.
+
 - Range scans probe again, "Run Scan + Ranges", scan history per type (released v4.5.0, migration 033) · priority: P1 · area: full-stack
   Live stack: range scans skipped SNMP for all ping-only hosts (6 h window also on
   manual scans), 1 s pre-check, history listed all devices removed after a range run.

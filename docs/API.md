@@ -330,9 +330,13 @@ Ping candidates (table `ping_candidates`, migration 028): when a discovery or fu
 scan finishes without being cancelled, every discovery-range probe host that
 answered ping but no SNMP profile, and has neither a device nor a credential, is
 upserted as a candidate (`ip` unique, `rtt_ms`, `first_seen`, `last_seen`,
-`dismissed`). A repeat sighting refreshes `last_seen` and `rtt_ms` and keeps
-`dismissed`. Credential targets never become candidates. `GET /ping-candidates`
-hides candidates whose IP meanwhile has a device or a credential.
+`dismissed`, `hostname`). A repeat sighting refreshes `last_seen` and `rtt_ms` and keeps
+`dismissed`. The range scan reverse-resolves every candidate (configured DNS servers,
+then the system resolver) and stores the PTR name in `hostname` (migration 034; a
+failed lookup keeps the old name). Credential targets never become candidates.
+`GET /ping-candidates` hides candidates whose IP meanwhile has a device or a
+credential and returns the candidate's own `hostname`, else that of an endpoint with
+the same IP.
 `POST /credentials/ping-only` adopts hosts in bulk: per entry it creates a
 credential (`snmp_enabled=false`, `enabled=true`, label or empty) and immediately
 creates the ping-only device (`ping_status` `unknown` until the next scan) or marks

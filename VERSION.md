@@ -1,5 +1,17 @@
 # Version History
 
+## v4.5.1 -- DNS names for ping candidates
+
+**Type:** PATCH. Commit: e8a1e74 (backend). Migration 034 adds `ping_candidates.hostname`. No manual steps.
+
+### Fixes
+
+- Range hosts without SNMP (ping candidates, e.g. access points) never showed a DNS
+  name: the candidate list only borrowed the name of an endpoint with the same IP,
+  and range scans did not resolve the candidates. Range scans now reverse-resolve
+  every candidate concurrently and store the name; the list shows it and adopting a
+  candidate uses it as the device label.
+
 ## v4.5.0 -- Range scans probe again, "Run Scan + Ranges", scan history per type
 
 **Type:** MINOR. Commits: 12b2e21 (backend), 1f3b255 (frontend). Migration 033 adds `scan_runs.scan_type`. No manual steps.
