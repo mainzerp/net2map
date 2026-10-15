@@ -541,6 +541,8 @@ class PingCandidate(Base):
     # Last time the host was actually SNMP-probed (naive UTC). Range scans skip
     # the SNMP probe while this lies within the scan_probe_skip_hours window.
     snmp_checked_at = Column(DateTime, nullable=True)
+    # Reverse DNS (PTR) name, refreshed by range scans (migration 034)
+    hostname   = Column(String(255), nullable=True)
 
 
 class ScanRange(Base):

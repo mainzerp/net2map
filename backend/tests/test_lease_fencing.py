@@ -466,4 +466,4 @@ def test_alembic_head_is_032():
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory(str(BACKEND / "alembic"))
-    assert script.get_heads() == ["033"]
+    assert script.get_heads() == ["034"]

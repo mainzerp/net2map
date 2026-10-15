@@ -309,7 +309,10 @@ def test_range_scan_skip_window_and_bookkeeping(db, executor_mod, monkeypatch):
 
     monkeypatch.setattr(executor_mod, "snmp_probe_profile", precheck)
     monkeypatch.setattr(executor_mod, "scan_switch", fake_scan)
-    monkeypatch.setattr(executor_mod, "resolve_hosts", AsyncMock(return_value={}))
+    async def fake_resolve(ips, dns_servers=None, correlation_id="", concurrency=16):
+        return {ip: f"host-{ip.rsplit('.', 1)[1]}.lan" for ip in ips if ip != "10.7.0.4"}
+
+    monkeypatch.setattr(executor_mod, "resolve_hosts", fake_resolve)
     monkeypatch.setattr(executor_mod, "extract_model", lambda descr, vendor: "")
     monkeypatch.setattr(executor_mod, "auto_layout", lambda ips: {})
 
@@ -331,6 +334,10 @@ def test_range_scan_skip_window_and_bookkeeping(db, executor_mod, monkeypatch):
     # Probed hosts get a fresh snmp_checked_at (existing and new candidates).
     assert cands["10.7.0.3"].snmp_checked_at >= now - timedelta(seconds=5)
     assert cands["10.7.0.4"].snmp_checked_at >= now - timedelta(seconds=5)
+    # Candidates (also SNMP-skipped ones) get their reverse DNS name.
+    assert cands["10.7.0.2"].hostname == "host-2.lan"
+    assert cands["10.7.0.3"].hostname == "host-3.lan"
+    assert cands["10.7.0.4"].hostname is None
     rng = db.query(ScanRange).one()
     assert rng.last_scan_at is not None and rng.last_scan_at >= now - timedelta(seconds=5)
     # The history counts only the SNMP device, not the ping-only hosts.

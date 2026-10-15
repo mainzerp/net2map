@@ -935,6 +935,12 @@ async def _execute_scan_body(
         dns_servers = (await asyncio.to_thread(_read_dns_settings)).get("servers", [])
         if want_device_dns:
             hostname_by_ip = await resolve_hosts([*switch_data, *ping_only_targets], dns_servers, correlation_id=corr)
+        if scan_mode in RANGE_MODES and range_no_profile_ips:
+            # Range hosts without SNMP become ping candidates; resolve them too
+            # so access points, printers etc. show their DNS name.
+            hostname_by_ip.update(await resolve_hosts(
+                range_no_profile_ips, dns_servers, correlation_id=corr, concurrency=ENDPOINT_DNS_CONCURRENCY,
+            ))
         if want_endpoint_dns:
             arp_ips = _collect_arp_ips(switch_data)
             if arp_ips:
@@ -1188,6 +1194,7 @@ def _upsert_ping_candidates(
     probe_ips: List[str],
     ping_by_ip: Dict[str, tuple],
     snmp_probed_ips: Optional[set] = None,
+    hostname_by_ip: Optional[Dict[str, str]] = None,
 ) -> None:
     """Record discovery-range hosts that answer ping but not SNMP as ping candidates.
 
@@ -1196,9 +1203,11 @@ def _upsert_ping_candidates(
     a Credential are skipped. Existing candidates get last_seen / rtt_ms
     refreshed; their dismissed flag is kept. Hosts in ``snmp_probed_ips`` were
     actually SNMP-probed and get snmp_checked_at = now; hosts whose probe was
-    skipped keep their value. The caller commits (lease-guarded).
+    skipped keep their value. A resolved name from ``hostname_by_ip`` is
+    stored; a failed lookup keeps the old one. The caller commits (lease-guarded).
     """
     snmp_probed_ips = snmp_probed_ips or set()
+    hostname_by_ip = hostname_by_ip or {}
     rtt_by_ip: Dict[str, int] = {}
     for ip in probe_ips:
         ping_ok, ping_rtt = ping_by_ip.get(ip, (False, 0))
@@ -1224,6 +1233,8 @@ def _upsert_ping_candidates(
             cand.last_seen = now
         if ip in snmp_probed_ips:
             cand.snmp_checked_at = checked_at
+        if hostname_by_ip.get(ip):
+            cand.hostname = hostname_by_ip[ip]
 
 
 ENDPOINT_RETENTION_DEFAULT_DAYS = 30
@@ -1606,7 +1617,7 @@ def _finalize_scan_db(
             device.hostname = host
 
     if status != "cancelled" and not (cancel_event and cancel_event.is_set()):
-        _upsert_ping_candidates(db, range_no_profile_ips, ping_by_ip, snmp_probed_ips)
+        _upsert_ping_candidates(db, range_no_profile_ips, ping_by_ip, snmp_probed_ips, hostname_by_ip)
         if scan_mode in RANGE_MODES and scan_range_ids:
             mark_ranges_scanned(db, scan_range_ids)
 

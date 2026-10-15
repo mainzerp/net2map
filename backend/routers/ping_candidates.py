@@ -60,7 +60,8 @@ def list_ping_candidates(include_dismissed: bool = False, db: Session = Depends(
             rtt_ms=cand.rtt_ms,
             first_seen=cand.first_seen,
             last_seen=cand.last_seen,
-            hostname=(ep.hostname or None) if ep else None,
+            # The candidate's own PTR name (range scans), else the endpoint's
+            hostname=cand.hostname or ((ep.hostname or None) if ep else None),
             mac=(ep.mac or None) if ep else None,
             # Endpoints carry no OUI vendor column; reserved for a later lookup
             vendor=None,

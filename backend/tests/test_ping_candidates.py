@@ -253,6 +253,19 @@ def test_list_enriches_from_endpoints(client, auth_headers, db):
     assert items["10.70.1.2"]["mac"] is None
 
 
+def test_list_prefers_candidate_dns_name(client, auth_headers, db):
+    db.add_all([
+        PingCandidate(ip="10.70.3.1", hostname="ap-01.lan"),
+        PingCandidate(ip="10.70.3.2"),
+        Endpoint(mac="aa:bb:cc:00:03:01", ip="10.70.3.1", hostname="endpoint-name.lan"),
+        Endpoint(mac="aa:bb:cc:00:03:02", ip="10.70.3.2", hostname="from-endpoint.lan"),
+    ])
+    db.commit()
+    items = {c["ip"]: c for c in client.get("/api/v1/ping-candidates", headers=auth_headers).json()}
+    assert items["10.70.3.1"]["hostname"] == "ap-01.lan"
+    assert items["10.70.3.2"]["hostname"] == "from-endpoint.lan"
+
+
 def test_dismiss_and_restore(client, auth_headers, db):
     a, b = PingCandidate(ip="10.70.2.1"), PingCandidate(ip="10.70.2.2")
     db.add_all([a, b])
