@@ -88,6 +88,8 @@ import {
   hasStpData,
   stpDomainCount,
   stpProtocolCounts,
+  collectStpInstances,
+  CIST_INSTANCE,
   classifyAggregatedVlan,
   classifyAggregatedStp,
   classifyAggregatedLatency,
@@ -100,6 +102,8 @@ import {
   saveLayerPreference,
   loadLayerVlan,
   saveLayerVlan,
+  loadLayerStpInstance,
+  saveLayerStpInstance,
 } from "./layerPreference";
 import { prefersReducedMotion, useReducedMotion } from "./motion";
 import {
@@ -255,6 +259,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
   const [flowPref, setFlowPref] = useState<boolean | null>(loadFlowPreference);
   const [layerPref, setLayerPref] = useState<MapLayer>(loadLayerPreference);
   const [vlanPref, setVlanPref] = useState<number | null>(loadLayerVlan);
+  const [stpInstancePref, setStpInstancePref] = useState<number>(loadLayerStpInstance);
   const pulseSet = useMemo(() => new Set(scanPulseIps), [scanPulseIps]);
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -412,6 +417,9 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
   const selectedVlan =
     vlanPref != null && vlanOptions.some(o => o.id === vlanPref) ? vlanPref : defaultVlan(vlanOptions);
   const selectedVlanLabel = vlanOptions.find(o => o.id === selectedVlan)?.label ?? null;
+  const stpInstanceOptions = useMemo(() => collectStpInstances(nodes), [nodes]);
+  const selectedStpInstance = stpInstanceOptions.some(o => o.id === stpInstancePref) ? stpInstancePref : CIST_INSTANCE;
+  const selectedStpInstanceLabel = stpInstanceOptions.find(o => o.id === selectedStpInstance)?.label ?? null;
 
   // Per-edge layer encoding keyed by endpoint pair.
   const edgeOverlays = useMemo(() => {
@@ -444,16 +452,21 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
         });
         return;
       }
-      const stp = classifyAggregatedStp(l, nodesByIp, endpointByIp);
+      const stp = classifyAggregatedStp(l, nodesByIp, endpointByIp, selectedStpInstance);
       result.set(pairKey, {
         layer: "stp",
         emphasis: stp.state === "root" ? "emphasized" : stp.state === "blocked" ? "blocked" : "faded",
         blockedCount: stp.blockedCount,
         rootEnd: stp.towardRoot == null ? null : stp.towardRoot === l.to ? "target" : stp.towardRoot === l.from ? "source" : null,
+        boundary: stp.boundary,
       });
     });
     return result;
-  }, [layer, selectedVlan, aggregated, portalLinks, nodes, nodesByIp, managedRacks, switchClasses, latencyById]);
+  }, [layer, selectedVlan, selectedStpInstance, aggregated, portalLinks, nodes, nodesByIp, managedRacks, switchClasses, latencyById]);
+  const stpBoundaryCount = useMemo(
+    () => [...edgeOverlays.values()].filter(o => o.layer === "stp" && o.boundary).length,
+    [edgeOverlays],
+  );
 
   // Which endpoint pair contains the link selected in RackDetail.
   const activePairKey = useMemo(() => {
@@ -558,7 +571,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
             classColors,
             activePorts: counts.active,
             totalPorts: counts.total,
-            overlay: layer === "off" ? undefined : nodeOverlay(rack.devices, layer, selectedVlan),
+            overlay: layer === "off" ? undefined : nodeOverlay(rack.devices, layer, selectedVlan, selectedStpInstance),
           },
           style: { width: RACK_COLLAPSED_SIZE.width, height: RACK_COLLAPSED_SIZE.height, zIndex: 0 },
           selected: prevSelected.has(id),
@@ -577,7 +590,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
             device: node,
             classColor: node.class_id ? classMap[node.class_id]?.color || null : null,
             inRack: false,
-            overlay: layer === "off" ? undefined : nodeOverlay([node], layer, selectedVlan),
+            overlay: layer === "off" ? undefined : nodeOverlay([node], layer, selectedVlan, selectedStpInstance),
           },
           style: { width: DEVICE_NODE_SIZE.width, height: DEVICE_NODE_SIZE.height },
           selected: prevSelected.has(id),
@@ -647,7 +660,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
       ...aggregated.map(l => toEdge(l, false)),
       ...portalLinks.map(l => toEdge(l, true)),
     ]);
-  }, [graphModel, aggregated, portalLinks, portalViews, activeFloor, activePairKey, racks, outsideNodes, classMap, rackPairColorMap, nodesByIp, edgeOverlays, layer, selectedVlan, mapBgUrl, mapBgOpacity, mapBgScale, mapBgColor, setFlowNodes, setEdges]);
+  }, [graphModel, aggregated, portalLinks, portalViews, activeFloor, activePairKey, racks, outsideNodes, classMap, rackPairColorMap, nodesByIp, edgeOverlays, layer, selectedVlan, selectedStpInstance, mapBgUrl, mapBgOpacity, mapBgScale, mapBgColor, setFlowNodes, setEdges]);
 
   // Floor switch: restore the new floor's saved viewport, or fit the view
   // once the new floor has been rebuilt and measured.
@@ -882,6 +895,10 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
     setVlanPref(vlan);
     saveLayerVlan(vlan);
   }, []);
+  const handleStpInstanceChange = useCallback((instance: number) => {
+    setStpInstancePref(instance);
+    saveLayerStpInstance(instance);
+  }, []);
 
   const handleMoveEnd = useCallback((_e: unknown, viewport: Viewport) => {
     try {
@@ -923,6 +940,9 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
         vlanOptions={vlanOptions}
         selectedVlan={selectedVlan}
         onVlanChange={handleVlanChange}
+        stpInstanceOptions={stpInstanceOptions}
+        selectedStpInstance={selectedStpInstance}
+        onStpInstanceChange={handleStpInstanceChange}
         stats={stats}
         updatedAt={updatedAt}
       />
@@ -999,7 +1019,11 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
             onChange={onActiveFloorChange}
           />
         )}
-        <MapLayerLegend layer={layer} vlanId={selectedVlan} vlanLabel={selectedVlanLabel} stpDomains={stpDomains} stpProtocols={stpProtocols} />
+        <MapLayerLegend layer={layer} vlanId={selectedVlan} vlanLabel={selectedVlanLabel} stpDomains={stpDomains}
+          stpProtocols={stpProtocols}
+          stpInstanceLabel={selectedStpInstance === CIST_INSTANCE ? null : selectedStpInstanceLabel}
+          stpBoundaries={stpBoundaryCount}
+        />
         {scan?.active && <ScanOverlay progress={scan.progress} label={scan.label} />}
       </div>
     </div>

@@ -6,6 +6,7 @@ import type { MapLayer } from "./overlays";
 
 export const LAYER_STORAGE_KEY = "net2map-map-layer";
 export const LAYER_VLAN_STORAGE_KEY = "net2map-map-layer-vlan";
+export const LAYER_STP_INSTANCE_STORAGE_KEY = "net2map-map-layer-stp-instance";
 
 export function loadLayerPreference(): MapLayer {
   try {
@@ -35,5 +36,20 @@ export function loadLayerVlan(): number | null {
 export function saveLayerVlan(vlan: number): void {
   try {
     localStorage.setItem(LAYER_VLAN_STORAGE_KEY, String(vlan));
+  } catch { /* ignore */ }
+}
+
+// Stored spanning tree instance for the STP layer (0 = CIST, the default).
+export function loadLayerStpInstance(): number {
+  try {
+    const id = Number(localStorage.getItem(LAYER_STP_INSTANCE_STORAGE_KEY));
+    if (Number.isInteger(id) && id >= 0) return id;
+  } catch { /* ignore */ }
+  return 0;
+}
+
+export function saveLayerStpInstance(instance: number): void {
+  try {
+    localStorage.setItem(LAYER_STP_INSTANCE_STORAGE_KEY, String(instance));
   } catch { /* ignore */ }
 }

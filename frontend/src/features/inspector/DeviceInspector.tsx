@@ -57,6 +57,9 @@ function StpChip({ port }: { port: PortInfo }) {
     port.stp_role ? `Role: ${port.stp_role}` : null,
     port.stp_state ? `State: ${port.stp_state}` : null,
     port.stp_path_cost != null ? `Path cost: ${port.stp_path_cost}` : null,
+    ...Object.entries(port.stp_instances ?? {})
+      .sort((a, b) => Number(a[0]) - Number(b[0]))
+      .map(([id, v]) => `MSTI ${id}: ${v.role ?? v.state ?? "-"}`),
   ].filter(Boolean).join(", ");
   return (
     <Badge tone={stpTone(port)} className="px-1.5 py-0 text-[9px]" title={title}>
@@ -123,6 +126,7 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
   const showVlan = ports.some((p) => p.vlan != null || (p.tagged_vlans?.length ?? 0) > 0);
   const showStp = ports.some((p) => p.stp_state != null || p.stp_role != null);
   const stp = device.stp ?? null;
+  const stpInstances = device.stp_instances ?? [];
   const upCount = ports.filter((p) => p.oper_status === 1).length;
   const downCount = ports.length - upCount;
   const upPercent = ports.length > 0 ? Math.round((upCount / ports.length) * 100) : 0;
@@ -244,6 +248,34 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
               { label: "Root ID", value: stp.root_id, mono: true },
             ]}
           />
+          {stpInstances.length > 0 && (
+            <div className="mt-3 border border-line rounded-control overflow-x-auto">
+              <table className="w-full text-[11px]" data-testid="stp-instances">
+                <thead className="bg-panel-2">
+                  <tr className="text-[10px] uppercase tracking-wider text-muted">
+                    <th className="px-2 py-1.5 text-left font-semibold">MSTI</th>
+                    <th className="px-2 py-1.5 text-left font-semibold">VLANs</th>
+                    <th className="px-2 py-1.5 text-left font-semibold">Root</th>
+                    <th className="px-2 py-1.5 text-right font-semibold">Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stpInstances.map((inst) => (
+                    <tr key={inst.id} className="border-t border-line">
+                      <td className="px-2 py-1 font-mono text-primary">{inst.id}</td>
+                      <td className="px-2 py-1 font-mono text-muted truncate max-w-28" title={inst.vlans || undefined}>
+                        {inst.vlans || "-"}
+                      </td>
+                      <td className="px-2 py-1 font-mono text-muted" title={inst.root_id ?? undefined}>
+                        {inst.is_root ? "This bridge" : inst.root_port ?? "-"}
+                      </td>
+                      <td className="px-2 py-1 text-right font-mono text-muted">{inst.root_cost ?? "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </InspectorSection>
       )}
 

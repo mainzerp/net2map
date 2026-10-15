@@ -14,10 +14,13 @@ import {
   stpDomainCount,
   stpProtocolCounts,
   stpProtocolName,
+  stpBoundaryLabel,
+  stpPortView,
+  collectStpInstances,
   nodeOverlay,
 } from "../features/topology/overlays";
 import { vlanColor } from "../features/topology/vlanColor";
-import type { DeviceStpInfo, PortInfo, TopologyLink, TopologyNode } from "../types";
+import type { DeviceStpInfo, DeviceStpInstance, PortInfo, TopologyLink, TopologyNode } from "../types";
 
 function port(name: string, extra: Partial<PortInfo> = {}): PortInfo {
   return {
@@ -185,6 +188,7 @@ describe("STP classification", () => {
       blockedCount: 1,
       towardRoot: "1",
       blockedEnd: `outside:${access.id}`,
+      boundary: null,
     });
     const blockedOnly = { individual: [link(3, root.ip, "2", access.ip, "50")] };
     expect(classifyAggregatedStp(blockedOnly, nodes, endpoints).state).toBe("blocked");
@@ -218,5 +222,58 @@ describe("STP classification", () => {
     ]);
     expect(stpProtocolName("stp")).toBe("STP");
     expect(stpProtocolName("unknown")).toBe("Unknown");
+  });
+});
+
+describe("STP protocol boundaries and MSTP instances", () => {
+  const inst = (id: number, extra: Partial<DeviceStpInstance> = {}): DeviceStpInstance => ({
+    id, bridge_id: null, root_id: null, root_cost: null, root_port: null, vlans: "", is_root: false, ...extra,
+  });
+  const core = device(1, "10.1.0.1", [
+    port("1", { stp_role: "designated", stp_state: "forwarding", stp_instances: { "2": { state: "forwarding", role: "root" } } }),
+    port("2", { stp_role: "designated", stp_state: "forwarding", stp_instances: { "2": { state: "forwarding", role: "designated" } } }),
+  ], { stp: stp({ protocol: "mstp", is_root: true }), stp_instances: [inst(2, { vlans: "10-20" })] });
+  const dist = device(2, "10.1.0.2", [
+    port("49", { stp_role: "root", stp_state: "forwarding", stp_instances: { "2": { state: "forwarding", role: "designated" } } }),
+    port("50", { stp_role: "blocked", stp_state: "blocking", stp_instances: { "2": { state: "forwarding", role: "designated" } } }),
+  ], { stp: stp({ protocol: "mstp" }), stp_instances: [inst(2, { is_root: true })] });
+  const edge = device(3, "10.1.0.3", [port("1", { stp_role: "root", stp_state: "forwarding" })], { stp: stp() });
+  const nodes = byIp([core, dist, edge]);
+  const endpoints = { [core.ip]: "a", [dist.ip]: "b", [edge.ip]: "c" };
+
+  it("classifies links per instance: the CIST and an MSTI can disagree", () => {
+    const l1 = link(1, dist.ip, "49", core.ip, "1");
+    const l2 = link(2, dist.ip, "50", core.ip, "2");
+    expect(classifyLinkStp(l1, nodes).towardRootIp).toBe(core.ip);
+    expect(classifyLinkStp(l2, nodes).state).toBe("blocked");
+    // MSTI 2: the root lies at dist (core port 1 is the root port), nothing blocked.
+    expect(classifyLinkStp(l1, nodes, 2)).toMatchObject({ state: "root", towardRootIp: dist.ip });
+    expect(classifyLinkStp(l2, nodes, 2).state).toBe("forwarding");
+    // An end without data for the instance does not count; no data at all is unknown.
+    expect(classifyLinkStp(link(3, edge.ip, "1", core.ip, "2"), nodes, 2).state).toBe("forwarding");
+    expect(classifyLinkStp(link(4, edge.ip, "1", "10.9.9.9", "x"), nodes, 2).state).toBe("unknown");
+  });
+
+  it("marks links between different known protocols as boundaries", () => {
+    expect(stpBoundaryLabel(core, edge)).toBe("MSTP|RSTP");
+    expect(stpBoundaryLabel(core, dist)).toBeNull();
+    expect(stpBoundaryLabel(core, device(9, "10.9.9.9", [], { stp: stp({ protocol: "unknown" }) }))).toBeNull();
+    expect(stpBoundaryLabel(core, undefined)).toBeNull();
+    const agg = { individual: [link(5, dist.ip, "49", core.ip, "1"), link(6, edge.ip, "1", core.ip, "2")] };
+    expect(classifyAggregatedStp(agg, nodes, endpoints).boundary).toBe("MSTP|RSTP");
+    expect(classifyAggregatedStp({ individual: [link(1, dist.ip, "49", core.ip, "1")] }, nodes, endpoints).boundary).toBeNull();
+  });
+
+  it("collects instance options and marks the MSTI root node", () => {
+    expect(collectStpInstances([core, dist, edge])).toEqual([
+      { id: 0, label: "CIST (instance 0)", deviceCount: 3 },
+      { id: 2, label: "MSTI 2 · VLAN 10-20", deviceCount: 2 },
+    ]);
+    expect(collectStpInstances([edge])).toEqual([]);
+    expect(nodeOverlay([dist], "stp", null, 2).isRoot).toBe(true);
+    expect(nodeOverlay([core], "stp", null, 2).isRoot).toBe(false);
+    expect(nodeOverlay([edge], "stp", null, 2).dim).toBe("strong");
+    expect(stpPortView(core.ports[0], 2)).toEqual({ stp_state: "forwarding", stp_role: "root" });
+    expect(stpPortView(edge.ports[0], 2)).toBeNull();
   });
 });

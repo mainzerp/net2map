@@ -52,6 +52,7 @@ export type TopoFlowNode = RackFlowNode | DeviceFlowNode | BackgroundFlowNode | 
 //  - untagged: VLAN carried untagged only ("U" marker)
 //  - blocked: STP blocked member(s); blockedOnly draws the edge dashed
 //  - rootEnd: which end of the edge the STP root lies toward (arrow marker)
+//  - boundary: STP protocol boundary label ("MSTP|RSTP"), never faded
 //  - color: VLAN mode, the selected VLAN's color (vlanColor.ts)
 //  - latencyTone / latencyLabel: latency mode, tint from the worst endpoint
 //    status and the worst endpoint RTT shown in place of the speed label
@@ -62,6 +63,7 @@ export type EdgeOverlay = {
   untagged?: boolean;
   blockedCount?: number;
   rootEnd?: "source" | "target" | null;
+  boundary?: string | null;
   latencyTone?: LatencyEdgeTone;
   latencyLabel?: string | null;
 };

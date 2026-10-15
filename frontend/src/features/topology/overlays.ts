@@ -10,7 +10,10 @@
 //
 // STP: a link is on the root path when a resolved endpoint port has the root
 // role; it is blocked when an endpoint port has the blocked role or a
-// blocking/broken state. Blocked wins over root for a single link.
+// blocking/broken state. Blocked wins over root for a single link. The layer
+// shows one instance at a time: the CIST (BRIDGE-MIB port fields) or an MSTI
+// (per-port `stp_instances`). Links between devices running different known
+// protocols are marked as protocol boundaries in every instance.
 
 import type { DeviceStpInfo, LatencyDevice, LatencyStatus, PortInfo, TopologyLink, TopologyNode } from "../../types";
 import { formatMs, latencyEdgeTone, worstStatus, type LatencyEdgeTone } from "../latency/latency";
@@ -133,18 +136,36 @@ export interface StpLinkClass {
   blockedIp: string | null;
 }
 
-export function isPortBlocked(port: PortInfo | null): boolean {
+// Spanning tree instance shown by the STP layer: 0 is the CIST / default
+// instance (BRIDGE-MIB), any other id an MSTI (IEEE8021-MSTP-MIB).
+export const CIST_INSTANCE = 0;
+
+type StpPortFields = Pick<PortInfo, "stp_state" | "stp_role">;
+
+// A port's state and role in the given instance (null when not reported).
+export function stpPortView(port: PortInfo | null, instance: number = CIST_INSTANCE): StpPortFields | null {
+  if (!port) return null;
+  if (instance === CIST_INSTANCE) return port;
+  const entry = port.stp_instances?.[String(instance)];
+  return entry ? { stp_state: entry.state, stp_role: entry.role } : null;
+}
+
+export function isPortBlocked(port: StpPortFields | null): boolean {
   if (!port) return false;
   return port.stp_role === "blocked" || port.stp_state === "blocking" || port.stp_state === "broken";
 }
 
-function hasStpPortData(port: PortInfo | null): boolean {
+function hasStpPortData(port: StpPortFields | null): boolean {
   return !!port && (port.stp_role != null || port.stp_state != null);
 }
 
-export function classifyLinkStp(link: TopologyLink, nodesByIp: Map<string, TopologyNode>): StpLinkClass {
-  const local = resolvePort(nodesByIp.get(link.local_ip), link.local_port);
-  const remote = resolvePort(nodesByIp.get(link.remote_ip), link.remote_port);
+export function classifyLinkStp(
+  link: TopologyLink,
+  nodesByIp: Map<string, TopologyNode>,
+  instance: number = CIST_INSTANCE,
+): StpLinkClass {
+  const local = stpPortView(resolvePort(nodesByIp.get(link.local_ip), link.local_port), instance);
+  const remote = stpPortView(resolvePort(nodesByIp.get(link.remote_ip), link.remote_port), instance);
   if (isPortBlocked(local) || isPortBlocked(remote)) {
     return { state: "blocked", towardRootIp: null, blockedIp: isPortBlocked(local) ? link.local_ip : link.remote_ip };
   }
@@ -165,20 +186,34 @@ export interface StpEdgeClass {
   towardRoot: EndpointId | null;
   // Endpoint holding the blocked port, from the first blocked member.
   blockedEnd: EndpointId | null;
+  // Protocol boundary ("MSTP|RSTP") when a member link joins devices running
+  // different known spanning tree protocols, else null.
+  boundary: string | null;
+}
+
+// "MSTP|RSTP" when the two devices run different known protocols, else null.
+export function stpBoundaryLabel(a: TopologyNode | undefined, b: TopologyNode | undefined): string | null {
+  const pa = a?.stp?.protocol;
+  const pb = b?.stp?.protocol;
+  if (!pa || !pb || pa === "unknown" || pb === "unknown" || pa === pb) return null;
+  return STP_PROTOCOL_ORDER.filter(p => p === pa || p === pb).map(stpProtocolName).join("|");
 }
 
 export function classifyAggregatedStp(
   agg: Pick<AggregatedLink, "individual">,
   nodesByIp: Map<string, TopologyNode>,
   endpointByIp: Record<string, EndpointId>,
+  instance: number = CIST_INSTANCE,
 ): StpEdgeClass {
   let rootCount = 0;
   let blockedCount = 0;
   let forwarding = false;
   let towardRoot: EndpointId | null = null;
   let blockedEnd: EndpointId | null = null;
+  let boundary: string | null = null;
   agg.individual.forEach(link => {
-    const c = classifyLinkStp(link, nodesByIp);
+    boundary ??= stpBoundaryLabel(nodesByIp.get(link.local_ip), nodesByIp.get(link.remote_ip));
+    const c = classifyLinkStp(link, nodesByIp, instance);
     if (c.state === "root") {
       rootCount++;
       if (towardRoot == null && c.towardRootIp) towardRoot = endpointByIp[c.towardRootIp] ?? null;
@@ -190,7 +225,41 @@ export function classifyAggregatedStp(
     }
   });
   const state: StpLinkState = rootCount > 0 ? "root" : blockedCount > 0 ? "blocked" : forwarding ? "forwarding" : "unknown";
-  return { state, rootCount, blockedCount, towardRoot, blockedEnd };
+  return { state, rootCount, blockedCount, towardRoot, blockedEnd, boundary };
+}
+
+// MSTI options --------------------------------------------------------------------
+
+export interface StpInstanceOption {
+  id: number;
+  label: string;
+  // Devices reporting this instance.
+  deviceCount: number;
+}
+
+// Instance options for the STP layer: the CIST plus every MSTI any device
+// reports, labeled with its VLANs ("MSTI 1 · VLAN 10-20"). Empty when no
+// device reports MSTIs, so the picker stays hidden.
+export function collectStpInstances(nodes: TopologyNode[]): StpInstanceOption[] {
+  const byId = new Map<number, { vlans: string; count: number }>();
+  nodes.forEach(n => {
+    (n.stp_instances || []).forEach(inst => {
+      const cur = byId.get(inst.id) ?? { vlans: "", count: 0 };
+      byId.set(inst.id, { vlans: cur.vlans || inst.vlans || "", count: cur.count + 1 });
+    });
+  });
+  if (byId.size === 0) return [];
+  const cistCount = nodes.filter(n => n.stp != null).length;
+  return [
+    { id: CIST_INSTANCE, label: "CIST (instance 0)", deviceCount: cistCount },
+    ...[...byId.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([id, v]) => ({ id, label: v.vlans ? `MSTI ${id} · VLAN ${v.vlans}` : `MSTI ${id}`, deviceCount: v.count })),
+  ];
+}
+
+function deviceInstance(device: TopologyNode, instance: number) {
+  return (device.stp_instances || []).find(i => i.id === instance);
 }
 
 // Distinct root bridge ids among devices with STP data (STP domains or
@@ -289,10 +358,25 @@ export interface NodeOverlay {
 export const NEUTRAL_NODE_OVERLAY: NodeOverlay = { dim: "none", vlanPorts: null, isRoot: false };
 
 // Overlay for a canvas node representing one device or a rack of devices.
-export function nodeOverlay(devices: TopologyNode[], layer: MapLayer, vlan: number | null): NodeOverlay {
+export function nodeOverlay(
+  devices: TopologyNode[],
+  layer: MapLayer,
+  vlan: number | null,
+  stpInstance: number = CIST_INSTANCE,
+): NodeOverlay {
   if (layer === "vlan" && vlan != null) {
     const count = devices.reduce((s, d) => s + deviceVlanPortCount(d, vlan), 0);
     return { dim: count > 0 ? "none" : "faded", vlanPorts: count, isRoot: false, color: vlanColor(vlan) };
+  }
+  if (layer === "stp" && stpInstance !== CIST_INSTANCE) {
+    const members = devices.filter(d => deviceInstance(d, stpInstance) != null);
+    if (members.length === 0) return { dim: "strong", vlanPorts: null, isRoot: false };
+    return {
+      dim: "none",
+      vlanPorts: null,
+      isRoot: members.some(d => deviceInstance(d, stpInstance)?.is_root),
+      stpProtocol: stpProtocolLabel(members),
+    };
   }
   if (layer === "stp") {
     const withStp = devices.filter(d => d.stp != null);

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, GitBranch, Layers, Tag, Timer, type LucideIcon } from "lucide-react";
 import { Button, Input } from "../../components/ui";
 import type { FilterState, RackInfo, SwitchClass, TopologyNode } from "../../types";
-import type { MapLayer, VlanOption } from "./overlays";
+import type { MapLayer, StpInstanceOption, VlanOption } from "./overlays";
 import { vlanColor } from "./vlanColor";
 
 // ── MapToolbar ───────────────────────────────────────────────────────────────
@@ -38,6 +38,10 @@ interface MapToolbarProps {
   vlanOptions?: VlanOption[];
   selectedVlan?: number | null;
   onVlanChange?: (vlan: number) => void;
+  // STP layer: spanning tree instance picker (CIST + MSTIs), hidden when empty.
+  stpInstanceOptions?: StpInstanceOption[];
+  selectedStpInstance?: number;
+  onStpInstanceChange?: (instance: number) => void;
   stats: { switches: number; fast: number; gig: number };
   updatedAt: number | null;
 }
@@ -78,6 +82,9 @@ export default function MapToolbar({
   vlanOptions = [],
   selectedVlan = null,
   onVlanChange,
+  stpInstanceOptions = [],
+  selectedStpInstance = 0,
+  onStpInstanceChange,
   stats,
   updatedAt,
 }: MapToolbarProps) {
@@ -319,6 +326,21 @@ export default function MapToolbar({
                   ))}
                 </select>
               </span>
+            )}
+            {layer === "stp" && stpInstanceOptions.length > 0 && (
+              <select
+                aria-label="STP instance"
+                title="Spanning tree instance (MSTP)"
+                value={selectedStpInstance}
+                onChange={e => onStpInstanceChange?.(Number(e.target.value))}
+                className="text-[10px] px-1.5 py-0.5 rounded border border-overlay-stp bg-panel text-primary max-w-48 cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
+              >
+                {stpInstanceOptions.map(o => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
             )}
           </div>
         )}

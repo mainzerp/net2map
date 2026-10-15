@@ -16,6 +16,10 @@ interface MapLayerLegendProps {
   stpDomains?: number;
   // Devices per spanning tree protocol (see stpProtocolCounts).
   stpProtocols?: StpProtocolCount[];
+  // Selected MSTI label; null while the CIST is shown.
+  stpInstanceLabel?: string | null;
+  // Number of edges joining devices with different STP protocols.
+  stpBoundaries?: number;
 }
 
 function Swatch({ color, dash, faded, arrow }: { color: string; dash?: string; faded?: boolean; arrow?: boolean }) {
@@ -52,6 +56,8 @@ export default function MapLayerLegend({
   vlanLabel,
   stpDomains = 0,
   stpProtocols = [],
+  stpInstanceLabel = null,
+  stpBoundaries = 0,
 }: MapLayerLegendProps) {
   if (layer === "off") return null;
   const mixedStp = stpProtocols.filter((p) => p.protocol !== "unknown").length > 1;
@@ -67,6 +73,11 @@ export default function MapLayerLegend({
       <div className="text-[10px] font-semibold uppercase tracking-wider text-primary mb-1.5 truncate">
         {layer === "vlan" ? `VLAN ${vlanLabel ?? ""}`.trim() : layer === "latency" ? "Latency" : "Spanning tree"}
       </div>
+      {layer === "stp" && stpInstanceLabel && (
+        <div className="-mt-1 mb-1.5 truncate text-overlay-stp font-semibold" data-testid="stp-instance-label">
+          {stpInstanceLabel}
+        </div>
+      )}
       {layer === "latency" ? (
         <ul className="flex flex-col gap-1">
           <Row icon={<Swatch color="var(--success)" />}>Both ends OK</Row>
@@ -114,6 +125,17 @@ export default function MapLayerLegend({
             </span>
           </Row>
           <Row icon={<Swatch color="var(--line-strong)" faded />}>Forwarding / no STP data</Row>
+          {stpBoundaries > 0 && (
+            <Row
+              icon={
+                <span className="rounded-full border border-warning px-1 font-mono font-semibold text-[8px] leading-[12px] text-warning">
+                  A|B
+                </span>
+              }
+            >
+              Protocol boundary ({stpBoundaries})
+            </Row>
+          )}
         </ul>
       )}
       {layer === "stp" && stpProtocols.length > 0 && (

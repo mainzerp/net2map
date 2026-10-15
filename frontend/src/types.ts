@@ -16,7 +16,26 @@ export interface PortInfo {
   stp_state?: StpPortState | null;
   stp_role?: StpPortRole | null;
   stp_path_cost?: number | null;
+  // MSTP bridges: MSTI id (string) -> state and role in that instance.
+  stp_instances?: Record<string, PortStpInstance> | null;
   [key: string]: unknown;
+}
+
+export interface PortStpInstance {
+  state: StpPortState | null;
+  role: StpPortRole | null;
+}
+
+// One multiple spanning tree instance (MSTI) of an MSTP bridge.
+export interface DeviceStpInstance {
+  id: number;
+  bridge_id: string | null;
+  root_id: string | null;
+  root_cost: number | null;
+  root_port: string | null;
+  // VLAN range string, e.g. "10-20,30".
+  vlans: string;
+  is_root: boolean;
 }
 
 export type StpPortState = "disabled" | "blocking" | "listening" | "learning" | "forwarding" | "broken";
@@ -66,6 +85,7 @@ export interface TopologyNode {
   rack_side?: RackSide;
   full_depth?: boolean;
   stp?: DeviceStpInfo | null;
+  stp_instances?: DeviceStpInstance[];
   // VLAN id (as string) -> VLAN name
   vlan_names?: Record<string, string>;
   // Device kind derived from the detected vendor scanner (default "switch").

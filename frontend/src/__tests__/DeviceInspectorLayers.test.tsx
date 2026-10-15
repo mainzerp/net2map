@@ -37,10 +37,13 @@ const LAYERED: TopologyData = {
       return {
         ...n,
         stp: { protocol: "rstp", bridge_id: "8000.aa", root_id: "8000.aa", root_cost: 0, root_port: null, is_root: true },
+        stp_instances: [
+          { id: 2, bridge_id: "2002.aa", root_id: "1002.bb", root_cost: 200, root_port: "1/1/2", vlans: "10-20", is_root: false },
+        ],
         ports: n.ports.map((p, i) =>
           i === 0
             ? { ...p, vlan: 20, tagged_vlans: [30, 40, 50], stp_role: "designated", stp_state: "forwarding", stp_path_cost: 2000 }
-            : { ...p, stp_role: "blocked", stp_state: "blocking" },
+            : { ...p, stp_role: "blocked", stp_state: "blocking", stp_instances: { "2": { state: "forwarding", role: "root" } } },
         ),
       };
     }
@@ -52,7 +55,8 @@ const LAYERED: TopologyData = {
 };
 
 function headers(): string[] {
-  const table = screen.getByRole("table");
+  // The ports table; the MSTI table (stp-instances) is not counted.
+  const table = screen.getAllByRole("table").find(t => t.dataset.testid !== "stp-instances") as HTMLElement;
   return within(table).getAllByRole("columnheader").map(h => h.textContent ?? "");
 }
 
@@ -80,6 +84,10 @@ describe("DeviceInspector logical layer data", () => {
     expect(screen.getByText("Protocol").nextElementSibling?.textContent).toBe("RSTP");
     expect(screen.getByTestId("stp-protocol").textContent).toBe("RSTP");
     expect(screen.getByText("Root bridge").nextElementSibling?.textContent).toBe("Yes");
+    const instances = screen.getByTestId("stp-instances");
+    expect(instances.textContent).toContain("10-20");
+    expect(instances.textContent).toContain("1/1/2");
+    expect(screen.getAllByText("blocked")[0].getAttribute("title")).toContain("MSTI 2: root");
   });
 
   it("hides the VLAN and STP columns and the summary without data", async () => {

@@ -83,7 +83,9 @@ function AggregatedEdge({ id, source, target, data, selected }: EdgeProps<Aggreg
   const overlay = data?.overlay;
   const emphasized = overlay?.emphasis === "emphasized";
   const blockedOnly = overlay?.emphasis === "blocked";
-  const faded = overlay?.emphasis === "faded" && !active;
+  const boundary = overlay?.layer === "stp" ? overlay.boundary ?? null : null;
+  // Protocol boundaries stay readable even when the link itself is not on a root path.
+  const faded = overlay?.emphasis === "faded" && !active && !boundary;
   const isVlan = overlay?.layer === "vlan";
   const latencyTone = overlay?.layer === "latency" ? overlay.latencyTone ?? null : null;
   const vlanStroke = overlay?.color?.stroke ?? "var(--overlay-vlan)";
@@ -107,14 +109,16 @@ function AggregatedEdge({ id, source, target, data, selected }: EdgeProps<Aggreg
   const untagged = emphasized && overlay?.layer === "vlan" && !!overlay.untagged;
   const blockedText = blockedOnly ? "blocked" : blockedCount > 0 ? `${blockedCount} blocked` : null;
   const labelText = latencyTone && overlay?.latencyLabel ? overlay.latencyLabel : data?.label;
-  const hasLabel = !!labelText || untagged || !!blockedText;
+  const hasLabel = !!labelText || untagged || !!blockedText || !!boundary;
   const labelTone = active
     ? "border-accent text-accent"
     : blockedText
       ? "border-danger text-primary"
-      : emphasized
-        ? `${latencyTone ? LATENCY_LABEL_BORDER[latencyTone] : isVlan ? "" : "border-overlay-stp"} text-primary`
-        : up ? "border-line text-primary" : "border-line text-muted";
+      : boundary
+        ? "border-warning text-primary"
+        : emphasized
+          ? `${latencyTone ? LATENCY_LABEL_BORDER[latencyTone] : isVlan ? "" : "border-overlay-stp"} text-primary`
+          : up ? "border-line text-primary" : "border-line text-muted";
   // Dynamic VLAN colors cannot be Tailwind classes, so the pill border is inline.
   const labelBorderColor = !active && !blockedText && emphasized && isVlan ? vlanStroke : undefined;
 
@@ -199,6 +203,15 @@ function AggregatedEdge({ id, source, target, data, selected }: EdgeProps<Aggreg
               <span className="inline-flex items-center gap-0.5 text-danger" data-testid="stp-blocked-marker">
                 <Ban size={9} strokeWidth={2} aria-hidden="true" />
                 {blockedText}
+              </span>
+            )}
+            {boundary && (
+              <span
+                className="text-warning"
+                title={`Spanning tree protocol boundary: ${boundary.replace("|", " / ")}`}
+                data-testid="stp-boundary-marker"
+              >
+                {boundary}
               </span>
             )}
             {labelText}

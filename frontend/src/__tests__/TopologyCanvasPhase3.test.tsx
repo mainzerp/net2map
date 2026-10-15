@@ -10,7 +10,11 @@ import { render, screen, waitFor, fireEvent, within } from "@testing-library/rea
 import TopologyCanvas from "../features/topology/TopologyCanvas";
 import useNet2MapStore from "../store";
 import { FLOW_STORAGE_KEY } from "../features/topology/flowContext";
-import { LAYER_STORAGE_KEY, LAYER_VLAN_STORAGE_KEY } from "../features/topology/layerPreference";
+import {
+  LAYER_STORAGE_KEY,
+  LAYER_STP_INSTANCE_STORAGE_KEY,
+  LAYER_VLAN_STORAGE_KEY,
+} from "../features/topology/layerPreference";
 import { vlanColor } from "../features/topology/vlanColor";
 import { stubMemoryStorage } from "./test-utils";
 import type { TopologyNode, RackInfo } from "../types";
@@ -276,6 +280,34 @@ describe("TopologyCanvas logical layers", () => {
     expect(screen.queryByTestId("map-layer-legend")).toBeNull();
     expect(screen.queryByTestId("stp-root-badge")).toBeNull();
     expect(screen.queryByTestId("stp-protocol-badge")).toBeNull();
+  });
+
+  it("marks protocol boundaries and switches the STP layer to an MSTI", async () => {
+    const [core, access] = layeredNodes;
+    const mstpNodes = [
+      {
+        ...core,
+        stp: { ...stpInfo, protocol: "mstp" as const, is_root: true },
+        stp_instances: [{ id: 3, bridge_id: null, root_id: null, root_cost: 0, root_port: null, vlans: "20", is_root: false }],
+        ports: core.ports.map((p) => ({ ...p, stp_instances: { "3": { state: "forwarding" as const, role: "root" as const } } })),
+      },
+      access,
+    ];
+    storage.set(LAYER_STORAGE_KEY, "stp");
+    render(<TopologyCanvas {...defaultProps} nodes={mstpNodes} links={layeredLinks} />);
+    expect((await screen.findByTestId("stp-boundary-marker")).textContent).toBe("MSTP|RSTP");
+    expect(screen.getByTestId("map-layer-legend").textContent).toContain("Protocol boundary (1)");
+
+    const picker = screen.getByRole("combobox", { name: "STP instance" }) as HTMLSelectElement;
+    expect(Array.from(picker.options).map((o) => o.textContent)).toEqual(["CIST (instance 0)", "MSTI 3 · VLAN 20"]);
+    expect(picker.value).toBe("0");
+    fireEvent.change(picker, { target: { value: "3" } });
+    expect(storage.get(LAYER_STP_INSTANCE_STORAGE_KEY)).toBe("3");
+    expect(screen.getByTestId("stp-instance-label").textContent).toBe("MSTI 3 · VLAN 20");
+    // MSTI 3 has no blocked port, unlike the CIST.
+    await waitFor(() => expect(screen.queryByTestId("stp-blocked-marker")).toBeNull());
+    // The access switch does not take part in MSTI 3: no root badge anywhere.
+    expect(screen.queryByTestId("stp-root-badge")).toBeNull();
   });
 
   it("restores a stored layer and VLAN on mount", () => {
