@@ -1,5 +1,31 @@
 # Version History
 
+## v4.5.0 -- Range scans probe again, "Run Scan + Ranges", scan history per type
+
+**Type:** MINOR. Commits: 12b2e21 (backend), 1f3b255 (frontend). Migration 033 adds `scan_runs.scan_type`. No manual steps.
+
+### Features
+
+- "Run Scan + Ranges" next to "Run Scan" (Settings > Scan): first probes every enabled
+  discovery range, then runs the full scan, so new devices are scanned completely in
+  one job. API: `POST /scan/jobs?include_ranges=true` (scan type `full_ranges`); the
+  job result reports `ranges_scanned` / `ranges_found`. "Run Scan" itself is unchanged
+  and does not probe the ranges; its description now says so.
+
+### Fixes
+
+- Range scans found nothing new: the SNMP re-probe skip window (`probe_skip_hours`)
+  also applied to "Scan all ranges", "Scan now" and the dry run, so every host that
+  once answered ping but not SNMP was skipped for 6 hours and a manual scan of a /24
+  finished in a few seconds without any SNMP request. The window now applies only to
+  scheduled re-scans; manual scans and never-scanned ranges probe every host.
+- The range SNMP pre-check used a fixed 1 s timeout; it now uses the configured SNMP
+  timeout (still a single GET without retries), so slow agents are not written off.
+- Scan history: each run is diffed against the previous run of the same scan type.
+  Before, a range scan between two device scans listed every device as removed and
+  then as new again. Range runs count only hosts that answered SNMP (ping-only hosts
+  are ping candidates); the history shows the scan type.
+
 ## v4.4.0 -- Endpoint IPs from ARP fixed, DNS lookup test
 
 **Type:** MINOR. Commits: f4d5a27 (backend), f4f7a3a (frontend). No migration.

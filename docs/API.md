@@ -506,7 +506,7 @@ available, otherwise in a backend thread.
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
 | POST | `/scan` | op+ | Deprecated (`deprecated=True`). Starts a full scan job and polls until done (max 600 s; `504 SCAN_TIMEOUT`, `409 SCAN_CONFLICT`). 2/min. | -> `ScanResult` |
-| POST | `/scan/jobs` | op+ | Start a background scan; returns immediately. 5/min. | -> `{job_id, status: "queued"\|"running"}` |
+| POST | `/scan/jobs` | op+ | Start a background full scan of all enabled credentials; returns immediately. `?include_ranges=true` starts a `full_ranges` job instead: first every enabled discovery range (`ranges_all`), then the full scan, under one scan lock; two scan runs are stored and the job result adds `ranges_scanned` / `ranges_found`. 5/min. | -> `{job_id, status: "queued"\|"running"}` |
 | POST | `/scan/dry-run/jobs` | op+ | Start a background dry-run of all enabled scan ranges (scan type `ranges_all`, no persistence of devices); job result contains a `preview` key. 3/min. | -> `{job_id, status}` |
 | GET | `/scan/jobs/{job_id}` | any | Job status. Terminal statuses: `finished`, `failed`, `cancelled`, `skipped`, `dry_run`. | -> `{id, status, started_at, finished_at, cancel_requested, result}` |
 | POST | `/scan/jobs/{job_id}/cancel` | op+ | Request cancellation of a `running`/`queued` job. | -> `{id, status, cancel_requested}` |
@@ -521,7 +521,7 @@ Scan history with diffs against the previous run.
 
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
-| GET | `/scan-runs?limit=20` | any | Latest runs, newest `created_at` first (runs without a timestamp, stored before migration 023, sort last; limit clamped 1..200) with `new_devices`, `removed_devices`, `new_links`, `removed_links` diffed against the predecessor, plus per-switch metrics. | `ScanRunOut[]` |
+| GET | `/scan-runs?limit=20` | any | Latest runs, newest `created_at` first (runs without a timestamp, stored before migration 023, sort last; limit clamped 1..200) with `scan_type` (`full`, `discovery`, `ports`, `links`, `macs`, `ranges`, `dry_run`; `null` for runs before migration 033) and `new_devices`, `removed_devices`, `new_links`, `removed_links` diffed against the previous run of the same `scan_type`, plus per-switch metrics. | `ScanRunOut[]` |
 | GET | `/scan-runs/{run_id}/dry-run-preview` | any | Stored dry-run preview for a run (`404 DRY_RUN_NOT_FOUND`). | JSON list (items shaped like `DryRunPreviewItem`) |
 
 ### topology (`routers/topology.py`)
@@ -580,10 +580,13 @@ Scan tuning, discovery ranges and DNS resolvers.
 Scan ranges are no longer probed by `full` or `discovery` scans. The scheduler checks
 at most every 60 s and starts a `ranges` scan when an enabled range is due
 (`last_scan_at` unset or older than its interval). Range probes run with their own
-concurrency (`probe_workers`): ping first, then a 1 s single-GET SNMP pre-check of the
-allowed profiles in parallel, then a discovery scan with the first answering profile.
-Hosts that answered ping but no SNMP are recorded as ping candidates
-(`snmp_checked_at`) and are not SNMP-probed again within `probe_skip_hours`.
+concurrency (`probe_workers`): ping first, then a single-GET SNMP pre-check (configured
+`snmp_timeout`, no retries) of the allowed profiles in parallel, then a discovery scan
+with the first answering profile. Hosts that answered ping but no SNMP are recorded as
+ping candidates (`snmp_checked_at`); scheduled re-scans of a range do not SNMP-probe
+them again within `probe_skip_hours`. "Scan all ranges" (`ranges_all`), the dry run and
+"Scan now" on one range (resets its `last_scan_at`) always probe every host. A range
+run's `found` and device snapshot count only hosts that answered SNMP.
 
 ### bulk (`routers/bulk.py`)
 

@@ -18,6 +18,15 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
+- Range scans probe again, "Run Scan + Ranges", scan history per type (released v4.5.0, migration 033) · priority: P1 · area: full-stack
+  Live stack: range scans skipped SNMP for all ping-only hosts (6 h window also on
+  manual scans), 1 s pre-check, history listed all devices removed after a range run.
+  New button "Run Scan + Ranges" (`full_ranges` job: ranges_all, then full).
+  Passed: ruff, backend pytest, alembic 033 on postgres:16, typecheck, vitest.
+  User to verify: after update, "Run Scan + Ranges" takes longer than a few seconds,
+  the result shows RANGES found/scanned, history has a `ranges` and a `full` entry
+  and no mass "removed devices"; "Scan now" on 192.168.210.0/24 probes via SNMP.
+
 - Endpoint IPs from ARP and DNS lookup test (released v4.4.0) · priority: P1 · area: full-stack
   Bug: ARP IpAddress values decoded as text -> every endpoint IP was empty, so no
   endpoint DNS either. IP now from the ARP row index. New Settings > DNS "Test reverse

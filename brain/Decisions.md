@@ -447,3 +447,21 @@
 - **DNS problems are diagnosed, not guessed**: `POST /dns-settings/test` shows the
   answer of the configured servers and of the container resolver. Docker's embedded
   resolver often cannot answer PTR for local IPs, so a local DNS server must be set.
+
+## Range probe skip window only for scheduled re-scans (2026-10-15)
+
+- **Manual range scans always SNMP-probe.** Found on the live stack: the 6 h skip
+  window also covered "Scan all", "Scan now" and the dry run, so a manual /24 scan
+  finished in 4 s without one SNMP request and never retried hosts whose first probe
+  failed. The window now applies only to scheduled `ranges` runs of ranges that were
+  scanned before (`last_scan_at` set); "Scan now" resets `last_scan_at` and forces.
+- **Pre-check uses the configured SNMP timeout** (single GET, no retries) instead of
+  1 s: probes run in parallel, so the longer timeout costs little, and slow agents are
+  not recorded as "no SNMP" for hours.
+- **Scan history diffs per scan type** (`scan_runs.scan_type`, migration 033): range
+  runs and device runs cover different hosts; diffing across them listed every device
+  as removed and new again. Range runs count only SNMP hosts as found.
+- **"Run Scan + Ranges" is one combined job** (`full_ranges`), not two client-side
+  jobs: ranges first (new SNMP hosts get credentials), then the full scan, under the
+  same scan lock, so no other scan slips in between and the full scan already covers
+  the new devices. "Run Scan" stays a plain full scan.
