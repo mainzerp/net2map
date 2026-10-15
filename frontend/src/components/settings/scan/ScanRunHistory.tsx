@@ -23,6 +23,9 @@ interface ScanResult {
   total_duration_ms?: number;
   max_workers?: number;
   switch_metrics?: SwitchMetric[];
+  /** Only set by "Run Scan + Ranges": counts of the range scan part. */
+  ranges_scanned?: number | null;
+  ranges_found?: number | null;
 }
 
 interface SwitchMetric {
@@ -75,11 +78,11 @@ function ScanRunHistory() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pollError, timedOut]);
 
-  const runScan = async () => {
+  const runScan = async (includeRanges = false) => {
     setScanning(true);
     setScanResult(null);
     try {
-      const jobId = await createJob.mutateAsync();
+      const jobId = await createJob.mutateAsync(includeRanges ? { includeRanges: true } : undefined);
       setActiveJobId(jobId);
       setJobStatus("queued");
     } catch (e) {
@@ -109,11 +112,16 @@ function ScanRunHistory() {
     <>
       <Card title={<SectionHeader>NETWORK SCAN</SectionHeader>}>
         <div className="text-muted text-[11px] leading-relaxed mb-3">
-          Discovers devices, ports, and LLDP neighbor links from enabled SNMP credentials.
+          Run Scan reads all enabled SNMP credentials: ports, LLDP links, MAC/ARP endpoints, VLAN and STP.
+          Run Scan + Ranges first probes every enabled discovery range (new devices are added), then runs the
+          full scan.
         </div>
-        <div className="flex items-center gap-3">
-          <Button variant="primary" onClick={runScan} disabled={scanning} className="px-6 py-2.5">
+        <div className="flex items-center gap-3 flex-wrap">
+          <Button variant="primary" onClick={() => runScan()} disabled={scanning} className="px-6 py-2.5">
             {scanning ? "Scanning..." : "Run Scan"}
+          </Button>
+          <Button variant="secondary" onClick={() => runScan(true)} disabled={scanning} className="px-4 py-2.5">
+            Run Scan + Ranges
           </Button>
           {scanning && activeJobId && (
             <Button variant="danger" onClick={cancelScan}>Cancel</Button>
@@ -139,6 +147,8 @@ function ScanRunHistory() {
             {statBlock("LINKS", scanResult.links ?? 0, "text-accent")}
             {statBlock("TOTAL TIME", fmtDuration(scanResult.total_duration_ms), "text-accent")}
             {statBlock("WORKERS", scanResult.max_workers ?? 1, "text-muted")}
+            {scanResult.ranges_scanned != null &&
+              statBlock("RANGES", `${scanResult.ranges_found ?? 0} / ${scanResult.ranges_scanned}`, "text-accent")}
           </div>
           {(scanResult.switch_metrics?.length ?? 0) > 0 && (
             <div className="mt-2.5 border-t border-line pt-2">
@@ -192,6 +202,9 @@ function ScanRunHistory() {
                 >
                   {h.status === "finished" ? "OK" : h.status === "cancelled" ? "CAN" : "ERR"}
                 </span>
+                {h.scan_type && (
+                  <span className="min-w-[56px] uppercase tracking-[1px] text-accent">{h.scan_type.replace("_", " ")}</span>
+                )}
                 <span className="text-muted">
                   {h.found} devices, {h.links} links
                   <span className="opacity-80"> - {fmtDuration(h.total_duration_ms)}</span>

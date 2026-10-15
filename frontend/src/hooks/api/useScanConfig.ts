@@ -30,6 +30,8 @@ export interface AppSetting {
 export interface ScanRunEntry {
   id: string;
   status: string;
+  /** full|discovery|ports|links|macs|ranges|dry_run; null for runs before v4.5.0. */
+  scan_type?: string | null;
   created_at?: string;
   found?: number;
   links?: number;
@@ -268,11 +270,18 @@ export function useScanJob<TResult>(
   };
 }
 
-/** POST /api/scan/jobs (full scan) or /api/scan/dry-run/jobs; resolves with the job id. */
-export function useCreateScanJob(options?: MutationHookOptions<string, { dryRun?: boolean } | void>) {
-  return useApiMutation<string, { dryRun?: boolean } | void>(
+type CreateScanJobVars = { dryRun?: boolean; includeRanges?: boolean } | void;
+
+/**
+ * POST /api/scan/jobs (full scan; `includeRanges` first scans all discovery
+ * ranges) or /api/scan/dry-run/jobs; resolves with the job id.
+ */
+export function useCreateScanJob(options?: MutationHookOptions<string, CreateScanJobVars>) {
+  return useApiMutation<string, CreateScanJobVars>(
     async (vars) => {
-      const path = vars && vars.dryRun ? "/api/scan/dry-run/jobs" : "/api/scan/jobs";
+      const path = vars && vars.dryRun
+        ? "/api/scan/dry-run/jobs"
+        : vars && vars.includeRanges ? "/api/scan/jobs?include_ranges=true" : "/api/scan/jobs";
       const job: { job_id?: string } = await api.post(path, {});
       if (!job?.job_id) throw new Error(`${vars && vars.dryRun ? "Dry run" : "Scan"} job could not be created`);
       return job.job_id;
