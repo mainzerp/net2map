@@ -24,6 +24,7 @@ from shared.auth import require_role
 from shared.errors import api_error
 from shared.rack_space import (
     RackSlot,
+    carry_rack_floors,
     collect_rack_slots,
     conflict_details,
     device_slot,
@@ -268,6 +269,9 @@ def bulk_update_device_meta(body: BulkDeviceMetaUpdate, request: Request, db: Se
         api_error(400, "NO_FIELDS", "No fields to update")
     if not body.clear_rack and {"rack_id", "rack_side", "full_depth"} & updates.keys():
         _validate_bulk_placement(db, body.device_ids, updates)
+    if body.clear_rack and "floor_id" not in updates:
+        # Unracked devices stay on their rack's floor.
+        carry_rack_floors(db, body.device_ids)
     count = db.query(Device).filter(Device.id.in_(body.device_ids)).update(updates, synchronize_session="fetch")
 
     db.commit()
@@ -341,6 +345,12 @@ def update_device_meta(
     if "model" in payload:
         device.model = payload["model"]
     if "rack_id" in payload:
+        if payload["rack_id"] is None and device.rack_id is not None and "floor_id" not in payload:
+            # Leaving the rack keeps the device on the rack's floor (an
+            # explicit floor_id in the same request wins).
+            old_rack = db.query(RackModel).filter(RackModel.id == device.rack_id).first()
+            if old_rack is not None and old_rack.floor_id is not None:
+                device.floor_id = old_rack.floor_id
         device.rack_id = payload["rack_id"]
         if payload["rack_id"] is None:
             # A device outside any rack has no elevation slot either.
@@ -348,7 +358,8 @@ def update_device_meta(
     if "class_id" in payload:
         device.class_id = payload["class_id"]
     if "floor_id" in payload:
-        # Explicit null clears the floor; rack changes never touch floor_id
+        # Explicit null clears the floor; it wins over the floor carried
+        # over from a rack the device leaves in the same request
         device.floor_id = payload["floor_id"]
     if "model_id" in payload:
         model_id = payload["model_id"]

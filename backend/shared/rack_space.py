@@ -131,3 +131,32 @@ def collect_rack_slots(
         items = db.query(RackItem).filter(RackItem.rack_id == rack_id).all()
         slots.extend(item_slot(i) for i in items if i.id not in excluded_items)
     return slots
+
+
+def carry_rack_floors(db, device_ids: Iterable[int]) -> None:
+    """Give racked devices their rack's floor before they leave the rack.
+
+    A racked device shows on its rack's floor; its own floor_id is ignored.
+    Without this, removing it from the rack (single or bulk unassign, rack
+    deletion) dropped it onto its stale own floor or "Unassigned". Devices
+    whose rack has no floor keep their floor_id. Call before clearing
+    rack_id; the caller commits.
+    """
+    from database import Device, Rack
+
+    ids = list(device_ids)
+    if not ids:
+        return
+    rows = (
+        db.query(Device.id, Rack.floor_id)
+        .join(Rack, Device.rack_id == Rack.id)
+        .filter(Device.id.in_(ids), Rack.floor_id.isnot(None))
+        .all()
+    )
+    by_floor: dict = {}
+    for device_id, floor_id in rows:
+        by_floor.setdefault(floor_id, []).append(device_id)
+    for floor_id, floor_device_ids in by_floor.items():
+        db.query(Device).filter(Device.id.in_(floor_device_ids)).update(
+            {Device.floor_id: floor_id}, synchronize_session="fetch",
+        )

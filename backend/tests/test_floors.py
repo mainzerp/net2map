@@ -331,6 +331,54 @@ def test_device_meta_floor_id_set_and_clear(client, db, auth_headers):
     assert r.status_code == 200 and r.json()["floor_id"] is None
 
 
+def test_leaving_a_rack_keeps_the_rack_floor(client, db, auth_headers):
+    b = _building(client, auth_headers)
+    f1 = _floor(client, auth_headers, b["id"], label="F1")
+    f2 = _floor(client, auth_headers, b["id"], label="F2")
+    rack = client.post(f"{V1}/racks", json={"label": "R2", "floor_id": f2["id"]}, headers=auth_headers).json()
+    dev = Device(ip="10.0.0.4", sys_name="sw4", floor_id=f1["id"])
+    db.add(dev)
+    db.commit()
+    url = f"{V1}/topology/devices/{dev.id}/meta"
+
+    client.patch(url, json={"rack_id": rack["id"]}, headers=auth_headers)
+    r = client.patch(url, json={"rack_id": None}, headers=auth_headers)
+    assert r.status_code == 200 and r.json()["floor_id"] == f2["id"]
+
+    # An explicit floor in the same request wins over the rack's floor.
+    client.patch(url, json={"rack_id": rack["id"]}, headers=auth_headers)
+    r = client.patch(url, json={"rack_id": None, "floor_id": f1["id"]}, headers=auth_headers)
+    assert r.json()["floor_id"] == f1["id"]
+    client.patch(url, json={"rack_id": rack["id"]}, headers=auth_headers)
+    r = client.patch(url, json={"rack_id": None, "floor_id": None}, headers=auth_headers)
+    assert r.json()["floor_id"] is None
+
+
+def test_bulk_unrack_and_rack_delete_keep_the_rack_floor(client, db, auth_headers):
+    b = _building(client, auth_headers)
+    f = _floor(client, auth_headers, b["id"])
+    on_floor = client.post(f"{V1}/racks", json={"label": "RA", "floor_id": f["id"]}, headers=auth_headers).json()
+    no_floor = client.post(f"{V1}/racks", json={"label": "RB"}, headers=auth_headers).json()
+    devs = [
+        Device(ip="10.0.2.1", rack_id=on_floor["id"]),
+        Device(ip="10.0.2.2", rack_id=no_floor["id"]),
+        Device(ip="10.0.2.3", rack_id=on_floor["id"]),
+    ]
+    db.add_all(devs)
+    db.commit()
+    ids = [d.id for d in devs]
+
+    r = client.patch(f"{V1}/topology/devices/bulk-meta", json={"device_ids": ids[:2], "clear_rack": True},
+                     headers=auth_headers)
+    assert r.status_code == 200
+    db.expire_all()
+    assert [(db.get(Device, i).rack_id, db.get(Device, i).floor_id) for i in ids[:2]] == [(None, f["id"]), (None, None)]
+
+    assert client.delete(f"{V1}/racks/{on_floor['id']}", headers=auth_headers).status_code == 204
+    db.expire_all()
+    assert (db.get(Device, ids[2]).rack_id, db.get(Device, ids[2]).floor_id) == (None, f["id"])
+
+
 def test_bulk_meta_floor_id_and_clear_floor(client, db, auth_headers):
     b = _building(client, auth_headers)
     f = _floor(client, auth_headers, b["id"])
