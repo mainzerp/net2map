@@ -7,8 +7,10 @@ from scanners.base import VendorScanner
 from scanners.cisco import CiscoScanner
 from scanners.fs_scanner import FSScanner
 from scanners.generic import GenericScanner
+from scanners.mikrotik import MikroTikScanner
 from scanners.opnsense import OPNsenseScanner
 from scanners.unifi import UniFiScanner
+from scanners.watchguard import WatchGuardScanner
 
 # ---------------------------------------------------------------------------
 # ArubaCX Scanner
@@ -155,6 +157,68 @@ class TestOPNsenseScanner:
 
 
 # ---------------------------------------------------------------------------
+# MikroTik Scanner
+# ---------------------------------------------------------------------------
+
+class TestMikroTikScanner:
+    scanner = MikroTikScanner()
+
+    def test_extract_model(self):
+        assert self.scanner.extract_model("RouterOS CRS326-24G-2S+") == "CRS326-24G-2S+"
+        assert self.scanner.extract_model("RouterOS RB4011iGS+") == "RB4011iGS+"
+        assert self.scanner.extract_model("RouterOS 7.12.1 (stable)") == ""
+        assert self.scanner.extract_model("Linux router") == ""
+
+    def test_extract_version(self):
+        assert self.scanner.extract_version("RouterOS 7.12.1 (stable)") == "7.12.1"
+        assert self.scanner.extract_version("RouterOS CRS326-24G-2S+") == ""
+
+    def test_firmware_oids_from_mikrotik_mib(self):
+        assert self.scanner.FIRMWARE_OIDS[0] == "1.3.6.1.4.1.14988.1.1.4.4.0"
+
+    def test_is_virtual_port(self):
+        for name in ("bridge", "vlan10", "pppoe-out1", "lo", "wireguard1", "bonding1", "eoip-tunnel1"):
+            assert self.scanner.is_virtual_port(name) is True, name
+        for name in ("ether1", "sfp-sfpplus1", "qsfp28-1-1", "combo1", "wlan1"):
+            assert self.scanner.is_virtual_port(name) is False, name
+
+    def test_hooks(self):
+        assert self.scanner.vendor_id == "mikrotik"
+        assert self.scanner.device_type() == "switch"
+        assert self.scanner.supports_stp() is True
+
+
+# ---------------------------------------------------------------------------
+# WatchGuard Scanner
+# ---------------------------------------------------------------------------
+
+class TestWatchGuardScanner:
+    scanner = WatchGuardScanner()
+
+    def test_extract_model(self):
+        assert self.scanner.extract_model("WatchGuard Firebox M370 Fireware v12.8.2") == "Firebox M370"
+        assert self.scanner.extract_model("T85-PoE Fireware v12.10") == "T85-PoE"
+        assert self.scanner.extract_model("WatchGuard XTM 330") == "XTM 330"
+        assert self.scanner.extract_model("Linux router") == ""
+
+    def test_extract_version(self):
+        assert self.scanner.extract_version("WatchGuard Fireware v12.10.3.B690003") == "12.10.3.B690003"
+        assert self.scanner.extract_version("Fireware OS Version 12.8.2") == "12.8.2"
+        assert self.scanner.extract_version("WatchGuard Firebox") == ""
+
+    def test_is_virtual_port(self):
+        for name in ("lo", "vlan10", "br0", "bvi0", "ppp0", "tun0", "sslvpn0"):
+            assert self.scanner.is_virtual_port(name) is True, name
+        for name in ("eth0", "eth7"):
+            assert self.scanner.is_virtual_port(name) is False, name
+
+    def test_hooks(self):
+        assert self.scanner.vendor_id == "watchguard"
+        assert self.scanner.device_type() == "firewall"
+        assert self.scanner.supports_stp() is False
+
+
+# ---------------------------------------------------------------------------
 # Generic Scanner
 # ---------------------------------------------------------------------------
 
@@ -236,6 +300,8 @@ class TestCiscoScanner:
     (OPNsenseScanner, "dot1d"),
     (CiscoScanner, "dot1d"),
     (GenericScanner, "dot1d"),
+    (MikroTikScanner, "dot1d"),
+    (WatchGuardScanner, "dot1d"),
 ])
 def test_fdb_strategy(scanner_cls, expected):
     assert scanner_cls().fdb_strategy() == expected
@@ -245,9 +311,12 @@ def test_fdb_strategy(scanner_cls, expected):
 # Registry & edge cases
 # ---------------------------------------------------------------------------
 
-EXPECTED_VENDOR_IDS = {"aruba_cx", "fs", "unifi", "opnsense", "cisco", "generic"}
+EXPECTED_VENDOR_IDS = {"aruba_cx", "fs", "unifi", "opnsense", "cisco", "generic", "mikrotik", "watchguard"}
 
-ALL_SCANNERS = [ArubaCXScanner, FSScanner, UniFiScanner, OPNsenseScanner, CiscoScanner, GenericScanner]
+ALL_SCANNERS = [
+    ArubaCXScanner, FSScanner, UniFiScanner, OPNsenseScanner, CiscoScanner, GenericScanner,
+    MikroTikScanner, WatchGuardScanner,
+]
 
 
 def test_vendor_registry_all_registered():

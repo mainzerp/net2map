@@ -20,6 +20,9 @@ class VendorScanner(ABC):
     MODEL_STRIP: bool = False
     # Version regex for extract_version (group 1); None uses _VERSION_PATTERNS.
     VERSION_PATTERN: re.Pattern | None = None
+    # Vendor MIB scalars carrying the software version, read in order when
+    # ENTITY-MIB reports none; sysDescr parsing is the last fallback.
+    FIRMWARE_OIDS: tuple[str, ...] = ()
     # Lowercase markers of virtual interfaces for is_virtual_port.
     # VIRTUAL_PORT_MATCH is "contains" (marker anywhere in ifDescr) or
     # "prefix" (ifDescr starts with the marker).

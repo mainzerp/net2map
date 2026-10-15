@@ -71,6 +71,8 @@ class TestDetectVendorOidBoundaries:
             "eaton": "1.3.6.1.4.1.534.1",
             "hpe_ups": "1.3.6.1.4.1.232.165.3",
             "hpe_ilo": "1.3.6.1.4.1.232.9.4.11",
+            "mikrotik": "1.3.6.1.4.1.14988.1",
+            "watchguard": "1.3.6.1.4.1.3097.1.5.70",
         }
         assert set(representative) == set(VENDOR_OIDS.values())
         for vendor, oid in representative.items():
@@ -165,6 +167,15 @@ class TestDetectVendorKeywords:
 
     def test_cisco_keyword(self):
         assert detect_vendor("Cisco IOS Software, C2960X Software", "") == "cisco"
+
+    def test_mikrotik_keyword_and_oid(self):
+        assert detect_vendor("RouterOS CRS326-24G-2S+", "") == "mikrotik"
+        assert detect_vendor("", "1.3.6.1.4.1.14988.1") == "mikrotik"
+
+    def test_watchguard_keyword_and_oid(self):
+        assert detect_vendor("WatchGuard Fireware v12.10.3", "") == "watchguard"
+        assert detect_vendor("", "1.3.6.1.4.1.3097.1.5.70") == "watchguard"
+        assert detect_vendor("", "1.3.6.1.4.1.30970.1") == "generic"
 
     def test_unknown_is_generic(self):
         assert detect_vendor("Mysterious black box", "") == "generic"

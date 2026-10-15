@@ -224,6 +224,8 @@ def test_collect_server_health():
     ("generic", "switch", True, True),
     ("cisco", "switch", True, True),
     ("opnsense", "firewall", True, False),
+    ("watchguard", "firewall", True, False),
+    ("mikrotik", "switch", True, True),
     ("eaton", "ups", False, False),
     ("hpe_ups", "ups", False, False),
     ("hpe_ilo", "server", False, False),

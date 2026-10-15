@@ -367,6 +367,29 @@ def test_scan_discovery_skips_stp(scanner, monkeypatch):
     assert calls["get_values"] == 0 and sw.stp is None
 
 
+def test_scan_mikrotik_reads_firmware_from_vendor_mib(scanner, monkeypatch):
+    _install_fakes(scanner, monkeypatch, sys_descr="RouterOS CRS326-24G-2S+", sys_oid="1.3.6.1.4.1.14988.1")
+    lic_version = "1.3.6.1.4.1.14988.1.1.4.4.0"
+
+    async def fake_get(ip, port, auth, *oids, **kw):
+        if lic_version in oids:
+            return {lic_version: " 7.12.1 "}
+        return {scanner.OID_SYS_NAME: "crs", scanner.OID_SYS_DESCR: "RouterOS CRS326-24G-2S+",
+                scanner.OID_SYS_OBJECT_ID: "1.3.6.1.4.1.14988.1"}
+
+    monkeypatch.setattr(scanner, "snmp_get", fake_get)
+    sw = asyncio.run(scanner.scan_switch("10.0.0.1", scan_type="discovery"))
+    assert (sw.vendor, sw.device_type, sw.firmware) == ("mikrotik", "switch", "7.12.1")
+
+
+def test_scan_watchguard_is_firewall_without_stp(scanner, monkeypatch):
+    calls = _install_fakes(scanner, monkeypatch, sys_descr="WatchGuard Fireware v12.10.3",
+                           sys_oid="1.3.6.1.4.1.3097.1.5", stp_scalars={scanner.OID_DOT1D_STP_ROOT_COST: 0})
+    sw = asyncio.run(scanner.scan_switch("10.0.0.1", scan_type="links"))
+    assert (sw.vendor, sw.device_type, sw.firmware) == ("watchguard", "firewall", "12.10.3")
+    assert calls["get_values"] == 0 and sw.stp is None
+
+
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------

@@ -22,6 +22,8 @@ VENDOR_OIDS: Dict[str, str] = {
     "1.3.6.1.4.1.52642": "fs",        # FS.COM (FSOS)
     "1.3.6.1.4.1.41112": "unifi",     # Ubiquiti / UniFi
     "1.3.6.1.4.1.9":     "cisco",     # Cisco Systems
+    "1.3.6.1.4.1.14988": "mikrotik",  # MikroTik (RouterOS, SwOS)
+    "1.3.6.1.4.1.3097":  "watchguard",  # WatchGuard Technologies (Firebox)
     "1.3.6.1.4.1.534":   "eaton",     # Eaton / Powerware (XUPS-MIB)
     "1.3.6.1.4.1.705":   "eaton",     # MGE UPS Systems (Eaton network cards)
     "1.3.6.1.4.1.232.165": "hpe_ups", # HPE UPS Network Module (CPQPOWER-MIB)
@@ -35,6 +37,8 @@ VENDOR_KEYWORDS: Dict[str, List[str]] = {
     "aruba_cx": [r"arubaos-cx", r"aruba[ \-]?cx\b", r"\barubacx\b"],
     "fs":       [r"\bfsos\b", r"\bfs\s+s\d", r"\bfs\.com\b", r"\bfss\b"],
     "unifi":    [r"\bunifi\b", r"\bubiquiti\b", r"\busw\b", r"\bu7\b", r"\budm\b", r"\buxg\b"],
+    "mikrotik": [r"\bmikrotik\b", r"\brouteros\b", r"\bswos\b"],
+    "watchguard": [r"\bwatchguard\b", r"\bfireware\b", r"\bfirebox\b"],
     "opnsense": [r"\bopnsense\b", r"\bfreebsd\b"],
     "cisco":    [r"\bcisco\b", r"\bios[- ]xe\b", r"\bcatalyst\b"],
     "eaton":    [r"\beaton\b"],

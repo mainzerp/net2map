@@ -72,6 +72,8 @@ class Vendor(str, Enum):
     UNIFI = "unifi"
     OPNSENSE = "opnsense"
     CISCO = "cisco"
+    MIKROTIK = "mikrotik"
+    WATCHGUARD = "watchguard"
     EATON = "eaton"
     HPE_UPS = "hpe_ups"
     HPE_ILO = "hpe_ilo"
@@ -761,6 +763,31 @@ async def _read_engine_id(ip: str, snmp_port: int, auth, snmp_timeout: int,
     return engine_id_to_hex(raw.get(OID_SNMP_ENGINE_ID))
 
 
+async def _read_vendor_firmware(vendor: str, ip: str, snmp_port: int, auth, snmp_timeout: int,
+                                snmp_retries: int, engine: SnmpEngine) -> str:
+    """Read the vendor scanner's FIRMWARE_OIDS; first non-empty value wins.
+
+    Returns "" when the vendor defines none or the agent answers none (never
+    raises).
+    """
+    oids = get_scanner(vendor).FIRMWARE_OIDS
+    if not oids:
+        return ""
+    try:
+        values = await snmp_get(
+            ip, snmp_port, auth, *oids,
+            timeout=snmp_timeout, retries=snmp_retries, engine=engine,
+        )
+    except Exception as exc:
+        log.debug("Vendor firmware read failed for %s: %s", ip, exc)
+        return ""
+    for oid in oids:
+        value = (values.get(oid) or "").strip()
+        if value:
+            return value
+    return ""
+
+
 # --- Device type / health -----------------------------------------------------
 
 async def _probe_generic_ups(ip: str, snmp_port: int, auth, snmp_timeout: int,
@@ -1059,7 +1086,10 @@ async def _scan_switch_inner(
     ):
         sw.device_type = "ups"
 
-    # Fall back to parsing sysDescr when ENTITY-MIB is not implemented
+    # Fall back to vendor MIB scalars, then to parsing sysDescr, when ENTITY-MIB
+    # is not implemented
+    if not sw.firmware:
+        sw.firmware = await _read_vendor_firmware(sw.vendor, ip, snmp_port, auth, snmp_timeout, snmp_retries, engine)
     if not sw.firmware:
         sw.firmware = extract_version(sw.sys_descr, sw.vendor)
 
