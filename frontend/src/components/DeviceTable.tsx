@@ -44,9 +44,11 @@ interface FormState {
   model_id: number | null;
   /** Own floor; only used while the device is outside a rack. */
   floor_id: number | null;
+  /** Manual display name; "" falls back to the label. */
+  display_name: string;
 }
 
-const EMPTY_FORM: FormState = { rack_id: null, class_id: null, model_id: null, floor_id: null };
+const EMPTY_FORM: FormState = { rack_id: null, class_id: null, model_id: null, floor_id: null, display_name: "" };
 
 // Map the dashboard deep-link alias to the stored ping_status value.
 function normalizeStatusParam(raw: string): string {
@@ -165,6 +167,7 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
       class_id: dev.class_id ?? null,
       model_id: dev.model_id ?? null,
       floor_id: dev.floor_id ?? null,
+      display_name: dev.display_name ?? "",
     };
     setForm(snapshot);
     setInitialForm(snapshot);
@@ -177,9 +180,10 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
     setErr("");
     // Send only changed fields: the backend treats an explicit null as
     // "unassign", so echoing a stale snapshot would clear assignments.
-    const changes: Partial<FormState> = {};
-    (Object.keys(form) as (keyof FormState)[]).forEach((key) => {
-      if (form[key] !== initialForm[key]) changes[key] = form[key];
+    const next: FormState = { ...form, display_name: form.display_name.trim() };
+    const changes: Partial<Record<keyof FormState, FormState[keyof FormState]>> = {};
+    (Object.keys(next) as (keyof FormState)[]).forEach((key) => {
+      if (next[key] !== initialForm[key]) changes[key] = next[key];
     });
     if (Object.keys(changes).length === 0) {
       resetForm();
@@ -195,7 +199,10 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
 
   const searchText = (dev: DeviceRow) =>
     [
+      dev.display_name || "",
+      dev.label || "",
       dev.sys_name || "",
+      dev.hostname || "",
       dev.ip || "",
       dev.mac || "",
       dev.rack_id && rackMap[dev.rack_id] ? rackMap[dev.rack_id].label : "",
@@ -493,9 +500,20 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
       <Modal open={editState.open} onClose={resetForm} title="Edit device" width={420}>
         <form onSubmit={submitEdit} className="flex flex-col gap-3">
           <div className="px-3 py-2 bg-panel-2 rounded-card border border-line">
-            <div className="text-xs font-semibold text-primary">{editDevice ? editDevice.sys_name || editDevice.ip : ""}</div>
+            <div className="text-xs font-semibold text-primary">{editDevice ? deviceDisplayName(editDevice) : ""}</div>
             <div className="text-[10px] text-muted">{editDevice?.ip || ""}</div>
           </div>
+          <label className="block text-[11px] text-muted select-none">
+            Display name
+            <Input
+              className="mt-1"
+              value={form.display_name}
+              maxLength={120}
+              onChange={(e) => setForm((p) => ({ ...p, display_name: e.target.value }))}
+              placeholder={editDevice?.label || "Shown instead of the label"}
+            />
+            <span className="block mt-1 text-[10px]">Empty: the label is shown ({editDevice?.label || "none set"}).</span>
+          </label>
           <label className="block text-[11px] text-muted select-none">
             Rack
             <Select

@@ -3,7 +3,17 @@ import type { TopologyNode } from "../types";
 
 export type SearchableDevice = Pick<TopologyNode, "id" | "ip" | "sys_name" | "vendor" | "model"> & {
   label?: string | null;
+  display_name?: string | null;
   hostname?: string | null;
+};
+
+/** Fields deviceDisplayName reads; only ip is required. */
+export type NamedDevice = {
+  ip: string;
+  sys_name?: string | null;
+  hostname?: string | null;
+  label?: string | null;
+  display_name?: string | null;
 };
 
 export interface DeviceFilterResult<T> {
@@ -15,11 +25,15 @@ export interface DeviceFilterResult<T> {
 
 export const DEVICE_PICKER_LIMIT = 50;
 
-// sysName, then the reverse DNS name, then the IP. A sysName that only repeats
-// the IP (ping-only devices without a label) yields to the DNS name.
-export function deviceDisplayName(d: Pick<SearchableDevice, "ip" | "sys_name" | "hostname">): string {
-  const sysName = d.sys_name && d.sys_name !== d.ip ? d.sys_name : "";
-  return sysName || d.hostname || d.ip;
+// Manual display name, then the label (credential label), then sysName, the
+// reverse DNS name and the IP. A label or sysName that only repeats the IP
+// (ping-only devices, range discoveries without a name) is skipped.
+export function deviceDisplayName(d: NamedDevice): string {
+  const notIp = (v: string | null | undefined) => {
+    const text = (v ?? "").trim();
+    return text && text !== d.ip ? text : "";
+  };
+  return notIp(d.display_name) || notIp(d.label) || notIp(d.sys_name) || (d.hostname ?? "").trim() || d.ip;
 }
 
 function joinFields(fields: readonly (string | null | undefined)[]): string {
@@ -30,7 +44,7 @@ function joinFields(fields: readonly (string | null | undefined)[]): string {
 }
 
 function haystack(d: SearchableDevice): string {
-  return joinFields([d.sys_name, d.hostname, d.ip, d.vendor, d.model, d.label]);
+  return joinFields([d.display_name, d.sys_name, d.hostname, d.ip, d.vendor, d.model, d.label]);
 }
 
 /**

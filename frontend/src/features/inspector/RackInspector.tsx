@@ -1,3 +1,4 @@
+import { deviceDisplayName } from "../../utils/deviceSearch";
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
@@ -35,7 +36,7 @@ export default function RackInspector({ id, titleId }: { id: number; titleId: st
           const ua = a.rack_u_position ?? -1;
           const ub = b.rack_u_position ?? -1;
           if (ua !== ub) return ub - ua;
-          return (a.sys_name || a.ip).localeCompare(b.sys_name || b.ip);
+          return deviceDisplayName(a).localeCompare(deviceDisplayName(b));
         }),
     [data, id],
   );
@@ -104,7 +105,7 @@ export default function RackInspector({ id, titleId }: { id: number; titleId: st
                   className="w-full flex items-center gap-2 px-2 py-1.5 rounded-control text-left text-xs hover:bg-panel-2 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                 >
                   <StatusDot status={pingDotStatus(d.ping_status)} title={pingWord(d.ping_status)} />
-                  <span className="min-w-0 truncate text-primary font-medium">{d.sys_name || d.hostname || d.ip}</span>
+                  <span className="min-w-0 truncate text-primary font-medium">{deviceDisplayName(d)}</span>
                   <span className="font-mono text-[11px] text-muted truncate">{d.ip}</span>
                   {d.rack_u_position != null && (
                     <span className="ml-auto shrink-0 font-mono text-[10px] text-muted">U{d.rack_u_position}</span>

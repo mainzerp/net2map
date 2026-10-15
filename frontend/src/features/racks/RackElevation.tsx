@@ -13,6 +13,7 @@
 // Faceplate styling lives in the "Rack faceplates (phase 4)" block of
 // index.css; all colors come from theme tokens or theme/visual.ts.
 
+import { deviceDisplayName } from "../../utils/deviceSearch";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { GripVertical, Layers, X } from "lucide-react";
 import { speedColor } from "../../theme/visual";
@@ -482,7 +483,7 @@ function FullDepthToggle({
 }
 
 function deviceName(device: TopologyNode): string {
-  return device.sys_name || device.hostname || device.ip;
+  return deviceDisplayName(device);
 }
 
 // ── Remove-from-rack button ─────────────────────────────────────────────────
@@ -1471,7 +1472,7 @@ function TraySection({
               >
                 <StatusDot status={status} className="shrink-0" />
                 <VendorBadge vendor={d.vendor} />
-                <span className="text-primary truncate">{d.sys_name || d.hostname || d.ip}</span>
+                <span className="text-primary truncate">{deviceDisplayName(d)}</span>
                 <span className="text-muted text-[10px] ml-auto shrink-0">
                   {deviceUHeight(d)}U
                 </span>

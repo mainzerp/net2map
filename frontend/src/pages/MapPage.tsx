@@ -1,3 +1,4 @@
+import { deviceDisplayName } from "../utils/deviceSearch";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { extractErrorMessage } from "../api";
 import useNet2MapStore from "../store";
@@ -217,7 +218,7 @@ export default function MapPage() {
     const node = topology.nodes.find(n => n.id === selectedOutsideNode.id) || selectedOutsideNode;
     return {
       id: `outside:${node.id}`,
-      label: node.sys_name || node.ip,
+      label: deviceDisplayName(node),
       location: "Outside rack",
       devices: [node],
     };

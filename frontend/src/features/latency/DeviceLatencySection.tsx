@@ -1,3 +1,4 @@
+import { deviceDisplayName } from "../../utils/deviceSearch";
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, extractErrorMessage, getStoredUser } from "../../api";
@@ -97,7 +98,7 @@ export function DeviceLatencySection({ device }: { device: TopologyNode }) {
               height={36}
               tone={latencySparklineTone(status)}
               baseline={entry?.baseline_ms ?? null}
-              ariaLabel={`Round-trip time of ${device.sys_name || device.ip}, last ${range}`}
+              ariaLabel={`Round-trip time of ${deviceDisplayName(device)}, last ${range}`}
             />
           ) : (
             <div className="text-[11px] text-muted h-9 flex items-center">

@@ -1,3 +1,4 @@
+import { deviceDisplayName } from "../../utils/deviceSearch";
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { buildPortLinkMap, normPort } from "../../api";
@@ -415,7 +416,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
         <div className="min-w-0 pr-1.5">
           <div
             className="font-semibold flex items-center gap-1 min-w-0 text-primary"
-          ><VendorBadge vendor={a?.vendor} /><span className="truncate">{a?.sys_name || l.local_ip}</span></div>
+          ><VendorBadge vendor={a?.vendor} /><span className="truncate">{a ? deviceDisplayName(a) : l.local_ip}</span></div>
           <div className="text-muted text-[10px] mt-px">{l.local_port}</div>
         </div>
         <div className="flex flex-col items-center gap-0.5">
@@ -434,7 +435,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
         <div className="min-w-0 pl-1.5 text-right">
           <div
             className="font-semibold flex items-center justify-end gap-1 min-w-0 text-primary"
-          ><span className="truncate">{b?.sys_name || l.remote_ip}</span><VendorBadge vendor={b?.vendor} /></div>
+          ><span className="truncate">{b ? deviceDisplayName(b) : l.remote_ip}</span><VendorBadge vendor={b?.vendor} /></div>
           <div className="text-muted text-[10px] mt-px">{l.remote_port}</div>
         </div>
       </div>
@@ -610,7 +611,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
                     <div className="min-w-0 pr-1.5">
                       <div className="font-semibold flex items-center gap-1 min-w-0 text-primary">
                         <VendorBadge vendor={localDev?.vendor} />
-                        <span className="truncate">{localDev?.sys_name || l.local_ip}</span>
+                        <span className="truncate">{localDev ? deviceDisplayName(localDev) : l.local_ip}</span>
                       </div>
                       <div className="text-muted text-[10px] mt-px">{l.local_port}</div>
                     </div>
@@ -643,7 +644,7 @@ function RackDetail({ rack, allRacks, switchClasses, switchModels, topologyLinks
                 }} className="flex items-center gap-2 mb-1 cursor-pointer px-1.5 py-0.5 rounded transition-colors">
                   <div style={{ backgroundColor: c }} className="w-6 h-0.5 rounded-sm shrink-0"/>
                   <span className="text-muted text-[10px] flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
-                    {devByIp[l.local_ip]?.sys_name||l.local_ip} {l.local_port} {"<->"} {l.remote_port} {devByIp[l.remote_ip]?.sys_name||l.remote_ip}
+                    {devByIp[l.local_ip] ? deviceDisplayName(devByIp[l.local_ip]) : l.local_ip} {l.local_port} {"<->"} {l.remote_port} {devByIp[l.remote_ip] ? deviceDisplayName(devByIp[l.remote_ip]) : l.remote_ip}
                   </span>
                   <span style={{
                     backgroundColor: `${c}18`, border: `1px solid ${c}33`, color: c,

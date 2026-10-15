@@ -99,14 +99,14 @@ export function DeviceAssignment({ assigned, available, onAssign, onUnassign }: 
         <div className="flex flex-wrap gap-1 mb-2">
           {assigned.map((d) => (
             <span key={d.id} className="inline-flex items-center gap-1 rounded bg-panel-2 border border-line-strong px-1.5 py-0.5 text-[10px]">
-              <span className="text-accent">{d.sys_name || d.ip}</span>
+              <span className="text-accent">{deviceDisplayName(d)}</span>
               <span className="text-muted">{d.ip}</span>
               <button
                 type="button"
                 onClick={() => onUnassign(d.id)}
                 className="text-muted hover:text-danger cursor-pointer leading-none"
                 title="Unassign"
-                aria-label={`Unassign ${d.sys_name || d.ip}`}
+                aria-label={`Unassign ${deviceDisplayName(d)}`}
               >x</button>
             </span>
           ))}

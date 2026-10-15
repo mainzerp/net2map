@@ -2,7 +2,7 @@
 
 import type { InspectorKind, InspectorTarget } from "../../hooks/useInspector";
 import type { Endpoint, TopologyData } from "../../types";
-import { deviceDisplayName } from "../../utils/deviceSearch";
+import { deviceDisplayName, type NamedDevice } from "../../utils/deviceSearch";
 import type { PaletteIndex, SearchItem } from "./search";
 
 export type PaletteCommand =
@@ -83,8 +83,8 @@ function actionItems(): PaletteItem[] {
   ];
 }
 
-export function switchLabel(node: { sys_name?: string; hostname?: string; ip: string }): string {
-  return deviceDisplayName({ ip: node.ip, sys_name: node.sys_name ?? "", hostname: node.hostname });
+export function switchLabel(node: NamedDevice): string {
+  return deviceDisplayName(node);
 }
 
 export function endpointLabel(ep: Pick<Endpoint, "hostname" | "mac">): string {
@@ -117,6 +117,8 @@ export function buildPaletteIndex(
     detail: node.ip,
     hint: "Device",
     fields: [
+      { text: node.display_name },
+      { text: node.label },
       { text: node.hostname },
       { text: node.sys_name },
       { text: node.ip, type: "ip" },

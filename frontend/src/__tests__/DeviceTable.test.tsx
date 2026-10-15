@@ -248,6 +248,15 @@ describe("DeviceTable", () => {
       });
     });
 
+    it("saves a trimmed display name and shows it as the device name", async () => {
+      mockEditApi();
+      const { dialog } = await openEditModal();
+      fireEvent.change(within(dialog).getByLabelText(/Display name/), { target: { value: "  Core RZ-01 " } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(mockApiPatch).toHaveBeenCalledTimes(1));
+      expect(mockApiPatch.mock.calls[0][1]).toEqual({ display_name: "Core RZ-01" });
+    });
+
     it("skips the request when nothing changed", async () => {
       mockEditApi();
       const { dialog } = await openEditModal();

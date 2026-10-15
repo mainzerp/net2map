@@ -1,3 +1,4 @@
+import { deviceDisplayName } from "../../utils/deviceSearch";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, GitBranch, Layers, Tag, Timer, type LucideIcon } from "lucide-react";
 import { Button, Input } from "../../components/ui";
@@ -117,9 +118,7 @@ export default function MapToolbar({
     if (!q) return [];
     return devices
       .filter(d =>
-        (d.sys_name || "").toLowerCase().includes(q) ||
-        (d.ip || "").toLowerCase().includes(q) ||
-        (d.hostname || "").toLowerCase().includes(q),
+        [d.display_name, d.label, d.sys_name, d.ip, d.hostname].some(v => (v || "").toLowerCase().includes(q)),
       )
       .slice(0, 8);
   }, [devices, query]);
@@ -198,7 +197,7 @@ export default function MapToolbar({
                 onClick={() => selectDevice(d)}
                 className="w-full text-left px-2.5 py-1.5 text-[11px] hover:bg-panel-2 cursor-pointer flex items-center gap-2"
               >
-                <span className="text-primary font-semibold truncate">{d.sys_name || d.ip}</span>
+                <span className="text-primary font-semibold truncate">{deviceDisplayName(d)}</span>
                 <span className="text-muted font-mono text-[10px] ml-auto shrink-0">{d.ip}</span>
               </button>
             ))}

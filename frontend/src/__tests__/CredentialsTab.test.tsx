@@ -14,13 +14,14 @@ const mockApiGet = vi.fn();
 const mockApiPost = vi.fn();
 const mockApiPut = vi.fn();
 const mockApiDel = vi.fn();
+const mockApiPatch = vi.fn();
 
 vi.mock("../api", () => ({
   api: {
     get: (...args: unknown[]) => mockApiGet(...args),
     post: (...args: unknown[]) => mockApiPost(...args),
     put: (...args: unknown[]) => mockApiPut(...args),
-    patch: vi.fn(),
+    patch: (...args: unknown[]) => mockApiPatch(...args),
     del: (...args: unknown[]) => mockApiDel(...args),
     invalidate: vi.fn(),
   },
@@ -115,6 +116,34 @@ describe("CredentialsTab search", () => {
     await user.clear(search);
     await user.type(search, "nothing-matches");
     expect(await screen.findByText("No entries match your search")).toBeTruthy();
+  });
+
+  it("edits the device display name and shows it on the card", async () => {
+    const user = userEvent.setup();
+    mockApiPatch.mockResolvedValue({});
+    mockApiPut.mockResolvedValue({});
+    renderWithQuery(<CredentialsTabContent newEntryTrigger={0} />);
+    await screen.findByText("Core v3");
+    await user.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    const dialog = await screen.findByRole("dialog");
+    const field = within(dialog).getByLabelText(/Display name/) as HTMLInputElement;
+    expect(field.disabled).toBe(false);
+    await user.type(field, "Core RZ-01");
+    await user.click(within(dialog).getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(mockApiPatch).toHaveBeenCalledWith("/api/topology/devices/1/meta", { display_name: "Core RZ-01" }),
+    );
+    await waitFor(() => expect(mockApiPut).toHaveBeenCalled());
+  });
+
+  it("disables the display name for credentials without a discovered device", async () => {
+    const user = userEvent.setup();
+    renderWithQuery(<CredentialsTabContent newEntryTrigger={0} />);
+    await screen.findByText("Edge printer floor");
+    const cards = screen.getAllByRole("button", { name: "Edit" });
+    await user.click(cards[cards.length - 1]);
+    const dialog = await screen.findByRole("dialog");
+    expect((within(dialog).getByLabelText(/Display name/) as HTMLInputElement).disabled).toBe(true);
   });
 
   it("also filters unassigned devices and ping candidates", async () => {

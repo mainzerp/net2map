@@ -108,7 +108,9 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
           localPort: outgoing ? l.local_port : l.remote_port,
           remoteIp,
           remotePort: outgoing ? l.remote_port : l.local_port,
-          remoteName: node?.sys_name || node?.hostname || (outgoing ? l.remote_sys_name : l.local_sys_name) || remoteIp,
+          remoteName: node
+            ? deviceDisplayName(node)
+            : (outgoing ? l.remote_sys_name : l.local_sys_name) || remoteIp,
           remoteId: node?.id ?? null,
           speed: l.speed_label,
         };

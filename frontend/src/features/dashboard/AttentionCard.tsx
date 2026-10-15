@@ -1,3 +1,4 @@
+import { deviceDisplayName } from "../../utils/deviceSearch";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, ChevronRight, CircleCheck, CircleX, EyeOff, TriangleAlert, type LucideIcon } from "lucide-react";
 import { formatRelativeTime, formatTimestamp } from "../../utils/datetime";
@@ -155,11 +156,11 @@ export function AttentionCard({ nodes, lastRun = null, classes = [], className =
               tone="danger"
               icon={CircleX}
               chip="Offline"
-              title={d.sys_name || d.hostname || d.ip}
+              title={deviceDisplayName(d)}
               detail={d.ip}
               meta={`last seen ${formatTimestamp(d.last_seen as string | null)}`}
               opensInspector
-              ariaLabel={`Open details for ${d.sys_name || d.hostname || d.ip} (offline)`}
+              ariaLabel={`Open details for ${deviceDisplayName(d)} (offline)`}
               onClick={() => openInspector("device", d.id)}
             />
           ))}
@@ -167,7 +168,7 @@ export function AttentionCard({ nodes, lastRun = null, classes = [], className =
             const health = healthOf(d);
             if (!health) return null;
             const critical = health.status === "critical";
-            const name = d.sys_name || d.hostname || d.ip;
+            const name = deviceDisplayName(d);
             return (
               <IssueRow
                 key={`health-${d.id}`}

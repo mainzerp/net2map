@@ -7,6 +7,7 @@
 //  - racks store TOP-LEFT (new; rack positions were never persisted before).
 // Positions round-trip through PATCH /api/topology/{devices,racks}/<id>/position.
 
+import { deviceDisplayName } from "../../utils/deviceSearch";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
@@ -491,7 +492,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
       const targetLabel = portal.remote.startsWith("outside:")
         ? (() => {
             const n = nodesById.get(portal.remote.slice("outside:".length));
-            return n ? n.sys_name || n.ip : portal.remote;
+            return n ? deviceDisplayName(n) : portal.remote;
           })()
         : racksById.get(portal.remote)?.label ?? `Rack ${portal.remote}`;
       const floorLabel = floorDisplayLabel(buildings, portal.remoteFloor, activeBuildingId);

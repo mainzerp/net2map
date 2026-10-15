@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { extractErrorMessage, AUTH_PROTOCOLS, PRIV_PROTOCOLS, SEC_LEVELS } from "../../api";
-import { matchesQuery } from "../../utils/deviceSearch";
+import { deviceDisplayName, matchesQuery } from "../../utils/deviceSearch";
 import type { Credential, TopologyNode } from "../../types";
 import {
   useCredentials,
@@ -77,6 +77,9 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
   const [err, setErr] = useState<string>("");
   const [deleteTarget, setDeleteTarget] = useState<Credential | null>(null);
   const [togglingIgnoreId, setTogglingIgnoreId] = useState<number | null>(null);
+  // Display name lives on the discovered device, not on the credential.
+  const [displayName, setDisplayName] = useState("");
+  const [displayTarget, setDisplayTarget] = useState<{ id: number; initial: string } | null>(null);
   // Search over all three lists, kept in ?q= like the other list pages.
   const [searchParams, setSearchParams] = useSearchParams();
   const query = searchParams.get("q") ?? "";
@@ -93,12 +96,24 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newEntryTrigger]);
 
-  const resetForm = () => { setForm({ ...EMPTY_FORM }); setEditState({ id: null, open: false }); setErr(""); };
+  const resetForm = () => {
+    setForm({ ...EMPTY_FORM });
+    setEditState({ id: null, open: false });
+    setErr("");
+    setDisplayName("");
+    setDisplayTarget(null);
+  };
+
+  const prepareDisplayName = (device: TopologyNode | undefined) => {
+    setDisplayName(device?.display_name ?? "");
+    setDisplayTarget(device ? { id: device.id, initial: device.display_name ?? "" } : null);
+  };
 
   const startNew = () => {
     setForm({ ...EMPTY_FORM });
     setEditState({ id: null, open: true });
     setErr("");
+    prepareDisplayName(undefined);
   };
 
   const startEdit = (c: Credential) => {
@@ -118,6 +133,7 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
     });
     setEditState({ id: c.id, open: true });
     setErr("");
+    prepareDisplayName(devices.find((d) => (c.device_id ? d.id === c.device_id : d.ip === c.ip)));
   };
 
   const toggleIgnoreMutation = useUpdateDeviceMeta({
@@ -131,6 +147,7 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
     onSuccess: () => resetForm(),
     onError: (ex) => setErr(extractErrorMessage(ex)),
   });
+  const displayNameMutation = useUpdateDeviceMeta();
 
   const deleteMutation = useDeleteCredential({
     onSuccess: () => setDeleteTarget(null),
@@ -149,10 +166,21 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
     : F.profile_id != null ? selectedProfile?.snmp_version === "v3" : isV3;
   const engineIdError = effectiveV3 ? validateEngineId(F.v3_engine_id) : "";
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr("");
     if (engineIdError) return;
+    // The display name is saved on the device first; the credential save
+    // closes the dialog.
+    const nextDisplayName = displayName.trim();
+    if (displayTarget && nextDisplayName !== displayTarget.initial) {
+      try {
+        await displayNameMutation.mutateAsync({ id: displayTarget.id, patch: { display_name: nextDisplayName } });
+      } catch (ex) {
+        setErr(extractErrorMessage(ex));
+        return;
+      }
+    }
     // Engine IDs are only meaningful for v3; an empty override means discovery.
     const engineId = effectiveV3 ? normalizeEngineId(F.v3_engine_id) : "";
     saveMutation.mutate({ id: editState.id, form: { ...form, v3_engine_id: engineId } });
@@ -171,7 +199,7 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
     .filter(({ c, matchedDevice, assignedRack, assignedProfile }) =>
       matchesQuery(query, [
         c.label, c.ip, c.snmp_version, c.v3_username, c.snmp_enabled === false ? "ping only" : "",
-        assignedProfile?.label, matchedDevice?.sys_name, matchedDevice?.hostname, matchedDevice?.vendor,
+        assignedProfile?.label, matchedDevice?.display_name, matchedDevice?.sys_name, matchedDevice?.hostname, matchedDevice?.vendor,
         matchedDevice?.model, assignedRack?.label, assignedRack?.room,
       ]),
     );
@@ -201,6 +229,20 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
               <Field label="IP address *">
                 <Input required value={F.ip} onChange={(e) => set("ip", e.target.value)} placeholder="192.168.1.1" />
               </Field>
+              <div className="col-span-2">
+                <Field label="Display name (optional)">
+                  <Input
+                    value={displayName}
+                    maxLength={120}
+                    disabled={!displayTarget}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder={displayTarget ? F.label || "Shown instead of the label" : "Available after the first scan"}
+                  />
+                  <span className="block mt-1 text-[10px] text-muted leading-relaxed">
+                    Shown everywhere on the map, in racks and lists. Empty: the label is shown.
+                  </span>
+                </Field>
+              </div>
               <Field label="Priority (0 = primary)">
                 <Input type="number" min="0" value={F.priority} onChange={(e) => set("priority", +e.target.value)} />
               </Field>
@@ -398,7 +440,9 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <StatusDot status={c.enabled ? "up" : "unknown"} />
-                      <span className="text-primary font-semibold text-xs truncate">{c.label}</span>
+                      <span className="text-primary font-semibold text-xs truncate" data-testid="credential-name">
+                        {matchedDevice?.display_name || c.label}
+                      </span>
                       {pingOnly ? (
                         <Badge tone="warning" title="Ping only: no SNMP polling">Ping only</Badge>
                       ) : (
@@ -414,6 +458,9 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
                       {matchedDevice && <Badge tone="success">discovered</Badge>}
                       {matchedDevice?.ignored && <Badge tone="danger">ignored</Badge>}
                     </div>
+                    {matchedDevice?.display_name && matchedDevice.display_name !== c.label && (
+                      <div className="text-muted text-[10px] mt-0.5 pl-3.5 truncate">Label: {c.label}</div>
+                    )}
                     <div className="text-muted text-[10px] mt-1 pl-3.5">
                       {pingOnly ? c.ip : <>{c.ip}:{c.snmp_port}</>}
                       {pingOnly
@@ -471,12 +518,12 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
           <div className="mt-1">
             <SectionHeader>DISCOVERED WITHOUT CREDENTIALS ({unassigned.length})</SectionHeader>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2 mt-2.5">
-              {[...unassigned].sort((a, b) => (a.sys_name || a.ip).localeCompare(b.sys_name || b.ip)).map((d) => (
+              {[...unassigned].sort((a, b) => deviceDisplayName(a).localeCompare(deviceDisplayName(b))).map((d) => (
                 <Card key={d.id}>
                   <div className="mb-1.5">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <StatusDot status="unknown" className="bg-warning" />
-                      <span className="text-primary font-semibold text-xs truncate">{d.sys_name || d.ip}</span>
+                      <span className="text-primary font-semibold text-xs truncate">{deviceDisplayName(d)}</span>
                       <Badge tone="warning">unassigned</Badge>
                       {d.ignored && <Badge tone="danger">ignored</Badge>}
                     </div>
@@ -496,6 +543,7 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
                         setForm((f) => ({ ...f, label: d.sys_name || d.ip, ip: d.ip, device_id: d.id }));
                         setEditState({ id: null, open: true });
                         setErr("");
+                        prepareDisplayName(d);
                       }}
                     >+ Add credentials</Button>
                   </div>

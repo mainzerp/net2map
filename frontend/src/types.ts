@@ -77,6 +77,8 @@ export interface TopologyNode {
   latency_monitored?: boolean;
   location?: string;
   label?: string;
+  // Manual name (Settings > Network Devices / Network page); "" = none.
+  display_name?: string;
   enabled?: boolean;
   rack_u_position?: number | null;
   u_height?: number;

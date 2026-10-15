@@ -64,4 +64,13 @@ describe("filterDevices", () => {
     expect(deviceDisplayName({ ip: "10.0.0.5", sys_name: "core-sw", hostname: "printer.lan" })).toBe("core-sw");
     expect(deviceDisplayName({ ip: "10.0.0.5", sys_name: "", hostname: "" })).toBe("10.0.0.5");
   });
+
+  it("prefers the display name, then the label, over the scanned names", () => {
+    const base = { ip: "10.0.0.5", sys_name: "core-sw", hostname: "core.lan" };
+    expect(deviceDisplayName({ ...base, label: "Core RZ", display_name: " Core RZ-01 " })).toBe("Core RZ-01");
+    expect(deviceDisplayName({ ...base, label: "Core RZ", display_name: "" })).toBe("Core RZ");
+    expect(deviceDisplayName({ ...base, label: "  ", display_name: "" })).toBe("core-sw");
+    // A label that only repeats the IP (range discovery without sysName) is skipped.
+    expect(deviceDisplayName({ ...base, label: "10.0.0.5" })).toBe("core-sw");
+  });
 });
