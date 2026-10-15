@@ -235,6 +235,10 @@ monitor in `latency_mode=selected`). Plus:
   (`"<prio hex4>.<mac hex12>"`), `root_id`, `root_cost`, `root_port` (null on the
   root bridge), `is_root`. `null` when no STP data was collected. The raw
   `stp_*` device columns are input-only and excluded from the output.
+- `stp_instances: StpInstanceInfo[]`: MSTIs of an MSTP bridge from IEEE8021-MSTP-MIB
+  (empty list otherwise). `StpInstanceInfo` = `id` (MSTID), `bridge_id`, `root_id`,
+  `root_cost`, `root_port` (port name or null), `vlans` (range string, e.g.
+  `"10-20,30"`), `is_root` (bridge ID equals root ID).
 - `vlan_names: {vlan_id_string: name}`: always an object (empty when unknown).
 - `device_type`: `switch|firewall|ups|server|other` (default `switch`; ping-only
   devices are created as `other`). Derived during a
@@ -274,6 +278,8 @@ monitor in `latency_mode=selected`). Plus:
 - `stp_state`: `disabled|blocking|listening|learning|forwarding|broken` (BRIDGE-MIB), or null
 - `stp_role`: `root|designated|blocked|disabled` (derived from state and root port), or null
 - `stp_path_cost`: int or null
+- `stp_instances`: `{"<msti>": {state, role}}` for MSTP bridges (IEEE8021-MSTP-MIB,
+  same state / role vocabulary; alternate and backup ports are `blocked`), or null
 
 ### TopologyLinkOut
 

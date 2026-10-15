@@ -18,6 +18,15 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
+- MSTP instances and STP protocol boundaries (released v4.2.0, migration 030) · priority: P2 · area: full-stack
+  IEEE8021-MSTP-MIB per MSTI (root, cost, VLANs, port state/role); STP layer
+  instance picker; "MSTP|RSTP" boundary markers on links; inspector MSTI table.
+  Passed: ruff, backend pytest (7 snmp_driver local Python 3.13 only), typecheck,
+  360 frontend tests, alembic upgrade/check/downgrade on postgres:16 (Docker).
+  Not verified: real MSTP switches (MIB support differs per vendor), browser.
+  User to verify: scan an MSTP switch with several MSTIs, map > STP > pick an MSTI,
+  blocked links and root arrows match `show spanning-tree mst`.
+
 - MikroTik + WatchGuard SNMP scanners, STP protocol badges (released v4.1.0, fix v4.1.1) · priority: P2 · area: full-stack
   New vendors `mikrotik` (switch, firmware via MIKROTIK-MIB) and `watchguard`
   (firewall, no STP); STP layer shows STP/RSTP/MSTP per node, legend counts and flags

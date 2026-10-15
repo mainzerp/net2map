@@ -405,3 +405,18 @@
   (`dot1dStpVersion`); the STP layer now shows it per node and the legend counts it,
   because mixed RSTP/MSTP regions are a common cause of unexpected topologies.
   `unknown` gets no node badge (only a legend count) to avoid noise.
+
+## MSTP instances and protocol boundaries (2026-10-15)
+
+- **MSTIs from IEEE8021-MSTP-MIB** (`1.3.111.2.802.1.1.6`), CIST stays on BRIDGE-MIB.
+  Read only when `dot1dStpVersion` is MSTP, so RSTP/STP bridges pay no extra walks.
+  Four walks per MSTP bridge: `ieee8021MstpEntry` raw (bridge/root IDs, `Vids0..3`
+  bitmaps) and decoded (cost, root port), port state and role. Only the first bridge
+  component is used. Port roles map to the CIST vocabulary (alternate/backup ->
+  `blocked`) so the map logic is shared. Not verified against real hardware.
+- **JSONB, not new tables** (migration 030): instances are read and replaced as a
+  whole per scan and only rendered; no queries filter on them.
+- **One instance at a time on the map**, like one VLAN at a time: overlaying several
+  spanning trees on one link is unreadable. VLANs are stored as a range string.
+- **Protocol boundary = both ends report different known protocols.** Shown in every
+  instance; boundary links are never faded. Unknown protocols never mark a boundary.

@@ -1,5 +1,28 @@
 # Version History
 
+## v4.2.0 -- MSTP instances and protocol boundaries on the map
+
+**Type:** MINOR. Commits: a8ab6fb (backend MSTP collection), a3066f1 (frontend
+MSTI picker and boundary markers). Migration 030 adds the nullable JSONB columns
+`devices.stp_instances` and `ports.stp_instances` (no manual steps).
+
+### Features
+
+- MSTP bridges: the scan reads IEEE8021-MSTP-MIB (`ieee8021MstpTable`,
+  `ieee8021MstpPortState`, `ieee8021MstpPortRole`) and stores every MSTI with bridge
+  ID, root ID, root cost, root port and its VLANs, plus per-port state and role per
+  MSTI. Only for bridges whose `dot1dStpVersion` reports MSTP; agents without the MIB
+  keep working as before.
+- API: `DeviceOut.stp_instances` (list of `{id, bridge_id, root_id, root_cost,
+  root_port, vlans, is_root}`), `PortOut.stp_instances` (`{"<msti>": {state, role}}`).
+- STP layer instance picker ("CIST (instance 0)" plus "MSTI n · VLAN ..."): links,
+  blocked markers, root arrows and root badges follow the selected instance; the
+  choice is persisted.
+- Links between devices running different known protocols (e.g. MSTP and RSTP) carry
+  a protocol boundary marker ("MSTP|RSTP"); the legend counts them.
+- Device inspector lists the MSTIs (VLANs, root, cost); port STP tooltips show the
+  role per MSTI.
+
 ## v4.1.1 -- Keep manual device type for MikroTik
 
 **Type:** PATCH. Commit: 5ed673e. No migration.
