@@ -281,6 +281,8 @@ class Device(Base):
 
     # Consolidation fields (metadata now lives here, not on Credential)
     label        = Column(String, default="", nullable=False)
+    # Manual display name (migration 035); "" falls back to label, sysName, DNS, IP
+    display_name = Column(String(120), default="", nullable=False, server_default="")
     enabled      = Column(Boolean, default=True, nullable=False)
 
     # Spanning tree summary (BRIDGE-MIB / RSTP-MIB default instance); NULL

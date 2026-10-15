@@ -616,6 +616,8 @@ class DeviceBase(BaseModel):
     map_y:     float = 100.0
     ignored:   bool  = False
     label:     str   = ""
+    # Manual name shown instead of label / sysName / DNS name / IP ("" = none)
+    display_name: str = ""
     enabled:   bool  = True
     vendor_override: bool = False
     latency_monitored: bool = False
@@ -794,6 +796,8 @@ class DeviceMetaUpdate(BaseModel):
     floor_id: Optional[int] = None
     ignored:  Optional[bool] = None
     label:    Optional[str] = None
+    # Manual display name; "" or null clears it (stored trimmed)
+    display_name: Optional[str] = Field(None, max_length=120)
     enabled:  Optional[bool] = None
     rack_u_position: Optional[int] = Field(None, ge=1, le=48)
     u_height: Optional[int] = Field(None, ge=1, le=60)

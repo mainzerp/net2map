@@ -370,6 +370,8 @@ def update_device_meta(
         device.ignored = payload["ignored"]
     if "label" in payload:
         device.label = payload["label"]
+    if "display_name" in payload:
+        device.display_name = (payload["display_name"] or "").strip()
     if "enabled" in payload:
         device.enabled = payload["enabled"]
     if "rack_u_position" in payload:

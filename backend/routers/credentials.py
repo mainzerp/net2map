@@ -141,6 +141,13 @@ def update_credential(cred_id: int, body: CredentialUpdate, request: Request, db
 
     for k, v in updates.items():
         setattr(cred, k, v)
+    if updates.get("label"):
+        # The device label mirrors the credential label (display fallback)
+        device = (
+            db.query(Device).filter(Device.id == cred.device_id).first() if cred.device_id else None
+        ) or db.query(Device).filter(Device.ip == cred.ip).first()
+        if device is not None:
+            device.label = updates["label"]
 
     log_audit(request, "update", "credential", str(cred_id), {"fields": list(updates.keys())}, db=db, strict=True)
     db.commit()
