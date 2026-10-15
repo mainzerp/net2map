@@ -18,6 +18,18 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
+- Reverse DNS names for network devices (released v4.3.0, migration 031) · priority: P2 · area: full-stack
+  `devices.hostname` from PTR in discovery/full scans (concurrent `resolve_hosts`);
+  display name sysName > DNS name > IP. User to verify: discovery scan, ping-only
+  device without label shows its DNS name on the map and in the device table.
+- Scan ranges and faster scans (released v4.3.0, migration 032) · priority: P1 · area: full-stack
+  Per-range interval/profiles (`/scan-ranges`), range discovery as own job, parallel
+  probes with SNMP pre-check and skip window, concurrent endpoint DNS with TTL cache.
+  Passed: ruff, 1111 backend tests, alembic chain on postgres:16 incl. legacy data
+  copy, typecheck, 376 frontend tests. Not measured: real scan durations.
+  User to verify: Settings > Scan ranges list shows the migrated ranges; compare
+  full scan duration in the scan history before/after; "Scan now" on a range.
+
 - MSTP instances and STP protocol boundaries (released v4.2.0, migration 030) · priority: P2 · area: full-stack
   IEEE8021-MSTP-MIB per MSTI (root, cost, VLANs, port state/role); STP layer
   instance picker; "MSTP|RSTP" boundary markers on links; inspector MSTI table.

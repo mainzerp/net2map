@@ -9,9 +9,10 @@ The project consists of a FastAPI backend (scan, persistence, API) and a React/V
 
 ## Features
 
-- SNMP scan of devices via SNMPv2c and SNMPv3, separate intervals for discovery, LLDP links and MAC tables; discovery IP ranges and DNS resolvers (PTR) configurable
+- SNMP scan of devices via SNMPv2c and SNMPv3, separate intervals for discovery, LLDP links and MAC tables; discovery IP ranges with their own interval and SNMP profiles per range (scanned as a separate job with fast parallel probing) and DNS resolvers (PTR) configurable
 - Automatic vendor detection with dedicated scanners (Aruba CX, Cisco, FS.com, MikroTik RouterOS / SwOS, OPNsense, UniFi, WatchGuard Firebox, Eaton UPS, HPE UPS, HPE iLO, Generic)
 - Supported device kinds: switches (MikroTik devices are treated as switches, change the type per device if needed), firewalls (OPNsense, WatchGuard), UPS units (Eaton / MGE network cards, HPE UPS Network Module, any RFC 1628 UPS-MIB agent) and HPE ProLiant servers via iLO; UPS battery charge, runtime, load and output source and server subsystem conditions (thermal, power, fans, storage, temperatures) are collected over SNMP and shown in the inspector, the rack faceplates, the map and the dashboard "Attention needed" list
+- Reverse DNS names (PTR) for endpoints and network devices; a device without a meaningful sysName (e.g. ping-only) is shown by its DNS name
 - Firmware version capture per device (ENTITY-MIB OID, then vendor MIB scalars such as MIKROTIK-MIB `mtxrLicVersion`, then vendor parsing from sysDescr)
 - Interactive topology map (React Flow) based on LLDP links, including port/speed info, auto-layout, device search, minimap and optional background image; layers "STP" (root bridge, root paths, blocked ports, STP / RSTP / MSTP badge per device, protocol mix in the legend, protocol boundary markers on links, and an instance picker for MSTP bridges that shows each MSTI from IEEE8021-MSTP-MIB with its VLANs), "VLAN" and "Latency"
 - Buildings and floors: model a campus as buildings with floors, each floor with its own floor plan; the map shows one floor at a time with a floor switcher, an "Unassigned" tab for racks/devices without a floor, and portal nodes for links to other floors (click to jump to the remote device)

@@ -1,5 +1,44 @@
 # Version History
 
+## v4.3.0 -- Scan ranges, faster discovery and DNS, device DNS names
+
+**Type:** MINOR. Commits: 28898fb (backend), 13be9b4 (frontend). Migration 031 adds `devices.hostname`; migration
+032 creates `scan_ranges` (the legacy `discovery_scan_ranges` setting is copied over
+and removed) and adds `ping_candidates.snmp_checked_at`. No manual steps.
+
+### Features
+
+- Scan ranges with their own settings: `/scan-ranges` CRUD (label, enabled, interval,
+  SNMP profiles per range), manual "scan all" / "scan this range", Settings > Scan
+  editor with last / next scan.
+- Range discovery is its own job (`ranges` scheduled when a range is due, checked at
+  most every 60 s; `ranges_all` for manual runs and the dry run).
+- Faster range probing: own concurrency (`probe_workers`, default 64), 1 s
+  single-GET SNMP pre-check of all allowed profiles in parallel before the discovery
+  scan, and hosts that answered ping but no SNMP are not SNMP-probed again within
+  `probe_skip_hours` (default 6).
+- Faster endpoint DNS: all ARP IPs are resolved concurrently (32 at a time) before the
+  database phase instead of one by one inside it; process-wide cache (answers 1 h,
+  empty results 10 min); an NXDOMAIN / missing PTR from the configured DNS servers no
+  longer triggers a second lookup via the system resolver.
+- Config export/import carries `scan_ranges`.
+- Network devices get the reverse DNS (PTR) name of their management IP during
+  discovery and full scans (configured DNS servers, then the system resolver;
+  resolved concurrently, at most 16 lookups at a time). A failed lookup keeps the
+  stored name. Exposed as `DeviceOut.hostname`.
+- Display name rule `deviceDisplayName`: sysName, then DNS name, then IP; a sysName
+  that only repeats the IP (ping-only devices without a label) yields to the DNS
+  name. Used by map nodes, device table, inspector title and command palette.
+
+### Changed behavior
+
+- `full` and `discovery` scans no longer probe discovery ranges; ranges are scanned
+  by their own schedule (their interval, else `discovery_interval_sec`) or manually.
+- The dry run now covers only the enabled scan ranges.
+- `discovery_scan_ranges` is no longer an allowed key of `PUT /settings/{key}`
+  (`400 UNKNOWN_SETTING_KEY`); `GET/PUT /discovery-ranges` still work (deprecated)
+  and now reject ranges above 65536 addresses (`400 RANGE_TOO_LARGE`).
+
 ## v4.2.0 -- MSTP instances and protocol boundaries on the map
 
 **Type:** MINOR. Commits: a8ab6fb (backend MSTP collection), a3066f1 (frontend

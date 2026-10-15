@@ -420,3 +420,19 @@
   spanning trees on one link is unreadable. VLANs are stored as a range string.
 - **Protocol boundary = both ends report different known protocols.** Shown in every
   instance; boundary links are never faded. Unknown protocols never mark a boundary.
+
+## Scan ranges and scan speed (2026-10-15)
+
+- **Range discovery is its own job** (`ranges` / `ranges_all`), not part of `full` /
+  `discovery`: probing hundreds of mostly empty addresses blocked MAC/port scans behind
+  the single scan lock. Due ranges are checked at most every 60 s.
+- **Ranges as a table** (`scan_ranges`, migration 032) instead of a JSON setting, for
+  per-range interval and SNMP profiles; the legacy `/discovery-ranges` API stays as a
+  deprecated view; the `discovery_scan_ranges` settings key is removed.
+- **No per-subnet scanner processes**: the time goes into waiting on timeouts, not CPU,
+  and separate scanners would fight the single scan lock and DB rebuild. Instead: own
+  probe concurrency, a 1 s parallel SNMP pre-check per profile, and a skip window for
+  hosts known to answer ping but no SNMP (`ping_candidates.snmp_checked_at`).
+- **Endpoint DNS out of the DB phase**: resolved concurrently up front with a
+  process-wide TTL cache; NXDOMAIN from configured servers is final (no system resolver
+  retry). Device DNS names (`devices.hostname`) only in discovery/full scans.

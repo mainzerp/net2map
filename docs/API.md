@@ -235,6 +235,9 @@ monitor in `latency_mode=selected`). Plus:
   (`"<prio hex4>.<mac hex12>"`), `root_id`, `root_cost`, `root_port` (null on the
   root bridge), `is_root`. `null` when no STP data was collected. The raw
   `stp_*` device columns are input-only and excluded from the output.
+- `hostname`: reverse DNS (PTR) name of the management IP, `""` when unknown.
+  Resolved concurrently during discovery and full scans (configured DNS servers,
+  then the system resolver); a failed lookup keeps the stored name.
 - `stp_instances: StpInstanceInfo[]`: MSTIs of an MSTP bridge from IEEE8021-MSTP-MIB
   (empty list otherwise). `StpInstanceInfo` = `id` (MSTID), `bridge_id`, `root_id`,
   `root_cost`, `root_port` (port name or null), `vlans` (range string, e.g.
@@ -377,7 +380,7 @@ Generic key/value app settings and dashboard statistics.
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
 | GET | `/settings` | any | List all app settings. | `AppSettingOut[]` |
-| PUT | `/settings/{key}` | op+ | Upsert one setting. Only allowlisted keys (`ALLOWED_SETTING_KEYS`: discovery/link/mac/port/vlan/stp intervals, `discovery_scan_ranges`, `scan_max_workers`, `scan_snmp_timeout`, `scan_snmp_retries`, `scan_snmp_bulk_size`, `dns_servers`, `map_opacity`, `map_scale`, `map_bg_color`, `audit_retention_days`, `endpoint_retention_days` (integer 0-3650), and the latency keys `latency_enabled` (`true`/`false`), `latency_interval_sec` (5-300), `latency_pings` (1-10), `latency_mode` (`all`/`selected`), `latency_retention_days` (1-365)); others -> `400 UNKNOWN_SETTING_KEY`. Latency keys and `endpoint_retention_days` are validated and normalized; invalid values -> `400 INVALID_SETTING_VALUE`. 10/min. | `AppSettingUpdate` -> `AppSettingOut` |
+| PUT | `/settings/{key}` | op+ | Upsert one setting. Only allowlisted keys (`ALLOWED_SETTING_KEYS`: discovery/link/mac/port/vlan/stp intervals, `scan_max_workers`, `scan_probe_workers` (1-256), `scan_probe_skip_hours` (0-168), `scan_snmp_timeout`, `scan_snmp_retries`, `scan_snmp_bulk_size`, `dns_servers`, `map_opacity`, `map_scale`, `map_bg_color`, `audit_retention_days`, `endpoint_retention_days` (integer 0-3650), and the latency keys `latency_enabled` (`true`/`false`), `latency_interval_sec` (5-300), `latency_pings` (1-10), `latency_mode` (`all`/`selected`), `latency_retention_days` (1-365)); others -> `400 UNKNOWN_SETTING_KEY`. Latency keys and `endpoint_retention_days` are validated and normalized; invalid values -> `400 INVALID_SETTING_VALUE`. 10/min. | `AppSettingUpdate` -> `AppSettingOut` |
 | PUT | `/settings` | op+ | Atomic multi-key update: JSON object `{key: value}` (string values). Every key and value is validated first with the same rules as `PUT /settings/{key}` (`400 UNKNOWN_SETTING_KEY` / `400 INVALID_SETTING_VALUE`, `field` = offending key; empty object -> `400 EMPTY_SETTINGS`); nothing is written unless all are valid. One audit entry (`details.keys`). Shares the 10/min limit; one call counts once. | `{key: value}` -> `AppSettingOut[]` (all settings, like GET) |
 | GET | `/stats` | any | Counts (devices, ports, ports up, racks, endpoints) and last scan time/status. | ad-hoc object |
 
@@ -504,7 +507,7 @@ available, otherwise in a backend thread.
 |---|---|---|---|---|
 | POST | `/scan` | op+ | Deprecated (`deprecated=True`). Starts a full scan job and polls until done (max 600 s; `504 SCAN_TIMEOUT`, `409 SCAN_CONFLICT`). 2/min. | -> `ScanResult` |
 | POST | `/scan/jobs` | op+ | Start a background scan; returns immediately. 5/min. | -> `{job_id, status: "queued"\|"running"}` |
-| POST | `/scan/dry-run/jobs` | op+ | Start a background dry-run discovery (no persistence of devices); job result contains a `preview` key. 3/min. | -> `{job_id, status}` |
+| POST | `/scan/dry-run/jobs` | op+ | Start a background dry-run of all enabled scan ranges (scan type `ranges_all`, no persistence of devices); job result contains a `preview` key. 3/min. | -> `{job_id, status}` |
 | GET | `/scan/jobs/{job_id}` | any | Job status. Terminal statuses: `finished`, `failed`, `cancelled`, `skipped`, `dry_run`. | -> `{id, status, started_at, finished_at, cancel_requested, result}` |
 | POST | `/scan/jobs/{job_id}/cancel` | op+ | Request cancellation of a `running`/`queued` job. | -> `{id, status, cancel_requested}` |
 
@@ -560,10 +563,24 @@ Scan tuning, discovery ranges and DNS resolvers.
 
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
-| GET | `/scan-settings` | any | Current values. | `ScanSettingsOut` `{max_workers, snmp_timeout, snmp_retries, snmp_bulk_size, endpoint_retention_days}` |
-| PUT | `/scan-settings` | op+ | Update (clamped: workers 1..128, timeout 1..30, retries 0..10, bulk size 5..100 = GETBULK rows per request, default 25; `endpoint_retention_days` 0..3650, default 30, 0 disables). After a successful full scan, endpoints whose `last_seen` is older than `endpoint_retention_days` are deleted; ignored endpoints and endpoints with notes are kept. | `ScanSettingsUpdate` -> `ScanSettingsOut` |
-| GET | `/discovery-ranges` | any | IP/CIDR ranges for discovery. | `DiscoveryRangesOut` `{ranges}` |
-| PUT | `/discovery-ranges` | op+ | Replace ranges (`400 INVALID_IP_RANGE` on bad entries). | `DiscoveryRangesUpdate` -> `DiscoveryRangesOut` |
+| GET | `/scan-settings` | any | Current values. | `ScanSettingsOut` `{max_workers, snmp_timeout, snmp_retries, snmp_bulk_size, endpoint_retention_days, probe_workers, probe_skip_hours}` |
+| PUT | `/scan-settings` | op+ | Update (clamped: workers 1..128, timeout 1..30, retries 0..10, bulk size 5..100 = GETBULK rows per request, default 25; `endpoint_retention_days` 0..3650, default 30, 0 disables; `probe_workers` 1..256, default 64 = parallel range probes; `probe_skip_hours` 0..168, default 6 = hours a ping-only candidate is not SNMP-probed again, 0 always probes). Fields missing in the request keep their stored value for the probe settings. After a successful full scan, endpoints whose `last_seen` is older than `endpoint_retention_days` are deleted; ignored endpoints and endpoints with notes are kept. | `ScanSettingsUpdate` -> `ScanSettingsOut` |
+| GET | `/discovery-ranges` | any | Deprecated: CIDRs of all scan ranges (use `/scan-ranges`). | `DiscoveryRangesOut` `{ranges}` |
+| PUT | `/discovery-ranges` | op+ | Deprecated: replace the set of scan ranges by CIDR; listed ranges keep their settings, new ones get defaults, unlisted ones are deleted (`400 INVALID_IP_RANGE`, `400 RANGE_TOO_LARGE`). | `DiscoveryRangesUpdate` -> `DiscoveryRangesOut` |
+| GET | `/scan-ranges` | any | Discovery scan ranges ordered by CIDR. | -> `ScanRangeOut[]` `{id, cidr, label, enabled, interval_sec (null = global discovery interval), profile_ids ([] = all SNMP profiles), last_scan_at, next_scan_at (null when disabled or never scanned), host_count}` |
+| POST | `/scan-ranges` | op+ | Create a range. CIDR or single IP, normalized (a /32 becomes the plain IP); max 65536 addresses; `interval_sec` 60..604800. Errors: `400 INVALID_IP_RANGE`, `400 RANGE_TOO_LARGE`, `409 RANGE_EXISTS`, `400 UNKNOWN_PROFILE`. | `ScanRangeCreate` -> `201 ScanRangeOut` |
+| PATCH | `/scan-ranges/{id}` | op+ | Update any subset; an explicit `"interval_sec": null` resets to the global interval. `404 SCAN_RANGE_NOT_FOUND`. | `ScanRangeUpdate` -> `ScanRangeOut` |
+| DELETE | `/scan-ranges/{id}` | op+ | Delete a range. | -> `204` |
+| POST | `/scan-ranges/scan` | op+ | Scan all enabled ranges now (scan type `ranges_all`). 5/min. | -> `{job_id, status}` |
+| POST | `/scan-ranges/{id}/scan` | op+ | Mark this range due and start a `ranges` scan (other ranges due at that moment are scanned too). 5/min. | -> `{job_id, status}` |
+
+Scan ranges are no longer probed by `full` or `discovery` scans. The scheduler checks
+at most every 60 s and starts a `ranges` scan when an enabled range is due
+(`last_scan_at` unset or older than its interval). Range probes run with their own
+concurrency (`probe_workers`): ping first, then a 1 s single-GET SNMP pre-check of the
+allowed profiles in parallel, then a discovery scan with the first answering profile.
+Hosts that answered ping but no SNMP are recorded as ping candidates
+(`snmp_checked_at`) and are not SNMP-probed again within `probe_skip_hours`.
 | GET | `/dns-settings` | any | DNS servers for PTR lookups. | `DnsSettingsOut` `{servers}` |
 | PUT | `/dns-settings` | op+ | Replace DNS servers. | `DnsSettingsUpdate` -> `DnsSettingsOut` |
 
@@ -586,8 +603,8 @@ items and device placement are not part of this export.
 
 | Method | Path | Role | Description | Schema |
 |---|---|---|---|---|
-| GET | `/config/export` | op+ | JSON string with `version`, `exported_at`, `settings`, `profiles`, `credentials` (secrets masked; FK references also as `profile_label` / `device_ip`). 10/min. | `GlobalConfigExportOut` `{data}` |
-| POST | `/config/import` | admin | Validate and import an export payload; `dry_run` defaults to `true`. `data` max 10 MB (`422`). | `GlobalConfigImportRequest` `{data, dry_run}` -> result object (no `response_model`) |
+| GET | `/config/export` | op+ | JSON string with `version`, `exported_at`, `settings`, `profiles`, `credentials`, `scan_ranges` (`{cidr, label, enabled, interval_sec, profile_labels}`) (secrets masked; FK references also as `profile_label` / `device_ip`). 10/min. | `GlobalConfigExportOut` `{data}` |
+| POST | `/config/import` | admin | Validate and import an export payload; `dry_run` defaults to `true`. `scan_ranges` are upserted by CIDR; a legacy `discovery_scan_ranges` settings row is converted into scan ranges. `data` max 10 MB (`422`). | `GlobalConfigImportRequest` `{data, dry_run}` -> result object (no `response_model`) |
 
 ### logs (`routers/logs.py`)
 
