@@ -606,6 +606,8 @@ class DeviceBase(BaseModel):
     firmware:  str = ""
     vendor:    str = ""
     location:  str = ""
+    # Reverse DNS name of the management IP ("" when unknown)
+    hostname:  str = ""
     ping_status: str = "unknown"
     ping_rtt_ms: int = 0
     # True while the device is monitored by ping only (credential snmp_enabled=False)
@@ -1035,6 +1037,10 @@ class ScanSettingsUpdate(BaseModel):
     snmp_bulk_size: Optional[int] = None
     # Days after which unseen endpoints are pruned; 0 disables pruning.
     endpoint_retention_days: Optional[int] = None
+    # Concurrent range probes (1-256).
+    probe_workers: Optional[int] = None
+    # Hours a ping-reachable host without SNMP is not re-probed; 0 = never skip.
+    probe_skip_hours: Optional[int] = None
 
     @model_validator(mode="after")
     def _clamp_values(self):
@@ -1048,6 +1054,10 @@ class ScanSettingsUpdate(BaseModel):
             self.snmp_bulk_size = max(5, min(100, self.snmp_bulk_size))
         if self.endpoint_retention_days is not None:
             self.endpoint_retention_days = max(0, min(3650, self.endpoint_retention_days))
+        if self.probe_workers is not None:
+            self.probe_workers = max(1, min(256, self.probe_workers))
+        if self.probe_skip_hours is not None:
+            self.probe_skip_hours = max(0, min(168, self.probe_skip_hours))
         return self
 
 class ScanSettingsOut(BaseModel):
@@ -1056,6 +1066,8 @@ class ScanSettingsOut(BaseModel):
     snmp_retries: int
     snmp_bulk_size: int = 25
     endpoint_retention_days: int = 30
+    probe_workers: int = 64
+    probe_skip_hours: int = 6
 
 
 # ─── DNS Settings ─────────────────────────────────────────────────────────────
@@ -1074,6 +1086,40 @@ class DiscoveryRangesUpdate(BaseModel):
 
 class DiscoveryRangesOut(BaseModel):
     ranges: List[str]
+
+
+# ─── Scan Ranges ─────────────────────────────────────────────────────────────
+
+SCAN_RANGE_INTERVAL_MIN, SCAN_RANGE_INTERVAL_MAX = 60, 604800
+
+
+class ScanRangeCreate(BaseModel):
+    cidr: str = Field(..., max_length=64)
+    label: str = Field("", max_length=128)
+    enabled: bool = True
+    interval_sec: Optional[int] = Field(None, ge=SCAN_RANGE_INTERVAL_MIN, le=SCAN_RANGE_INTERVAL_MAX)
+    profile_ids: List[int] = []
+
+
+class ScanRangeUpdate(BaseModel):
+    cidr: Optional[str] = Field(None, max_length=64)
+    label: Optional[str] = Field(None, max_length=128)
+    enabled: Optional[bool] = None
+    # An explicit null resets the range to the global discovery interval.
+    interval_sec: Optional[int] = Field(None, ge=SCAN_RANGE_INTERVAL_MIN, le=SCAN_RANGE_INTERVAL_MAX)
+    profile_ids: Optional[List[int]] = None
+
+
+class ScanRangeOut(BaseModel):
+    id: int
+    cidr: str
+    label: str
+    enabled: bool
+    interval_sec: Optional[int] = None
+    profile_ids: List[int] = []
+    last_scan_at: Optional[datetime] = None
+    next_scan_at: Optional[datetime] = None
+    host_count: int
 
 
 # ─── Map Settings ─────────────────────────────────────────────────────────────

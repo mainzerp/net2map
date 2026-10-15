@@ -11,7 +11,7 @@ _persist_scan_run = _dbh._persist_scan_run
 _read_discovery_ranges = _dbh._read_discovery_ranges
 _expand_ranges_to_ips = _dbh._expand_ranges_to_ips
 
-from database import AppSetting, ScanRun, ScanRunSwitchMetric  # noqa: E402
+from database import AppSetting, ScanRange, ScanRun, ScanRunSwitchMetric  # noqa: E402
 from schemas import ScanResult, ScanSwitchMetric  # noqa: E402
 
 # -- _safe_json_list ----------------------------------------------------------
@@ -67,11 +67,21 @@ def test_expand_ranges_invalid_entry():
 
 # -- _read_discovery_ranges ---------------------------------------------------
 
-def test_read_discovery_ranges_returns_list(db):
-    db.add(AppSetting(key="discovery_scan_ranges", value='["10.0.0.0/24", "192.168.1.0/24"]'))
+def test_read_discovery_ranges_returns_enabled_range_cidrs(db):
+    db.add_all([
+        ScanRange(cidr="192.168.1.0/24"),
+        ScanRange(cidr="10.0.0.0/24"),
+        ScanRange(cidr="172.16.0.0/24", enabled=False),
+    ])
     db.commit()
     result = _read_discovery_ranges(db)
     assert result == ["10.0.0.0/24", "192.168.1.0/24"]
+
+
+def test_read_discovery_ranges_ignores_legacy_setting(db):
+    db.add(AppSetting(key="discovery_scan_ranges", value='["10.0.0.0/24"]'))
+    db.commit()
+    assert _read_discovery_ranges(db) == []
 
 
 def test_read_discovery_ranges_missing(db):

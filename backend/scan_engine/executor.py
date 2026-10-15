@@ -29,11 +29,10 @@ from database import (
 from scan_engine.broadcast import _broadcast_progress, _broadcast_scan_complete, broadcast_nowait
 from scan_engine.db_helpers import (
     _canonical_link_key,
-    _expand_ranges_to_ips,
+    _load_scan_ranges,
     _persist_scan_run,
-    _read_discovery_ranges,
 )
-from scan_engine.dns import _resolve_host, _resolve_ip
+from scan_engine.dns import _resolve_ip, resolve_hosts
 from scan_engine.ping import _build_ping_cmd
 from scanners import get_scanner
 from scanners.health import health_firmware, health_model
@@ -51,6 +50,7 @@ from shared.metrics import (
     STALE_LEASE_REJECTIONS,
 )
 from shared.ping_only import upsert_ping_only_device as _upsert_ping_only_device
+from shared.scan_ranges import mark_ranges_scanned, range_ips, utcnow_naive
 from shared.state import SCAN_LOCK_FENCE_NAME, _log_event, fence_token_of, renew_scan_lock
 from snmp_scanner import (
     SwitchData,
@@ -58,6 +58,7 @@ from snmp_scanner import (
     extract_model,
     is_virtual,
     scan_switch,
+    snmp_probe_profile,
     speed_label,
 )
 
@@ -72,6 +73,35 @@ _LOCK_RENEW_INTERVAL_SEC = 120
 # schema; it travels alongside the result object via these helpers and is
 # materialized into the job result dict by the job runners (jobs.py/tasks.py).
 _DRY_RUN_PREVIEW_ATTR = "_dry_run_preview"
+
+# Range scans probe the configured discovery ranges only ("ranges": due
+# ranges, scheduled; "ranges_all": every enabled range, manual and dry run).
+RANGE_MODES = frozenset({"ranges", "ranges_all"})
+# Modes that only upsert devices: no port/endpoint/link rebuild and no
+# STP/VLAN/interface-name/health snapshot updates.
+DISCOVERY_LIKE_MODES = frozenset({"discovery"}) | RANGE_MODES
+# Modes that rebuild ports and endpoints (and therefore need endpoint DNS).
+PORT_REBUILD_MODES = frozenset({"full", "ports", "macs"})
+VALID_SCAN_MODES = frozenset({"discovery", "ports", "links", "macs", "full"}) | RANGE_MODES
+
+# Timeout (seconds) of the per-profile SNMP pre-check of range probes.
+RANGE_PRECHECK_TIMEOUT_SEC = 1
+# Concurrent reverse DNS lookups for endpoint names.
+ENDPOINT_DNS_CONCURRENCY = 32
+
+# SNMPv2c "public" fallback used by range probes when no SNMP profile exists.
+_DEFAULT_PUBLIC_PROFILE = {
+    "profile_id": None,
+    "profile_label": "default-public",
+    "snmp_version": "v2c",
+    "community": "public",
+    "v3_security_level": "authPriv",
+    "v3_username": "",
+    "v3_auth_protocol": "SHA-256",
+    "v3_auth_password": "",
+    "v3_priv_protocol": "AES-128",
+    "v3_priv_password": "",
+}
 
 
 class ScanOwnershipLost(RuntimeError):
@@ -213,7 +243,7 @@ async def _execute_scan(
     lock_token: Optional[str] = None,
 ) -> ScanResult:
     corr = correlation_id or str(uuid.uuid4())
-    scan_mode = scan_type if scan_type in {"discovery", "ports", "links", "macs", "full"} else "full"
+    scan_mode = scan_type if scan_type in VALID_SCAN_MODES else "full"
 
     scan_started = time.perf_counter()
     final_status = "failed"
@@ -275,7 +305,132 @@ def _prepare_scan_setup(scan_mode: str, corr: str) -> dict:
         db.close()
 
 
+def _profiles_data(db: Session) -> List[dict]:
+    """All SNMP profiles as decrypted dicts (ordered by id), or the v2c public fallback."""
+    profiles = db.query(SnmpProfile).order_by(SnmpProfile.id).all()
+    if not profiles:
+        return [dict(_DEFAULT_PUBLIC_PROFILE)]
+    return [
+        {
+            "profile_id": p.id,
+            "profile_label": p.label,
+            "snmp_version": p.snmp_version,
+            "community": decrypt(p.community),
+            "v3_security_level": p.v3_security_level,
+            "v3_username": p.v3_username,
+            "v3_auth_protocol": p.v3_auth_protocol,
+            "v3_auth_password": decrypt(p.v3_auth_password),
+            "v3_priv_protocol": p.v3_priv_protocol,
+            "v3_priv_password": decrypt(p.v3_priv_password),
+        }
+        for p in profiles
+    ]
+
+
+def _range_probe_targets(ranges: List[dict], excluded_ips: set, profiles_data: List[dict],
+                         snmp_timeout: int, snmp_retries: int) -> List[dict]:
+    """Build deduplicated range probe targets from the selected ranges.
+
+    IPs in ``excluded_ips`` (credential or ignored device) are skipped. The
+    allowed profiles of an IP are the union over all selected ranges that
+    contain it; a range without profile_ids allows every profile. Profile ids
+    that no longer exist are ignored; when none of a range's ids exists the
+    range falls back to all profiles.
+    """
+    known_ids = {p["profile_id"] for p in profiles_data if p["profile_id"] is not None}
+    allowed: Dict[str, Optional[set]] = {}
+    for rng in ranges:
+        ids = {pid for pid in rng.get("profile_ids") or [] if pid in known_ids}
+        allow_all = not ids
+        for ip in range_ips(rng["cidr"]):
+            if ip in excluded_ips:
+                continue
+            if allow_all:
+                allowed[ip] = None
+            elif ip not in allowed:
+                allowed[ip] = set(ids)
+            elif allowed[ip] is not None:
+                allowed[ip] |= ids
+
+    # Share one profile list per distinct allowed set (read-only).
+    lists_by_key: Dict[Optional[frozenset], List[dict]] = {}
+    targets: List[dict] = []
+    for ip, ids in allowed.items():
+        key = frozenset(ids) if ids is not None else None
+        profiles_to_try = lists_by_key.get(key)
+        if profiles_to_try is None:
+            profiles_to_try = (
+                profiles_data if key is None else [p for p in profiles_data if p["profile_id"] in key]
+            )
+            lists_by_key[key] = profiles_to_try
+        targets.append({
+            "ip": ip,
+            "label": ip,
+            "profile_key": f"range_probe:{ip}",
+            "snmp_port": 161,
+            "snmp_timeout": snmp_timeout,
+            "snmp_retries": snmp_retries,
+            "is_range_probe": True,
+            "profiles_to_try": profiles_to_try,
+        })
+    return targets
+
+
+def _build_range_setup(db: Session, scan_mode: str, corr: str, now: Optional[datetime] = None) -> dict:
+    """Setup of a range scan: only range probe targets, no credential or ping-only targets."""
+    now = now or utcnow_naive()
+    scan_settings = _read_scan_settings()
+    configured_max_workers = scan_settings.get("max_workers", 4)
+    probe_workers = int(scan_settings.get("probe_workers", 64))
+    probe_skip_hours = int(scan_settings.get("probe_skip_hours", 6))
+    ranges = _load_scan_ranges(db, due_only=(scan_mode == "ranges"), now=now)
+
+    range_targets: List[dict] = []
+    skip_ips: set = set()
+    if ranges:
+        excluded = {row[0] for row in db.query(Credential.ip).all()}
+        excluded |= {row[0] for row in db.query(Device.ip).filter(Device.ignored.is_(True)).all()}
+        profiles_data = _profiles_data(db)
+        range_targets = _range_probe_targets(
+            ranges, excluded, profiles_data,
+            scan_settings.get("snmp_timeout", 3), scan_settings.get("snmp_retries", 1),
+        )
+        if probe_skip_hours > 0 and range_targets:
+            cutoff = now - timedelta(hours=probe_skip_hours)
+            recent = {
+                row[0] for row in db.query(PingCandidate.ip).filter(
+                    PingCandidate.snmp_checked_at.isnot(None), PingCandidate.snmp_checked_at >= cutoff,
+                ).all()
+            }
+            skip_ips = recent & {t["ip"] for t in range_targets}
+        _log_event(
+            logging.INFO,
+            "scan.range_probe.start",
+            correlation_id=corr,
+            ranges=[r["cidr"] for r in ranges],
+            new_ips=len(range_targets),
+            skipped_snmp=len(skip_ips),
+            profiles=len(profiles_data),
+        )
+
+    return {
+        "credential_count": 0,
+        "range_target_count": len(range_targets),
+        "ping_only_targets": {},
+        "scan_targets": range_targets,
+        "configured_max_workers": configured_max_workers,
+        "bulk_size": scan_settings.get("snmp_bulk_size", 25),
+        "if_names_by_ip": {},
+        "vlan_stp_plan": {},
+        "range_ids": [r["id"] for r in ranges],
+        "probe_workers": probe_workers,
+        "probe_skip_ips": skip_ips,
+    }
+
+
 def _build_scan_setup(db: Session, scan_mode: str, corr: str) -> dict:
+    if scan_mode in RANGE_MODES:
+        return _build_range_setup(db, scan_mode, corr)
     ignored_ips = {d.ip for d in db.query(Device.ip).filter(Device.ignored.is_(True)).all()}
     if scan_mode in {"ports", "links", "macs"}:
         # Only scan credentials that are already in the Device table and not ignored
@@ -320,78 +475,6 @@ def _build_scan_setup(db: Session, scan_mode: str, corr: str) -> dict:
     bulk_size = scan_settings.get("snmp_bulk_size", 25)
     if_names_by_ip = _load_if_name_cache(db) if scan_mode in {"links", "macs"} else {}
     vlan_stp_plan = _plan_vlan_stp_collection(db, scan_mode)
-
-    # ── Range-based discovery (only for discovery/full scans) ──────────────────
-    range_targets: List[dict] = []
-    if scan_mode in {"discovery", "full"}:
-        configured_ranges = _read_discovery_ranges(db)
-        if configured_ranges:
-            range_ips = _expand_ranges_to_ips(configured_ranges)
-            cred_ips = {c.ip for c in credentials}
-            # Load all profiles to try for each range IP
-            all_profiles = db.query(SnmpProfile).order_by(SnmpProfile.id).all()
-            # Decrypt once per scan; the list is shared read-only by all range targets.
-            if all_profiles:
-                profiles_data = [
-                    {
-                        "profile_id": p.id,
-                        "profile_label": p.label,
-                        "snmp_version": p.snmp_version,
-                        "community": decrypt(p.community),
-                        "v3_security_level": p.v3_security_level,
-                        "v3_username": p.v3_username,
-                        "v3_auth_protocol": p.v3_auth_protocol,
-                        "v3_auth_password": decrypt(p.v3_auth_password),
-                        "v3_priv_protocol": p.v3_priv_protocol,
-                        "v3_priv_password": decrypt(p.v3_priv_password),
-                    }
-                    for p in all_profiles
-                ]
-            else:
-                # No profiles defined - try SNMPv2c public as fallback
-                profiles_data = [{
-                    "profile_id": None,
-                    "profile_label": "default-public",
-                    "snmp_version": "v2c",
-                    "community": "public",
-                    "v3_security_level": "authPriv",
-                    "v3_username": "",
-                    "v3_auth_protocol": "SHA-256",
-                    "v3_auth_password": "",
-                    "v3_priv_protocol": "AES-128",
-                    "v3_priv_password": "",
-                }]
-            for ip in range_ips:
-                if ip in cred_ips or ip in ignored_ips:
-                    continue  # already covered by existing credential
-                range_targets.append({
-                    "ip": ip,
-                    "label": ip,
-                    "profile_key": f"range_probe:{ip}",
-                    "snmp_port": 161,
-                    "snmp_timeout": global_snmp_timeout,
-                    "snmp_retries": global_snmp_retries,
-                    "is_range_probe": True,
-                    "profiles_to_try": profiles_data,
-                    # These fields are filled after profile selection:
-                    "snmp_version": "v2c",
-                    "community": "public",
-                    "v3_security_level": "authPriv",
-                    "v3_username": "",
-                    "v3_auth_protocol": "SHA-256",
-                    "v3_auth_password": "",
-                    "v3_priv_protocol": "AES-128",
-                    "v3_priv_password": "",
-                })
-            _log_event(
-                logging.INFO,
-                "scan.range_probe.start",
-                correlation_id=corr,
-                ranges=configured_ranges,
-                range_ips=len(range_ips),
-                new_ips=len(range_targets),
-                profiles=len(all_profiles),
-            )
 
     scan_targets = []
 
@@ -442,18 +525,84 @@ def _build_scan_setup(db: Session, scan_mode: str, corr: str) -> dict:
             "ping_only": True,
         })
 
-    scan_targets.extend(range_targets)
-
     return {
         "credential_count": len(credentials),
-        "range_target_count": len(range_targets),
+        "range_target_count": 0,
         "ping_only_targets": ping_only_targets,
         "scan_targets": scan_targets,
         "configured_max_workers": configured_max_workers,
         "bulk_size": bulk_size,
         "if_names_by_ip": if_names_by_ip,
         "vlan_stp_plan": vlan_stp_plan,
+        "range_ids": [],
+        "probe_workers": int(scan_settings.get("probe_workers", 64)),
+        "probe_skip_ips": set(),
     }
+
+
+async def _select_responding_profiles(ip: str, port: int, profiles: List[dict],
+                                      timeout: int = RANGE_PRECHECK_TIMEOUT_SEC) -> List[dict]:
+    """Quick SNMP pre-check of all profiles concurrently; keeps profile order.
+
+    Returns the profiles whose single sysObjectID.0 GET answered.
+    """
+    if not profiles:
+        return []
+    results = await asyncio.gather(
+        *(snmp_probe_profile(ip, port, prof, timeout=timeout) for prof in profiles),
+        return_exceptions=True,
+    )
+    return [prof for prof, ok in zip(profiles, results) if ok is True]
+
+
+async def _probe_range_host(ip: str, target: dict, cancel_event=None) -> tuple:
+    """SNMP part of a range probe: pre-check all allowed profiles, then run the
+    discovery scan with the answering profiles in profile order until one
+    returns data. Returns ``(switch_data or None, matched profile_id or None)``.
+    """
+    port = target.get("snmp_port", 161)
+    candidates = await _select_responding_profiles(ip, port, target.get("profiles_to_try") or [])
+    for prof in candidates:
+        if cancel_event and cancel_event.is_set():
+            break
+        try:
+            data = await scan_switch(
+                ip=ip,
+                snmp_version=prof["snmp_version"],
+                community=prof["community"],
+                snmp_port=port,
+                snmp_timeout=target["snmp_timeout"],
+                snmp_retries=target["snmp_retries"],
+                v3_security_level=prof["v3_security_level"],
+                v3_username=prof["v3_username"],
+                v3_auth_protocol=prof["v3_auth_protocol"],
+                v3_auth_password=prof["v3_auth_password"],
+                v3_priv_protocol=prof["v3_priv_protocol"],
+                v3_priv_password=prof["v3_priv_password"],
+                scan_type="discovery",
+            )
+        except Exception:
+            continue
+        if data:
+            return data, prof["profile_id"]
+    return None, None
+
+
+def _mark_ranges_scanned_now(range_ids: List[int], lease: "_ScanLease") -> None:
+    """Stamp last_scan_at on ranges when a range scan had nothing to probe.
+
+    Runs in a worker thread with its own session; the lease is checked first
+    so a scan that lost its lock does not write.
+    """
+    import database
+
+    lease.check()
+    db = database.SessionLocal()
+    try:
+        mark_ranges_scanned(db, range_ids)
+        db.commit()
+    finally:
+        db.close()
 
 
 async def _execute_scan_body(
@@ -483,6 +632,10 @@ async def _execute_scan_body(
     bulk_size = setup["bulk_size"]
     if_names_by_ip = setup["if_names_by_ip"]
     vlan_stp_plan = setup["vlan_stp_plan"]
+    range_ids: List[int] = setup.get("range_ids", [])
+    probe_workers = max(1, int(setup.get("probe_workers", 64)))
+    probe_skip_ips: set = setup.get("probe_skip_ips", set())
+    range_mode = scan_mode in RANGE_MODES
 
     _log_event(
         logging.INFO,
@@ -495,12 +648,17 @@ async def _execute_scan_body(
     )
 
     if not credential_count and not range_target_count:
+        cancelled = bool(cancel_event and cancel_event.is_set())
+        if range_mode and range_ids and not dry_run and not cancelled:
+            # All IPs already covered: the ranges count as scanned, otherwise
+            # the scheduler would dispatch them again on every tick.
+            await asyncio.to_thread(_mark_ranges_scanned_now, range_ids, lease)
         result = ScanResult(
             scanned=0,
             found=0,
             links=0,
-            errors=["No enabled credentials and no discovery ranges configured"],
-            max_workers=configured_max_workers,
+            errors=[] if range_mode else ["No enabled credentials configured"],
+            max_workers=probe_workers if range_mode else configured_max_workers,
             total_duration_ms=0,
             switch_metrics=[],
             status="finished",
@@ -513,6 +671,8 @@ async def _execute_scan_body(
     ping_by_ip: Dict[str, tuple[bool, int]] = {}
     switch_metrics: List[ScanSwitchMetric] = []
     range_found_ips: List[str] = []  # IPs from ranges that responded to SNMP
+    # Range probe IPs whose SNMP was actually probed (not skipped by the window)
+    snmp_probed_ips: set = set()
     # IP -> id of the credential (primary or fallback) whose scan succeeded
     working_cred_by_ip: Dict[str, int] = {}
 
@@ -578,35 +738,19 @@ async def _execute_scan_body(
                 duration_ms = int((time.perf_counter() - started) * 1000)
                 return ip, label, None, "cancelled", duration_ms, ping_ok, ping_rtt, is_probe, None
 
-            # For range probes: try all profiles in sequence until one succeeds
+            # Range probes: skip SNMP for hosts probed recently without
+            # success (reported like "no profile suitable" so the ping
+            # candidate stays fresh); otherwise pre-check all allowed
+            # profiles and run the discovery scan with the answering ones.
             if is_probe:
-                profiles_to_try = target.get("profiles_to_try", [])
-                for prof in profiles_to_try:
-                    if cancel_event and cancel_event.is_set():
-                        break
-                    try:
-                        data = await scan_switch(
-                            ip=ip,
-                            snmp_version=prof["snmp_version"],
-                            community=prof["community"],
-                            snmp_port=target["snmp_port"],
-                            snmp_timeout=target["snmp_timeout"],
-                            snmp_retries=target["snmp_retries"],
-                            v3_security_level=prof["v3_security_level"],
-                            v3_username=prof["v3_username"],
-                            v3_auth_protocol=prof["v3_auth_protocol"],
-                            v3_auth_password=prof["v3_auth_password"],
-                            v3_priv_protocol=prof["v3_priv_protocol"],
-                            v3_priv_password=prof["v3_priv_password"],
-                            scan_type="discovery",
-                        )
-                        if data:
-                            duration_ms = int((time.perf_counter() - started) * 1000)
-                            return ip, label, data, "", duration_ms, ping_ok, ping_rtt, is_probe, prof["profile_id"]
-                    except Exception:
-                        continue
-                # No profile worked
+                if ip in probe_skip_ips:
+                    duration_ms = int((time.perf_counter() - started) * 1000)
+                    return ip, label, None, "no profile suitable", duration_ms, ping_ok, ping_rtt, is_probe, None
+                snmp_probed_ips.add(ip)
+                data, matched_profile_id = await _probe_range_host(ip, target, cancel_event)
                 duration_ms = int((time.perf_counter() - started) * 1000)
+                if data:
+                    return ip, label, data, "", duration_ms, ping_ok, ping_rtt, is_probe, matched_profile_id
                 return ip, label, None, "no profile suitable", duration_ms, ping_ok, ping_rtt, is_probe, None
 
             # Try primary credential, then fallback credentials in priority order
@@ -654,13 +798,22 @@ async def _execute_scan_body(
     # Track IPs that responded but no profile matched
     range_no_profile_ips: List[str] = []
 
-    workers = max(1, min(int(configured_max_workers), max(len(scan_targets), 1)))
+    probe_count = sum(1 for t in scan_targets if t.get("is_range_probe"))
+    credential_target_count = len(scan_targets) - probe_count
+    workers = max(1, min(int(configured_max_workers), max(credential_target_count, 1)))
     sem = asyncio.Semaphore(workers)
+    # Range probes are cheap (ping + short pre-check) and get their own limit.
+    probe_sem = asyncio.Semaphore(max(1, min(probe_workers, max(probe_count, 1))))
+    if range_mode:
+        workers = max(1, min(probe_workers, max(probe_count, 1)))
 
     total_targets = len(scan_targets)
     scanned_count = 0
     # Keep explicit task ownership so parent exceptions cannot leave targets running.
-    target_tasks = [asyncio.create_task(_scan_target_async(t, sem)) for t in scan_targets]
+    target_tasks = [
+        asyncio.create_task(_scan_target_async(t, probe_sem if t.get("is_range_probe") else sem))
+        for t in scan_targets
+    ]
     try:
         for completed in asyncio.as_completed(target_tasks):
             ip, label, data, error_msg, duration_ms, ping_ok, ping_rtt, is_probe, matched_profile_id = await completed
@@ -741,6 +894,24 @@ async def _execute_scan_body(
                 task.cancel()
         await _drain_scan_task(asyncio.ensure_future(asyncio.gather(*target_tasks, return_exceptions=True)))
 
+    # Reverse DNS for the device management IPs (discovery-like / full scans
+    # only; names change rarely) and for all endpoint ARP IPs (port rebuild
+    # modes), resolved concurrently off the DB thread.
+    hostname_by_ip: Dict[str, str] = {}
+    endpoint_hostnames: Dict[str, str] = {}
+    want_device_dns = scan_mode in DISCOVERY_LIKE_MODES or scan_mode == "full"
+    want_endpoint_dns = scan_mode in PORT_REBUILD_MODES
+    if (want_device_dns or want_endpoint_dns) and not dry_run and not (cancel_event and cancel_event.is_set()):
+        dns_servers = (await asyncio.to_thread(_read_dns_settings)).get("servers", [])
+        if want_device_dns:
+            hostname_by_ip = await resolve_hosts([*switch_data, *ping_only_targets], dns_servers, correlation_id=corr)
+        if want_endpoint_dns:
+            arp_ips = _collect_arp_ips(switch_data)
+            if arp_ips:
+                endpoint_hostnames = await resolve_hosts(
+                    arp_ips, dns_servers, correlation_id=corr, concurrency=ENDPOINT_DNS_CONCURRENCY,
+                )
+
     total_duration_ms = int((time.perf_counter() - scan_started) * 1000)
     switch_metrics.sort(key=lambda m: m.duration_ms, reverse=True)
     status = "cancelled" if (cancel_event and cancel_event.is_set()) else "finished"
@@ -772,6 +943,10 @@ async def _execute_scan_body(
         lease=lease,
         working_cred_by_ip=working_cred_by_ip,
         ping_only_targets=ping_only_targets,
+        hostname_by_ip=hostname_by_ip,
+        endpoint_hostnames=endpoint_hostnames,
+        snmp_probed_ips=snmp_probed_ips,
+        scan_range_ids=range_ids,
     ))
     try:
         result, dry_run_preview = await asyncio.shield(finalization_task)
@@ -794,6 +969,16 @@ async def _execute_scan_body(
     await asyncio.to_thread(_bump_topo_version)
 
     return result
+
+
+def _collect_arp_ips(switch_data: Dict[str, SwitchData]) -> List[str]:
+    """Unique ARP IPs over all scanned devices (first-seen order)."""
+    ips: Dict[str, None] = {}
+    for sw in switch_data.values():
+        for arp_ip in (getattr(sw, "arp_table", None) or {}).values():
+            if arp_ip:
+                ips.setdefault(arp_ip, None)
+    return list(ips)
 
 
 def _record_engine_id(db: Session, cred: Credential, engine_id: str, corr: str) -> None:
@@ -925,7 +1110,7 @@ def _plan_vlan_stp_collection(db: Session, scan_mode: str) -> Dict[str, tuple]:
     stp_update_interval_sec) has passed; an interval of 0 leaves that part to
     manual full scans.
     """
-    if scan_mode in {"full", "ports", "discovery"}:
+    if scan_mode in {"full", "ports"} or scan_mode in DISCOVERY_LIKE_MODES:
         return {}
     rows = db.query(Device.ip, Device.vlan_at, Device.stp_at).all()
     if scan_mode != "macs":
@@ -968,14 +1153,22 @@ def _apply_stp_vlan_names(device: Device, sw) -> None:
         device.vlan_at = now
 
 
-def _upsert_ping_candidates(db: Session, probe_ips: List[str], ping_by_ip: Dict[str, tuple]) -> None:
+def _upsert_ping_candidates(
+    db: Session,
+    probe_ips: List[str],
+    ping_by_ip: Dict[str, tuple],
+    snmp_probed_ips: Optional[set] = None,
+) -> None:
     """Record discovery-range hosts that answer ping but not SNMP as ping candidates.
 
     ``probe_ips`` are range probe targets for which no SNMP profile worked
     (credential targets never land here). Hosts that already have a Device or
     a Credential are skipped. Existing candidates get last_seen / rtt_ms
-    refreshed; their dismissed flag is kept. The caller commits (lease-guarded).
+    refreshed; their dismissed flag is kept. Hosts in ``snmp_probed_ips`` were
+    actually SNMP-probed and get snmp_checked_at = now; hosts whose probe was
+    skipped keep their value. The caller commits (lease-guarded).
     """
+    snmp_probed_ips = snmp_probed_ips or set()
     rtt_by_ip: Dict[str, int] = {}
     for ip in probe_ips:
         ping_ok, ping_rtt = ping_by_ip.get(ip, (False, 0))
@@ -988,15 +1181,19 @@ def _upsert_ping_candidates(db: Session, probe_ips: List[str], ping_by_ip: Dict[
     known |= {row[0] for row in db.query(Credential.ip).filter(Credential.ip.in_(ips)).all()}
     existing = {c.ip: c for c in db.query(PingCandidate).filter(PingCandidate.ip.in_(ips)).all()}
     now = datetime.now(timezone.utc)
+    checked_at = utcnow_naive()
     for ip, rtt in rtt_by_ip.items():
         if ip in known:
             continue
         cand = existing.get(ip)
         if cand is None:
-            db.add(PingCandidate(ip=ip, rtt_ms=rtt, first_seen=now, last_seen=now, dismissed=False))
+            cand = PingCandidate(ip=ip, rtt_ms=rtt, first_seen=now, last_seen=now, dismissed=False)
+            db.add(cand)
         else:
             cand.rtt_ms = rtt
             cand.last_seen = now
+        if ip in snmp_probed_ips:
+            cand.snmp_checked_at = checked_at
 
 
 ENDPOINT_RETENTION_DEFAULT_DAYS = 30
@@ -1079,6 +1276,10 @@ def _finalize_scan_db(
     lease: _ScanLease,
     working_cred_by_ip: Optional[Dict[str, int]] = None,
     ping_only_targets: Optional[Dict[str, dict]] = None,
+    hostname_by_ip: Optional[Dict[str, str]] = None,
+    endpoint_hostnames: Optional[Dict[str, str]] = None,
+    snmp_probed_ips: Optional[set] = None,
+    scan_range_ids: Optional[List[int]] = None,
 ) -> tuple:
     """Synchronous DB rebuild phase -- runs in a worker thread via
     asyncio.to_thread (see _execute_scan_body).
@@ -1312,7 +1513,7 @@ def _finalize_scan_db(
                 device.model     = model        or device.model
                 device.firmware  = firmware     or device.firmware
                 device.last_seen = datetime.now(timezone.utc)
-                if scan_mode != "discovery":
+                if scan_mode not in DISCOVERY_LIKE_MODES:
                     _apply_stp_vlan_names(device, sw)
                     _apply_if_name_cache(device, sw)
                     _apply_health(device, sw)
@@ -1358,7 +1559,7 @@ def _finalize_scan_db(
                 label=cred.label if cred else "",
                 enabled=True,
             )
-            if scan_mode != "discovery":
+            if scan_mode not in DISCOVERY_LIKE_MODES:
                 _apply_stp_vlan_names(new_device, sw)
                 _apply_if_name_cache(new_device, sw)
                 _apply_health(new_device, sw)
@@ -1368,8 +1569,16 @@ def _finalize_scan_db(
             if cred and not cred.device_id:
                 cred.device_id = new_device.id
 
+    # Reverse DNS names of the devices; a failed lookup keeps the stored name.
+    for ip, host in (hostname_by_ip or {}).items():
+        device = devices_by_ip.get(ip)
+        if device is not None and host:
+            device.hostname = host
+
     if status != "cancelled" and not (cancel_event and cancel_event.is_set()):
-        _upsert_ping_candidates(db, range_no_profile_ips, ping_by_ip)
+        _upsert_ping_candidates(db, range_no_profile_ips, ping_by_ip, snmp_probed_ips)
+        if scan_mode in RANGE_MODES and scan_range_ids:
+            mark_ranges_scanned(db, scan_range_ids)
 
     db.commit()
 
@@ -1377,15 +1586,15 @@ def _finalize_scan_db(
     link_count = 0
     ports_committed = False
     port_update_failed = False
-    update_ports = scan_mode in {"full", "ports", "macs"}
+    update_ports = scan_mode in PORT_REBUILD_MODES
     update_links = scan_mode in {"full", "ports", "links"}
     if update_ports:
         if cancel_event and cancel_event.is_set():
             status = "cancelled"
         else:
             try:
-                dns_cache: Dict[str, str] = {}
-                dns_servers = _read_dns_settings().get("servers", [])
+                # Endpoint names were resolved concurrently before finalize.
+                endpoint_hostnames = endpoint_hostnames or {}
 
                 global_arp: dict = {}
                 for sw_data in switch_data.values():
@@ -1430,7 +1639,7 @@ def _finalize_scan_db(
                         ifindex = sw.mac_ifindex.get(mac)
                         if ifindex is None or not peer_ip:
                             continue
-                        peer_host = _resolve_host(peer_ip, dns_cache, dns_servers, correlation_id=corr)
+                        peer_host = endpoint_hostnames.get(peer_ip, "")
                         peers_by_ifindex.setdefault(ifindex, []).append((mac, peer_ip, peer_host))
 
                     # MAC-only entries: FDB has MAC->ifIndex, but no ARP entry
@@ -1445,9 +1654,7 @@ def _finalize_scan_db(
                         if ifindex in lldp_ifindexes:
                             continue
                         resolved_ip = global_arp.get(mac, "")
-                        resolved_host = ""
-                        if resolved_ip:
-                            resolved_host = _resolve_host(resolved_ip, dns_cache, dns_servers, correlation_id=corr)
+                        resolved_host = endpoint_hostnames.get(resolved_ip, "") if resolved_ip else ""
                         peers_by_ifindex.setdefault(ifindex, []).append((mac, resolved_ip, resolved_host))
 
                     keep_vlan = not getattr(sw, "vlan_collected", True)

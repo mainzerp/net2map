@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import shared.state as _st
-from database import Device, SnmpProfile
+from database import Device, ScanRange, SnmpProfile
 
 BACKEND = Path(__file__).resolve().parents[1]
 
@@ -173,10 +173,14 @@ def test_range_profiles_decrypted_once_per_scan(db, executor_mod, monkeypatch):
         SnmpProfile(label="p2", snmp_version="v3", v3_username="u",
                     v3_auth_password="a", v3_priv_password="p"),
     ])
+    db.add(ScanRange(cidr="10.7.0.0/29"))
     db.commit()
-    range_ips = ["10.7.0.%d" % i for i in range(1, 6)]
-    monkeypatch.setattr(executor_mod, "_read_discovery_ranges", lambda db: ["10.7.0.0/29"])
-    monkeypatch.setattr(executor_mod, "_expand_ranges_to_ips", lambda ranges: list(range_ips))
+    range_ips = ["10.7.0.%d" % i for i in range(1, 7)]
+
+    async def precheck_ok(ip, port, profile, timeout=1, engine=None):
+        return True
+
+    monkeypatch.setattr(executor_mod, "snmp_probe_profile", precheck_ok)
 
     decrypted = []
 
@@ -199,7 +203,7 @@ def test_range_profiles_decrypted_once_per_scan(db, executor_mod, monkeypatch):
 
     monkeypatch.setattr(executor_mod, "scan_switch", no_snmp)
 
-    result = asyncio.run(executor_mod._execute_scan(db, scan_type="discovery", dry_run=True))
+    result = asyncio.run(executor_mod._execute_scan(db, scan_type="ranges_all", dry_run=True))
 
     assert result.scanned == len(range_ips)
     # 3 secrets per profile, decrypted once per scan (not once per range IP).

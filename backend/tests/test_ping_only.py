@@ -15,7 +15,6 @@ def _patch_scan(monkeypatch, executor_mod, ping_ok=True):  # noqa: F811
     proc = Mock(returncode=0 if ping_ok else 1)
     proc.communicate = AsyncMock(return_value=(b"time=3ms" if ping_ok else b"", b""))
     monkeypatch.setattr(asyncio, "create_subprocess_exec", AsyncMock(return_value=proc))
-    monkeypatch.setattr(executor_mod, "_read_discovery_ranges", lambda db: [])
     snmp = AsyncMock(return_value=None)
     monkeypatch.setattr(executor_mod, "scan_switch", snmp)
     return snmp

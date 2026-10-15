@@ -204,10 +204,28 @@ def _write_db_setting(key: str, value: str):
 
 # ─── Scan Settings (DB-backed) ────────────────────────────────────────────────
 
-DEFAULT_SCAN_SETTINGS = {"max_workers": 12, "snmp_timeout": 3, "snmp_retries": 1, "snmp_bulk_size": 25}
+DEFAULT_SCAN_SETTINGS = {
+    "max_workers": 12,
+    "snmp_timeout": 3,
+    "snmp_retries": 1,
+    "snmp_bulk_size": 25,
+    "probe_workers": 64,
+    "probe_skip_hours": 6,
+}
 # GETBULK max-repetitions bounds; mirrors snmp_scanner.BULK_SIZE_MIN/MAX
 # (not imported here so this module stays free of pysnmp).
 _BULK_SIZE_MIN, _BULK_SIZE_MAX = 5, 100
+# Range probe concurrency and SNMP re-probe skip window (0 = never skip).
+PROBE_WORKERS_MIN, PROBE_WORKERS_MAX = 1, 256
+PROBE_SKIP_HOURS_MIN, PROBE_SKIP_HOURS_MAX = 0, 168
+
+
+def _clamp_probe_workers(value: int) -> int:
+    return max(PROBE_WORKERS_MIN, min(PROBE_WORKERS_MAX, int(value)))
+
+
+def _clamp_probe_skip_hours(value: int) -> int:
+    return max(PROBE_SKIP_HOURS_MIN, min(PROBE_SKIP_HOURS_MAX, int(value)))
 
 
 def _normalize_scan_settings(value: dict | None):
@@ -222,7 +240,17 @@ def _normalize_scan_settings(value: dict | None):
         "snmp_timeout": max(1, min(30, merged["snmp_timeout"])),
         "snmp_retries": max(0, min(10, merged["snmp_retries"])),
         "snmp_bulk_size": max(_BULK_SIZE_MIN, min(_BULK_SIZE_MAX, merged["snmp_bulk_size"])),
+        "probe_workers": _clamp_probe_workers(merged["probe_workers"]),
+        "probe_skip_hours": _clamp_probe_skip_hours(merged["probe_skip_hours"]),
     }
+
+
+def _read_int_setting(key: str, default: int, clamp) -> int:
+    raw = _read_db_setting(key, str(default))
+    try:
+        return clamp(int(str(raw).strip()))
+    except (TypeError, ValueError):
+        return clamp(default)
 
 
 # Endpoint pruning: days after which unseen endpoints are removed (0 = off).
@@ -251,6 +279,12 @@ def _read_scan_settings():
         "snmp_retries": max(0, min(10, int(_read_db_setting("scan_snmp_retries", "1")))),
         "snmp_bulk_size": max(_BULK_SIZE_MIN, min(_BULK_SIZE_MAX, int(_read_db_setting("scan_snmp_bulk_size", "25")))),
         "endpoint_retention_days": _read_endpoint_retention_days(),
+        "probe_workers": _read_int_setting(
+            "scan_probe_workers", DEFAULT_SCAN_SETTINGS["probe_workers"], _clamp_probe_workers,
+        ),
+        "probe_skip_hours": _read_int_setting(
+            "scan_probe_skip_hours", DEFAULT_SCAN_SETTINGS["probe_skip_hours"], _clamp_probe_skip_hours,
+        ),
     }
 
 
@@ -260,6 +294,18 @@ def _write_scan_settings(value: dict | None):
     _write_db_setting("scan_snmp_timeout", str(payload["snmp_timeout"]))
     _write_db_setting("scan_snmp_retries", str(payload["snmp_retries"]))
     _write_db_setting("scan_snmp_bulk_size", str(payload["snmp_bulk_size"]))
+    # Probe settings are only written when given, so an older client that
+    # omits them does not reset values to their defaults.
+    if (value or {}).get("probe_workers") is not None:
+        _write_db_setting("scan_probe_workers", str(payload["probe_workers"]))
+    if (value or {}).get("probe_skip_hours") is not None:
+        _write_db_setting("scan_probe_skip_hours", str(payload["probe_skip_hours"]))
+    payload["probe_workers"] = _read_int_setting(
+        "scan_probe_workers", DEFAULT_SCAN_SETTINGS["probe_workers"], _clamp_probe_workers,
+    )
+    payload["probe_skip_hours"] = _read_int_setting(
+        "scan_probe_skip_hours", DEFAULT_SCAN_SETTINGS["probe_skip_hours"], _clamp_probe_skip_hours,
+    )
     # Only written when given, so an older client that omits the field does
     # not reset a value set via /settings.
     retention = (value or {}).get("endpoint_retention_days")

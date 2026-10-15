@@ -1,13 +1,10 @@
 """Scan settings, discovery ranges, and DNS settings endpoints."""
-import ipaddress
-import json
 from typing import List
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
-from database import AppSetting, get_db
-from scan_engine import _read_discovery_ranges
+from database import ScanRange, get_db
 from schemas import (
     DiscoveryRangesOut,
     DiscoveryRangesUpdate,
@@ -25,6 +22,7 @@ from shared.file_settings import (
     _write_dns_settings,
     _write_scan_settings,
 )
+from shared.scan_ranges import ScanRangeError, all_range_cidrs, normalize_scan_range
 
 router = APIRouter()
 
@@ -44,39 +42,44 @@ def update_scan_settings(body: ScanSettingsUpdate, request: Request):
     return result
 
 
-@router.get("/discovery-ranges", response_model=DiscoveryRangesOut)
+@router.get("/discovery-ranges", response_model=DiscoveryRangesOut, deprecated=True)
 def get_discovery_ranges(db: Session = Depends(get_db)):
-    """Return configured discovery scan ranges."""
-    return {"ranges": _read_discovery_ranges(db)}
+    """Return the CIDRs of all scan ranges. Deprecated: use GET /scan-ranges."""
+    return {"ranges": all_range_cidrs(db)}
 
 
-@router.put("/discovery-ranges", response_model=DiscoveryRangesOut,
+@router.put("/discovery-ranges", response_model=DiscoveryRangesOut, deprecated=True,
             dependencies=[require_role("admin", "operator")])
 def update_discovery_ranges(body: DiscoveryRangesUpdate, request: Request, db: Session = Depends(get_db)):
-    """Save discovery scan ranges (CIDR notation or single IPs)."""
+    """Replace the scan range list (CIDR notation or single IPs). Deprecated: use /scan-ranges.
+
+    Listed ranges that already exist keep their settings, missing ones are
+    created with defaults and ranges not listed are deleted.
+    """
     validated: List[str] = []
     for entry in body.ranges:
         entry = str(entry).strip()
         if not entry:
             continue
         try:
-            ipaddress.ip_network(entry, strict=False)
-            validated.append(entry)
-        except ValueError:
-            try:
-                ipaddress.ip_address(entry)
-                validated.append(entry)
-            except ValueError:
-                api_error(400, "INVALID_IP_RANGE", f"Invalid IP or CIDR range: {entry}", field="ranges")
+            cidr = normalize_scan_range(entry)
+        except ScanRangeError as exc:
+            api_error(400, exc.code, str(exc), field="ranges")
+        if cidr not in validated:
+            validated.append(cidr)
 
-    row = db.query(AppSetting).filter(AppSetting.key == "discovery_scan_ranges").first()
-    if row:
-        row.value = json.dumps(validated)
-    else:
-        db.add(AppSetting(key="discovery_scan_ranges", value=json.dumps(validated)))
+    wanted = set(validated)
+    existing = {row.cidr: row for row in db.query(ScanRange).all()}
+    for cidr, row in existing.items():
+        if cidr not in wanted:
+            db.delete(row)
+    for cidr in validated:
+        if cidr not in existing:
+            db.add(ScanRange(cidr=cidr, label="", enabled=True))
     db.commit()
-    log_audit(request, "settings_change", "discovery_ranges", "", {"ranges": validated})
-    return {"ranges": validated}
+    ranges = all_range_cidrs(db)
+    log_audit(request, "settings_change", "discovery_ranges", "", {"ranges": ranges})
+    return {"ranges": ranges}
 
 
 @router.get("/dns-settings", response_model=DnsSettingsOut)

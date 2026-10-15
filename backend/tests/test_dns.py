@@ -110,3 +110,130 @@ def test_evict_dns_cache_trims_when_over_limit():
     cache = {f"10.0.{i // 256}.{i % 256}": f"host{i}" for i in range(_dns_mod._DNS_CACHE_MAX)}
     _dns_mod._evict_dns_cache(cache)
     assert len(cache) == _dns_mod._DNS_CACHE_MAX // 2
+
+
+def test_resolve_hosts_concurrent_dedup_and_failures():
+    """resolve_hosts resolves each unique IP once, concurrently, "" on failure."""
+    import asyncio
+    import threading
+    import time
+
+    seen = []
+    active = {"now": 0, "max": 0}
+    lock = threading.Lock()
+
+    def fake_gethostbyaddr(ip):
+        with lock:
+            seen.append(ip)
+            active["now"] += 1
+            active["max"] = max(active["max"], active["now"])
+        time.sleep(0.05)
+        with lock:
+            active["now"] -= 1
+        if ip == "10.0.0.9":
+            raise OSError("no PTR")
+        return (f"host-{ip.split('.')[-1]}.lan", [], [ip])
+
+    with patch.object(_dns_mod.socket, "gethostbyaddr", side_effect=fake_gethostbyaddr):
+        result = asyncio.run(_dns_mod.resolve_hosts(["10.0.0.1", "10.0.0.2", "10.0.0.1", "", "10.0.0.9"]))
+    assert result == {"10.0.0.1": "host-1.lan", "10.0.0.2": "host-2.lan", "10.0.0.9": ""}
+    assert sorted(seen) == ["10.0.0.1", "10.0.0.2", "10.0.0.9"]
+    assert active["max"] > 1
+
+
+# -- process-wide TTL cache and custom resolver semantics ----------------------
+
+def test_global_cache_shared_across_calls():
+    """A second lookup with a fresh per-call cache is served from the TTL cache."""
+    _dns_mod.clear_dns_cache()
+    with patch.object(_dns_mod.socket, "gethostbyaddr", return_value=("cached.lan", [], [])) as mock_dns:
+        assert _dns_mod._resolve_host("10.2.0.1", {}) == "cached.lan"
+        assert _dns_mod._resolve_host("10.2.0.1", {}) == "cached.lan"
+        assert mock_dns.call_count == 1
+
+
+def test_global_cache_stores_negative_answers():
+    _dns_mod.clear_dns_cache()
+    with patch.object(_dns_mod.socket, "gethostbyaddr", side_effect=OSError("no PTR")) as mock_dns:
+        assert _dns_mod._resolve_host("10.2.0.2", {}) == ""
+        assert _dns_mod._resolve_host("10.2.0.2", {}) == ""
+        assert mock_dns.call_count == 1
+    _dns_mod.clear_dns_cache()
+    with patch.object(_dns_mod.socket, "gethostbyaddr", return_value=("later.lan", [], [])):
+        assert _dns_mod._resolve_host("10.2.0.2", {}) == "later.lan"
+
+
+def test_ttl_cache_expiry_and_eviction():
+    from shared.dns_cache import TTLCache
+
+    clock = {"now": 0.0}
+    cache = TTLCache(max_entries=4, positive_ttl=100, negative_ttl=10, clock=lambda: clock["now"])
+    cache.set("a", "host-a")
+    cache.set("b", "")
+    assert cache.get("a") == "host-a"
+    assert cache.get("b") == ""
+    clock["now"] = 11
+    assert cache.get("b") is None          # negative TTL elapsed
+    assert cache.get("a") == "host-a"
+    clock["now"] = 101
+    assert cache.get("a") is None          # positive TTL elapsed
+    for key in "cdefgh":
+        cache.set(key, key)
+    assert len(cache) <= 4
+    assert cache.get("h") == "h"
+    cache.clear()
+    assert len(cache) == 0
+
+
+def _fake_resolver(monkeypatch, exc=None, answer=None):
+    import dns.resolver
+
+    calls = []
+
+    def fake_resolve(self, name, rdtype):
+        calls.append(str(name))
+        if exc is not None:
+            raise exc
+        return answer
+
+    monkeypatch.setattr(dns.resolver.Resolver, "resolve", fake_resolve)
+    return calls
+
+
+def test_custom_dns_nxdomain_does_not_fall_back(monkeypatch):
+    import dns.resolver
+
+    _dns_mod.clear_dns_cache()
+    calls = _fake_resolver(monkeypatch, exc=dns.resolver.NXDOMAIN())
+    with patch.object(_dns_mod.socket, "gethostbyaddr", return_value=("system.lan", [], [])) as mock_dns:
+        assert _dns_mod._resolve_host("10.3.0.1", {}, ["192.0.2.53"]) == ""
+        mock_dns.assert_not_called()
+    assert len(calls) == 1
+
+
+def test_custom_dns_no_answer_does_not_fall_back(monkeypatch):
+    import dns.resolver
+
+    _dns_mod.clear_dns_cache()
+    _fake_resolver(monkeypatch, exc=dns.resolver.NoAnswer())
+    with patch.object(_dns_mod.socket, "gethostbyaddr", return_value=("system.lan", [], [])) as mock_dns:
+        assert _dns_mod._resolve_host("10.3.0.2", {}, ["192.0.2.53"]) == ""
+        mock_dns.assert_not_called()
+
+
+def test_custom_dns_timeout_falls_back_to_system(monkeypatch):
+    import dns.exception
+
+    _dns_mod.clear_dns_cache()
+    _fake_resolver(monkeypatch, exc=dns.exception.Timeout())
+    with patch.object(_dns_mod.socket, "gethostbyaddr", return_value=("system.lan", [], [])) as mock_dns:
+        assert _dns_mod._resolve_host("10.3.0.3", {}, ["192.0.2.53"]) == "system.lan"
+        mock_dns.assert_called_once()
+
+
+def test_custom_dns_answer_is_cached(monkeypatch):
+    _dns_mod.clear_dns_cache()
+    calls = _fake_resolver(monkeypatch, answer=["host.example.com."])
+    assert _dns_mod._resolve_host("10.3.0.4", {}, ["192.0.2.53"]) == "host.example.com"
+    assert _dns_mod._resolve_host("10.3.0.4", {}, ["192.0.2.53"]) == "host.example.com"
+    assert len(calls) == 1

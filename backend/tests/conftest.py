@@ -29,6 +29,7 @@ import database as _db_mod
 from database import User
 from main import app
 from shared.auth import DUMMY_PASSWORD_HASH, clear_revocation_cache, create_token, hash_password
+from shared.dns_cache import DNS_CACHE
 
 # In-memory SQLite engine with shared cache so all connections see the same DB
 engine = create_engine(
@@ -55,9 +56,12 @@ def setup_db():
     _db_mod.Base.metadata.create_all(bind=engine)
     # User ids restart per test; never reuse cached revocation state.
     clear_revocation_cache()
+    # The reverse DNS cache is process-wide; never leak answers between tests.
+    DNS_CACHE.clear()
     yield
     _db_mod.Base.metadata.drop_all(bind=engine)
     clear_revocation_cache()
+    DNS_CACHE.clear()
 
 
 @pytest.fixture

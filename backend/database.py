@@ -248,6 +248,8 @@ class Device(Base):
     # then keeps it instead of overwriting it with the auto-detected vendor.
     vendor_override = Column(Boolean, default=False, nullable=False, server_default="false")
     location     = Column(String, default="")             # sysLocation
+    # Reverse DNS (PTR) name of the management IP, refreshed by discovery/full scans
+    hostname     = Column(String(255), nullable=True)
     ping_status  = Column(String, default="unknown")      # online|offline|unknown
     ping_rtt_ms  = Column(Integer, default=0)
     last_ping    = Column(DateTime, nullable=True)
@@ -534,6 +536,29 @@ class PingCandidate(Base):
     first_seen = Column(DateTime, server_default=func.now())
     last_seen  = Column(DateTime, server_default=func.now())
     dismissed  = Column(Boolean, nullable=False, default=False, server_default="false")
+    # Last time the host was actually SNMP-probed (naive UTC). Range scans skip
+    # the SNMP probe while this lies within the scan_probe_skip_hours window.
+    snmp_checked_at = Column(DateTime, nullable=True)
+
+
+class ScanRange(Base):
+    """Discovery range (CIDR network or single IP) probed by range scans.
+
+    ``cidr`` is normalized (str(ip_network) or str(ip_address) for single
+    hosts). ``interval_sec`` NULL uses the global discovery_interval_sec
+    setting; ``profile_ids`` NULL or [] tries every SNMP profile.
+    ``last_scan_at`` is naive UTC.
+    """
+    __tablename__ = "scan_ranges"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    cidr         = Column(String(64), nullable=False, unique=True)
+    label        = Column(String(128), nullable=False, default="", server_default="")
+    enabled      = Column(Boolean, nullable=False, default=True, server_default="true")
+    interval_sec = Column(Integer, nullable=True)
+    profile_ids  = Column(JSONB, nullable=True)
+    last_scan_at = Column(DateTime, nullable=True)
+    created_at   = Column(DateTime, server_default=func.now())
 
 
 def _seed_default_settings():
@@ -550,7 +575,6 @@ def _seed_default_settings():
             ("mac_update_interval_sec", "300"),
             ("vlan_update_interval_sec", "1800"),
             ("stp_update_interval_sec", "300"),
-            ("discovery_scan_ranges", "[]"),
             ("scan_max_workers", "12"),
             ("scan_snmp_timeout", "3"),
             ("scan_snmp_retries", "1"),

@@ -33,11 +33,12 @@ ALLOWED_SETTING_KEYS = {
     "vlan_update_interval_sec",
     "stp_update_interval_sec",
     "port_update_interval_sec",  # legacy, still read as fallback
-    "discovery_scan_ranges",
     "scan_max_workers",
     "scan_snmp_timeout",
     "scan_snmp_retries",
     "scan_snmp_bulk_size",
+    "scan_probe_workers",
+    "scan_probe_skip_hours",
     "dns_servers",
     "map_opacity",
     "map_scale",
@@ -51,6 +52,8 @@ ALLOWED_SETTING_KEYS = {
 _INT_SETTING_RANGES = {
     # Days after which unseen endpoints are pruned; 0 disables pruning.
     "endpoint_retention_days": (0, 3650),
+    "scan_probe_workers": (1, 256),
+    "scan_probe_skip_hours": (0, 168),
 }
 
 

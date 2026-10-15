@@ -385,6 +385,8 @@ SCAN_PRIORITY = {
     "ports": 3,
     "links": 2,
     "discovery": 1,
+    "ranges": 1,
+    "ranges_all": 1,
 }
 
 _SCAN_LOCK_TTL = 600  # seconds -- safety TTL for crash recovery; renewed during scans

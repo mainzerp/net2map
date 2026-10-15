@@ -126,7 +126,6 @@ def test_scan_setup_runs_in_worker_thread(db, executor_mod, monkeypatch):  # noq
 
     db.add(Credential(ip="10.8.8.8", label="sw", enabled=True, snmp_enabled=False))
     db.commit()
-    monkeypatch.setattr(executor_mod, "_read_discovery_ranges", lambda session: [])
     threads = {}
     original = executor_mod._build_scan_setup
 

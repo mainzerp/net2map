@@ -2,12 +2,14 @@
 import ipaddress
 import json
 import logging
+from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from database import AppSetting, ScanRun, ScanRunSwitchMetric
+from database import ScanRun, ScanRunSwitchMetric
 from schemas import ScanResult
+from shared.scan_ranges import enabled_range_cidrs, load_scan_ranges, range_is_due
 
 log = logging.getLogger(__name__)
 
@@ -57,18 +59,22 @@ def _persist_scan_run(db: Session, result: ScanResult, devices_snapshot: List[st
     return run.id
 
 
+# ── Scan ranges (logic lives in shared.scan_ranges) ─────────────────────────
+
+
+def _range_is_due(last_scan_at: Optional[datetime], interval: int, now: Optional[datetime] = None) -> bool:
+    """True when a range was never scanned or its interval has elapsed."""
+    return range_is_due(last_scan_at, interval, now)
+
+
+def _load_scan_ranges(db: Session, due_only: bool, now: Optional[datetime] = None) -> List[dict]:
+    """Enabled scan ranges as plain dicts (see shared.scan_ranges.load_scan_ranges)."""
+    return load_scan_ranges(db, due_only=due_only, now=now)
+
+
 def _read_discovery_ranges(db: Session) -> List[str]:
-    """Return list of configured CIDR/IP discovery ranges from AppSettings."""
-    row = db.query(AppSetting).filter(AppSetting.key == "discovery_scan_ranges").first()
-    if not row or not row.value:
-        return []
-    try:
-        value = json.loads(row.value)
-        if isinstance(value, list):
-            return [str(v).strip() for v in value if str(v).strip()]
-    except Exception:
-        pass
-    return []
+    """Return the CIDRs of all enabled scan ranges (legacy helper)."""
+    return enabled_range_cidrs(db)
 
 
 def _expand_ranges_to_ips(ranges: List[str]) -> List[str]:

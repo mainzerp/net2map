@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from database import Credential, Device
+from database import Credential, Device, ScanRange
 from schemas import ScanResult
 
 
@@ -87,16 +87,16 @@ def test_unresponsive_unknown_device_not_created(db, executor_mod):
     assert db.query(Device).filter(Device.ip == "10.9.9.10").first() is None
 
 
-@pytest.mark.parametrize("scan_type", ["full", "discovery"])
+@pytest.mark.parametrize("scan_type", ["full", "discovery", "ranges", "ranges_all"])
 def test_ignored_devices_are_not_scan_targets(db, executor_mod, monkeypatch, scan_type):
     db.add_all([
         Device(ip="10.9.9.9", ignored=True),
         Device(ip="10.9.9.10", ignored=True),
         Credential(ip="10.9.9.9", label="ignored", enabled=True),
+        # 10.9.9.8/30 has the usable hosts .9 and .10
+        ScanRange(cidr="10.9.9.8/30"),
     ])
     db.commit()
-    monkeypatch.setattr(executor_mod, "_read_discovery_ranges", lambda db: ["10.9.9.0/24"])
-    monkeypatch.setattr(executor_mod, "_expand_ranges_to_ips", lambda ranges: ["10.9.9.9", "10.9.9.10"])
     subprocess = AsyncMock()
     monkeypatch.setattr(asyncio, "create_subprocess_exec", subprocess)
     result = asyncio.run(executor_mod._execute_scan(db, scan_type=scan_type))
@@ -111,7 +111,6 @@ def test_cancelled_scan_does_not_ping_queued_targets(db, executor_mod, monkeypat
     cancel.set()
     subprocess = AsyncMock()
     monkeypatch.setattr(asyncio, "create_subprocess_exec", subprocess)
-    monkeypatch.setattr(executor_mod, "_read_discovery_ranges", lambda db: [])
     result = asyncio.run(executor_mod._execute_scan(db, cancel_event=cancel, dry_run=True))
     assert result.status == "cancelled"
     subprocess.assert_not_called()
@@ -225,7 +224,6 @@ def test_lost_lock_never_starts_scan(db, executor_mod, monkeypatch):
 def test_lost_heartbeat_cancels_ping_and_reaps_process(db, executor_mod, monkeypatch):
     db.add(Credential(ip="10.9.9.9", label="slow", enabled=True))
     db.commit()
-    monkeypatch.setattr(executor_mod, "_read_discovery_ranges", lambda db: [])
     monkeypatch.setattr(executor_mod, "_LOCK_RENEW_INTERVAL_SEC", 0.001)
     # The setup phase and lease checks run in worker threads, so the first
     # renewal can fire before the ping starts. Lose the lease only once the
@@ -256,7 +254,6 @@ def test_external_cancellation_awaits_all_snmp_targets(db, executor_mod, monkeyp
     db.add_all([Credential(ip="10.9.9.9", label="one", enabled=True),
                 Credential(ip="10.9.9.10", label="two", enabled=True)])
     db.commit()
-    monkeypatch.setattr(executor_mod, "_read_discovery_ranges", lambda db: [])
     monkeypatch.setattr(executor_mod, "_read_scan_settings", lambda: {"max_workers": 2})
     proc = Mock(returncode=0)
     proc.communicate = AsyncMock(return_value=(b"time=1ms", b""))
@@ -293,7 +290,6 @@ def test_external_cancellation_awaits_all_snmp_targets(db, executor_mod, monkeyp
 def test_cancelled_finalizer_drains_thread_and_blocks_commit(db, executor_mod, monkeypatch):
     db.add(Credential(ip="10.9.9.9", label="queued", enabled=True))
     db.commit()
-    monkeypatch.setattr(executor_mod, "_read_discovery_ranges", lambda db: [])
     user_cancel = threading.Event()
     user_cancel.set()
     thread_started = threading.Event()

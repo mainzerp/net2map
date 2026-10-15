@@ -187,8 +187,10 @@ def scheduler_tick():
     refused dispatch rolls its own claim back so the next tick retries.
     """
     from scan_engine.scheduler import (
+        RANGES_CHECK_INTERVAL_SEC,
         _dispatch_scheduled_scan,
         _log_dispatch_start,
+        _ranges_due,
         _read_scheduler_intervals,
         _scan_blocked,
     )
@@ -201,7 +203,7 @@ def scheduler_tick():
     finally:
         db.close()
 
-    # Dispatch in priority order: macs > links > discovery
+    # Dispatch in priority order: macs > links > discovery > ranges
     for kind in ("macs", "links", "discovery"):
         interval = intervals[kind]
         if interval <= 0:
@@ -217,6 +219,15 @@ def scheduler_tick():
             # Refused after claiming (scan lock state changed in between):
             # roll back only our own claim so the next tick retries.
             release_scheduled_dispatch(kind, token)
+
+    # Range scans: dispatched only when at least one enabled range is due; the
+    # claim (at most one dispatch per minute) is taken only in that case.
+    if not _scan_blocked("ranges") and _ranges_due():
+        token = claim_scheduled_dispatch_token("ranges", RANGES_CHECK_INTERVAL_SEC)
+        if token:
+            _log_dispatch_start("ranges")
+            if not _dispatch_scheduled_scan("ranges"):
+                release_scheduled_dispatch("ranges", token)
 
 
 @celery_app.task

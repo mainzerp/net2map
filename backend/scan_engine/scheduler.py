@@ -9,7 +9,12 @@ from datetime import datetime, timezone
 from database import AppSetting, SessionLocal
 from scan_engine.event_loop import _get_bg_loop
 from scan_engine.executor import _execute_scan
+from shared.scan_ranges import any_scan_range_due
 from shared.state import _log_event, can_dispatch_scan, set_scan_job, update_scan_job
+
+# Range scans are dispatched when at least one enabled range is due; the due
+# check (a DB query) runs at most this often.
+RANGES_CHECK_INTERVAL_SEC = 60
 
 # Wake event: set this to interrupt the scheduler sleep early (e.g. when
 # settings change and the scheduler should re-evaluate intervals immediately).
@@ -91,6 +96,15 @@ def _read_scheduler_intervals(db) -> dict:
     return {"discovery": discovery_interval, "links": links_interval, "macs": macs_interval}
 
 
+def _ranges_due() -> bool:
+    """True when at least one enabled scan range is due (short-lived session)."""
+    db = SessionLocal()
+    try:
+        return any_scan_range_due(db)
+    finally:
+        db.close()
+
+
 def _dispatch_scheduled_scan(scan_type: str) -> bool:
     """Run a scheduled scan, using Celery if available, otherwise directly.
 
@@ -164,10 +178,11 @@ def _dispatch_scheduled_scan(scan_type: str) -> bool:
 
 
 def _background_scheduler():
-    """Runs discovery, link and MAC scans periodically based on app settings."""
+    """Runs discovery, link, MAC and range scans periodically based on app settings."""
     last_discovery = 0
     last_links = 0
     last_macs = 0
+    last_ranges_check = 0
 
     while not _shutdown_requested.is_set():
         _scheduler_wake.wait(timeout=5)
@@ -185,7 +200,7 @@ def _background_scheduler():
 
             now = time.time()
 
-            # Dispatch in priority order: macs > links > discovery
+            # Dispatch in priority order: macs > links > discovery > ranges
             # Higher-priority scans are dispatched first so they register
             # in the waiting set before lower-priority checks run.
             # The last_* timestamps only advance when the scan was actually
@@ -204,6 +219,13 @@ def _background_scheduler():
                 _log_dispatch_start("discovery")
                 if _dispatch_scheduled_scan("discovery"):
                     last_discovery = time.time()
+
+            # Range scans run when a range is due; checked at most once a minute.
+            if (now - last_ranges_check) >= RANGES_CHECK_INTERVAL_SEC:
+                last_ranges_check = now
+                if _ranges_due():
+                    _log_dispatch_start("ranges")
+                    _dispatch_scheduled_scan("ranges")
 
         except Exception as e:
             _log_event(logging.ERROR, "scheduler.error", error=str(e))

@@ -66,7 +66,7 @@ def start_scan_job(request: Request):
 def start_dry_run_job(request: Request):
     """Start a background dry-run discovery job. Returns job ID immediately.
     Poll /api/v1/scan/jobs/{job_id} for results; result will contain a 'preview' key."""
-    return _start_job(dry_run=True)
+    return _start_job(dry_run=True, scan_type="ranges_all")
 
 
 @router.get("/scan/jobs/{job_id}")

@@ -8,29 +8,78 @@ from slowapi.util import get_remote_address
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from database import AppSetting, Credential, Device, SnmpProfile, get_db
+from database import AppSetting, Credential, Device, ScanRange, SnmpProfile, get_db
 from routers.bulk import _normalize_bool, _normalize_optional_int, normalize_snmp_enabled
 from schemas import (
     MASK_EXPORT,
     CredentialCreate,
     GlobalConfigExportOut,
     GlobalConfigImportRequest,
+    ScanRangeCreate,
     SnmpProfileCreate,
 )
 from shared.audit import log_audit
 from shared.auth import require_role
 from shared.crypto import encrypt
 from shared.errors import api_error
+from shared.scan_ranges import ScanRangeError, clean_profile_ids, normalize_scan_range
 from shared.secrets import SECRET_FIELDS, masked_secret_fields
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
+
+_LEGACY_RANGES_KEY = "discovery_scan_ranges"
+
+
+def _legacy_range_cidrs(raw: str) -> list:
+    """Normalized CIDRs of a legacy discovery_scan_ranges JSON list (invalid entries skipped)."""
+    try:
+        value = json.loads(raw or "[]")
+    except ValueError:
+        return []
+    if not isinstance(value, list):
+        return []
+    result = []
+    for item in value:
+        try:
+            cidr = normalize_scan_range(item)
+        except ScanRangeError:
+            continue
+        if cidr not in result:
+            result.append(cidr)
+    return result
+
+
+def _validate_scan_range_row(row) -> dict:
+    """Validate one exported scan range; raises ValueError with a readable message."""
+    if not isinstance(row, dict):
+        raise ValueError("scan range must be an object")
+    cidr = normalize_scan_range(row.get("cidr"))
+    base = ScanRangeCreate(
+        cidr=cidr,
+        label=str(row.get("label") or ""),
+        enabled=_normalize_bool(row.get("enabled", True)),
+        interval_sec=_normalize_optional_int(row.get("interval_sec")),
+    )
+    labels = row.get("profile_labels")
+    if labels is not None:
+        if not isinstance(labels, list):
+            raise ValueError("profile_labels must be an array")
+        labels = [str(label).strip() for label in labels if str(label).strip()]
+    return {
+        "cidr": cidr,
+        "label": base.label.strip(),
+        "enabled": base.enabled,
+        "interval_sec": base.interval_sec,
+        "profile_labels": labels,
+    }
 
 
 @router.get("/config/export", response_model=GlobalConfigExportOut,
             dependencies=[require_role("admin", "operator")])
 @limiter.limit("10/minute")
 def export_global_config(request: Request, db: Session = Depends(get_db)):
+    profile_labels_by_id = {p.id: p.label for p in db.query(SnmpProfile).all()}
     payload = {
         "version": 1,
         "exported_at": datetime.now(timezone.utc).isoformat(),
@@ -77,6 +126,20 @@ def export_global_config(request: Request, db: Session = Depends(get_db)):
             }
             for c in db.query(Credential).order_by(Credential.id).all()
         ],
+        "scan_ranges": [
+            {
+                "cidr": r.cidr,
+                "label": r.label or "",
+                "enabled": bool(r.enabled),
+                "interval_sec": r.interval_sec,
+                # Profiles are referenced by label: ids differ between databases.
+                "profile_labels": [
+                    profile_labels_by_id[pid] for pid in clean_profile_ids(r.profile_ids)
+                    if pid in profile_labels_by_id
+                ],
+            }
+            for r in db.query(ScanRange).order_by(ScanRange.cidr).all()
+        ],
     }
     return GlobalConfigExportOut(data=json.dumps(payload, ensure_ascii=False, indent=2))
 
@@ -95,6 +158,11 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
     settings_rows = payload.get("settings") or []
     profile_rows = payload.get("profiles") or []
     credential_rows = payload.get("credentials") or []
+    scan_range_rows = payload.get("scan_ranges")
+    if scan_range_rows is None:
+        scan_range_rows = []
+    elif not isinstance(scan_range_rows, list):
+        api_error(400, "INVALID_CONFIG_ARRAYS", "scan_ranges must be an array")
 
     if not isinstance(settings_rows, list) or not isinstance(profile_rows, list) or not isinstance(credential_rows, list):
         api_error(400, "INVALID_CONFIG_ARRAYS", "settings/profiles/credentials must be arrays")
@@ -103,6 +171,11 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
     valid_settings = []
     valid_profiles = []
     valid_credentials = []
+    # Normalized cidr -> validated scan range row (later rows win).
+    valid_scan_ranges: dict = {}
+    # CIDRs from a legacy "discovery_scan_ranges" settings row: only inserted
+    # when missing, never written to app_settings.
+    legacy_range_cidrs: list = []
 
     for i, row in enumerate(settings_rows, start=1):
         try:
@@ -110,9 +183,21 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
             value = str(row.get("value", ""))
             if not key:
                 raise ValueError("missing key")
+            if key == _LEGACY_RANGES_KEY:
+                legacy_range_cidrs.extend(_legacy_range_cidrs(value))
+                continue
             valid_settings.append({"key": key, "value": value})
         except Exception as exc:
             errors.append({"section": "settings", "row": i, "message": str(exc)})
+
+    for i, row in enumerate(scan_range_rows, start=1):
+        try:
+            valid = _validate_scan_range_row(row)
+            valid_scan_ranges[valid["cidr"]] = valid
+        except Exception as exc:
+            errors.append({"section": "scan_ranges", "row": i, "message": str(exc)})
+    for cidr in legacy_range_cidrs:
+        valid_scan_ranges.setdefault(cidr, {"cidr": cidr, "legacy": True})
 
     for i, row in enumerate(profile_rows, start=1):
         try:
@@ -139,8 +224,8 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
         except Exception as exc:
             errors.append({"section": "credentials", "row": i, "message": str(exc)})
 
-    inserted = {"settings": 0, "profiles": 0, "credentials": 0}
-    updated = {"settings": 0, "profiles": 0, "credentials": 0}
+    inserted = {"settings": 0, "profiles": 0, "credentials": 0, "scan_ranges": 0}
+    updated = {"settings": 0, "profiles": 0, "credentials": 0, "scan_ranges": 0}
 
     if not body.dry_run and not errors:
         for row in valid_settings:
@@ -169,6 +254,13 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
                     row[field] = ""
                 db.add(SnmpProfile(**row))
                 inserted["profiles"] += 1
+
+        # New profiles need their ids before labels can be resolved.
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            api_error(400, "IMPORT_INTEGRITY", "Import violated a database constraint (e.g. duplicate or dangling reference)")
 
         # Reference maps for resolving exported FK labels/ips; raw ids in the
         # payload remain the fallback when no label/ip was provided.
@@ -203,6 +295,33 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
                 db.add(Credential(**row))
                 inserted["credentials"] += 1
 
+        existing_ranges = {r.cidr: r for r in db.query(ScanRange).all()}
+        for cidr, row in valid_scan_ranges.items():
+            existing = existing_ranges.get(cidr)
+            if row.get("legacy"):
+                if existing is None:
+                    db.add(ScanRange(cidr=cidr, label="", enabled=True))
+                    inserted["scan_ranges"] += 1
+                continue
+            fields = {
+                "label": row["label"],
+                "enabled": row["enabled"],
+                "interval_sec": row["interval_sec"],
+            }
+            if row["profile_labels"] is not None:
+                # Unknown labels are dropped (profile not part of this database).
+                fields["profile_ids"] = list(dict.fromkeys(
+                    profiles_by_label[label] for label in row["profile_labels"] if label in profiles_by_label
+                ))
+            if existing is not None:
+                for key, value in fields.items():
+                    setattr(existing, key, value)
+                updated["scan_ranges"] += 1
+            else:
+                fields.setdefault("profile_ids", [])
+                db.add(ScanRange(cidr=cidr, **fields))
+                inserted["scan_ranges"] += 1
+
         # Written in the import transaction: no import without its audit record.
         log_audit(request, "import", "global_config", "", {
             "inserted": inserted, "updated": updated,
@@ -219,6 +338,7 @@ def import_global_config(body: GlobalConfigImportRequest, request: Request, db: 
             "settings": len(valid_settings),
             "profiles": len(valid_profiles),
             "credentials": len(valid_credentials),
+            "scan_ranges": len(valid_scan_ranges),
         },
         "inserted": inserted,
         "updated": updated,

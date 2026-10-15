@@ -441,6 +441,35 @@ async def snmp_get(ip: str, port: int, auth,
     return result
 
 
+OID_SYS_OBJECT_ID = "1.3.6.1.2.1.1.2.0"
+
+
+async def snmp_probe_profile(ip: str, port: int, profile: dict, timeout: int = 1,
+                             engine: Optional[SnmpEngine] = None) -> bool:
+    """Quick SNMP pre-check: one GET of sysObjectID.0 without retries.
+
+    ``profile`` carries the SNMP credential fields (snmp_version, community,
+    v3_*). Returns True when the agent answered with a value, so the full
+    discovery scan is only attempted with profiles that can work.
+    """
+    try:
+        auth = build_auth(
+            snmp_version=profile.get("snmp_version", "v2c"),
+            community=profile.get("community", "public"),
+            v3_security_level=profile.get("v3_security_level", "authPriv"),
+            v3_username=profile.get("v3_username", ""),
+            v3_auth_protocol=profile.get("v3_auth_protocol", "SHA-256"),
+            v3_auth_password=profile.get("v3_auth_password", ""),
+            v3_priv_protocol=profile.get("v3_priv_protocol", "AES-128"),
+            v3_priv_password=profile.get("v3_priv_password", ""),
+        )
+    except Exception as exc:
+        log.debug("snmp_probe_profile %s: invalid profile: %s", ip, exc)
+        return False
+    result = await snmp_get(ip, port, auth, OID_SYS_OBJECT_ID, timeout=timeout, retries=0, engine=engine)
+    return bool(result)
+
+
 async def snmp_get_raw(ip: str, port: int, auth,
                        *oids: str,
                        timeout: int = 3,
@@ -1047,6 +1076,9 @@ async def scan_switch(
     (the result then reports ``vlan_collected`` / ``stp_collected`` False).
     """
 
+    if scan_type in {"ranges", "ranges_all"}:
+        # Range probes only need the discovery data set.
+        scan_type = "discovery"
     scan_mode = scan_type if scan_type in {"discovery", "ports", "links", "macs", "full"} else "full"
     is_v3 = snmp_version not in (SnmpVersion.V2C, "v2c")
     engine_id_override = (v3_engine_id or "") if is_v3 else ""
