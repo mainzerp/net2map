@@ -201,6 +201,15 @@ def test_dry_run_job_uses_ranges_all(client, auth_headers, started_jobs):
     assert started_jobs == [{"dry_run": True, "scan_type": "ranges_all"}]
 
 
+def test_scan_job_include_ranges_starts_combined_job(client, auth_headers, started_jobs):
+    assert client.post("/api/v1/scan/jobs", headers=auth_headers).status_code == 200
+    assert client.post("/api/v1/scan/jobs?include_ranges=true", headers=auth_headers).status_code == 200
+    assert started_jobs == [
+        {"dry_run": False, "scan_type": "full"},
+        {"dry_run": False, "scan_type": "full_ranges"},
+    ]
+
+
 def test_scan_endpoints_require_operator(client, viewer_jwt_headers, started_jobs):
     assert client.post(f"{BASE}/scan", headers=viewer_jwt_headers).status_code == 403
     assert started_jobs == []

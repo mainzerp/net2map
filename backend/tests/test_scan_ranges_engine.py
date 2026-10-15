@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import sqlalchemy as sa
 
-from database import AppSetting, Credential, Device, Endpoint, PingCandidate, ScanRange, SnmpProfile
+from database import AppSetting, Credential, Device, Endpoint, PingCandidate, ScanRange, ScanRun, SnmpProfile
 from schemas import ScanResult
 from shared import scan_ranges as sr
 
@@ -155,8 +155,8 @@ def test_range_probe_targets_dedupe_exclusion_and_profile_union(executor_mod):
 def test_build_range_setup_excludes_credentials_and_ignored(db, executor_mod):
     now = _now()
     db.add_all([
-        ScanRange(cidr="10.2.0.0/29"),                                   # .1-.6
-        ScanRange(cidr="10.3.0.1", last_scan_at=now),                    # not due
+        ScanRange(cidr="10.2.0.0/29", last_scan_at=now - timedelta(days=1)),  # .1-.6, due
+        ScanRange(cidr="10.3.0.1", last_scan_at=now),                         # not due
         Credential(ip="10.2.0.1", label="known", enabled=False),
         Device(ip="10.2.0.2", ignored=True),
         Device(ip="10.2.0.3", ignored=False),
@@ -179,6 +179,24 @@ def test_build_range_setup_excludes_credentials_and_ignored(db, executor_mod):
     setup_all = executor_mod._build_scan_setup(db, "ranges_all", "corr")
     assert "10.3.0.1" in [t["ip"] for t in setup_all["scan_targets"]]
     assert len(setup_all["range_ids"]) == 2
+    # "Scan all" is an explicit request: the skip window does not apply.
+    assert setup_all["probe_skip_ips"] == set()
+
+
+def test_scan_now_range_ignores_skip_window(db, executor_mod):
+    """A range reset by "Scan now" (or never scanned) re-probes every host;
+    other due ranges in the same run keep the skip window."""
+    now = _now()
+    db.add_all([
+        ScanRange(cidr="10.2.1.1", last_scan_at=None),                       # scan now
+        ScanRange(cidr="10.2.2.1", last_scan_at=now - timedelta(days=1)),    # scheduled, due
+        PingCandidate(ip="10.2.1.1", snmp_checked_at=now - timedelta(hours=1)),
+        PingCandidate(ip="10.2.2.1", snmp_checked_at=now - timedelta(hours=1)),
+    ])
+    db.commit()
+    setup = executor_mod._build_scan_setup(db, "ranges", "corr")
+    assert sorted(t["ip"] for t in setup["scan_targets"]) == ["10.2.1.1", "10.2.2.1"]
+    assert setup["probe_skip_ips"] == {"10.2.2.1"}
 
 
 def test_full_and_discovery_setup_do_not_probe_ranges(db, executor_mod):
@@ -222,7 +240,8 @@ def test_precheck_selects_answering_profiles_in_order(executor_mod, monkeypatch)
          "v3_priv_protocol": "", "v3_priv_password": ""} for p in _profiles()
     ]}
     data, profile_id = asyncio.run(executor_mod._probe_range_host("10.5.0.1", target))
-    assert sorted(prechecked) == [(1, 1), (2, 1), (3, 1)]
+    # The pre-check uses the configured SNMP timeout of the target.
+    assert sorted(prechecked) == [(1, 3), (2, 3), (3, 3)]
     # Profile 2 failed the pre-check: only 1 and 3 get a full discovery scan, in order.
     assert scanned == [("a", "discovery", 3), ("c", "discovery", 3)]
     assert data is not None and profile_id == 3
@@ -272,7 +291,7 @@ def test_range_scan_skip_window_and_bookkeeping(db, executor_mod, monkeypatch):
     recent = now - timedelta(hours=1)
     old_seen = now - timedelta(days=1)
     db.add_all([
-        ScanRange(cidr="10.7.0.0/29"),  # .1-.6
+        ScanRange(cidr="10.7.0.0/29", last_scan_at=now - timedelta(days=1)),  # .1-.6, scheduled re-scan
         PingCandidate(ip="10.7.0.2", snmp_checked_at=recent, last_seen=old_seen, rtt_ms=99),
         PingCandidate(ip="10.7.0.3", snmp_checked_at=now - timedelta(hours=12), last_seen=old_seen),
     ])
@@ -314,6 +333,52 @@ def test_range_scan_skip_window_and_bookkeeping(db, executor_mod, monkeypatch):
     assert cands["10.7.0.4"].snmp_checked_at >= now - timedelta(seconds=5)
     rng = db.query(ScanRange).one()
     assert rng.last_scan_at is not None and rng.last_scan_at >= now - timedelta(seconds=5)
+    # The history counts only the SNMP device, not the ping-only hosts.
+    assert result.found == 1
+    run = db.query(ScanRun).filter(ScanRun.id == result.run_id).one()
+    assert run.scan_type == "ranges"
+    assert json.loads(run.devices_snapshot_json) == ["10.7.0.1"]
+
+
+def _result(status="finished", scanned=1, found=1, errors=()):
+    return ScanResult(scanned=scanned, found=found, links=0, errors=list(errors), status=status)
+
+
+def test_full_ranges_runs_ranges_then_full(db, executor_mod, monkeypatch):
+    real = executor_mod._execute_scan
+    calls = []
+
+    async def fake_execute(db_, cancel_event=None, correlation_id=None, scan_type="full", dry_run=False,
+                           lock_token=None):
+        if scan_type == "full_ranges":
+            return await real(db_, cancel_event, correlation_id, scan_type, dry_run, lock_token)
+        calls.append((scan_type, lock_token))
+        if scan_type == "ranges_all":
+            return _result(scanned=254, found=2, errors=["10.0.0.9: boom"])
+        return _result(scanned=48, found=50)
+
+    monkeypatch.setattr(executor_mod, "_execute_scan", fake_execute)
+    result = asyncio.run(executor_mod._execute_scan(db, scan_type="full_ranges", lock_token="tok"))
+    assert calls == [("ranges_all", "tok"), ("full", "tok")]
+    assert (result.scanned, result.found, result.ranges_scanned, result.ranges_found) == (48, 50, 254, 2)
+    assert result.errors == ["Range scan: 10.0.0.9: boom"]
+
+
+def test_full_ranges_stops_after_cancelled_range_scan(db, executor_mod, monkeypatch):
+    real = executor_mod._execute_scan
+    calls = []
+
+    async def fake_execute(db_, cancel_event=None, correlation_id=None, scan_type="full", dry_run=False,
+                           lock_token=None):
+        if scan_type == "full_ranges":
+            return await real(db_, cancel_event, correlation_id, scan_type, dry_run, lock_token)
+        calls.append(scan_type)
+        return _result(status="cancelled")
+
+    monkeypatch.setattr(executor_mod, "_execute_scan", fake_execute)
+    result = asyncio.run(executor_mod._execute_scan(db, scan_type="full_ranges"))
+    assert calls == ["ranges_all"]
+    assert result.status == "cancelled"
 
 
 def test_range_scan_skip_window_disabled(db, executor_mod, monkeypatch):

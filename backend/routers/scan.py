@@ -53,10 +53,15 @@ async def run_scan(request: Request):
 @router.post("/scan/jobs",
              dependencies=[require_role("admin", "operator")])
 @limiter.limit("5/minute")
-def start_scan_job(request: Request):
-    """Start background scan job and return job ID immediately."""
-    result = _start_job(dry_run=False)
-    log_audit(request, "scan", "scan_job", result.get("job_id", ""), {"mode": "background"})
+def start_scan_job(request: Request, include_ranges: bool = False):
+    """Start background scan job and return job ID immediately.
+
+    ``include_ranges=true`` first scans every enabled discovery range, then
+    runs the full scan (one job, two scan runs).
+    """
+    scan_type = "full_ranges" if include_ranges else "full"
+    result = _start_job(dry_run=False, scan_type=scan_type)
+    log_audit(request, "scan", "scan_job", result.get("job_id", ""), {"mode": "background", "scan_type": scan_type})
     return result
 
 

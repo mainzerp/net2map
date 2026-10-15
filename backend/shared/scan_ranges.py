@@ -134,7 +134,7 @@ def clean_profile_ids(value) -> List[int]:
 
 
 def load_scan_ranges(db: Session, due_only: bool, now: Optional[datetime] = None) -> List[dict]:
-    """Enabled scan ranges as plain dicts {id, cidr, profile_ids, interval}.
+    """Enabled scan ranges as plain dicts {id, cidr, profile_ids, interval, last_scan_at}.
 
     ``due_only`` keeps only ranges never scanned or whose effective interval
     has elapsed since last_scan_at.
@@ -152,6 +152,7 @@ def load_scan_ranges(db: Session, due_only: bool, now: Optional[datetime] = None
             "cidr": row.cidr,
             "profile_ids": clean_profile_ids(row.profile_ids),
             "interval": interval,
+            "last_scan_at": naive_utc(row.last_scan_at),
         })
     return result
 

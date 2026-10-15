@@ -382,6 +382,7 @@ def is_cancel_requested(job_id: str) -> bool:
 SCAN_PRIORITY = {
     "macs": 3,
     "full": 3,
+    "full_ranges": 3,
     "ports": 3,
     "links": 2,
     "discovery": 1,

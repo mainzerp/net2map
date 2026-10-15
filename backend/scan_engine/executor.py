@@ -83,9 +83,9 @@ DISCOVERY_LIKE_MODES = frozenset({"discovery"}) | RANGE_MODES
 # Modes that rebuild ports and endpoints (and therefore need endpoint DNS).
 PORT_REBUILD_MODES = frozenset({"full", "ports", "macs"})
 VALID_SCAN_MODES = frozenset({"discovery", "ports", "links", "macs", "full"}) | RANGE_MODES
+# "Run Scan + Ranges": a ranges_all run followed by a full run under one lock.
+COMBINED_SCAN_MODE = "full_ranges"
 
-# Timeout (seconds) of the per-profile SNMP pre-check of range probes.
-RANGE_PRECHECK_TIMEOUT_SEC = 1
 # Concurrent reverse DNS lookups for endpoint names.
 ENDPOINT_DNS_CONCURRENCY = 32
 
@@ -243,6 +243,8 @@ async def _execute_scan(
     lock_token: Optional[str] = None,
 ) -> ScanResult:
     corr = correlation_id or str(uuid.uuid4())
+    if scan_type == COMBINED_SCAN_MODE and not dry_run:
+        return await _execute_full_with_ranges(db, cancel_event, corr, lock_token)
     scan_mode = scan_type if scan_type in VALID_SCAN_MODES else "full"
 
     scan_started = time.perf_counter()
@@ -286,6 +288,24 @@ async def _execute_scan(
         SCAN_ACTIVE.dec()
         SCAN_DURATION.labels(scan_type=scan_mode).observe(duration_ms / 1000)
         SCAN_TOTAL.labels(scan_type=scan_mode, status=final_status).inc()
+
+
+async def _execute_full_with_ranges(db: Session, cancel_event, corr: str, lock_token: Optional[str]) -> ScanResult:
+    """``full_ranges``: scan every enabled range first, then run a full scan.
+
+    Both runs share the caller's scan lock and are persisted as two scan runs
+    (``ranges`` and ``full``). Range hosts that answer SNMP get a credential
+    in the first run, so the full scan already reads their ports and links.
+    Returns the full scan result with the range counts and errors merged in.
+    """
+    ranges_result = await _execute_scan(db, cancel_event, corr, scan_type="ranges_all", lock_token=lock_token)
+    if ranges_result.status in ("cancelled", "failed") or (cancel_event and cancel_event.is_set()):
+        return ranges_result
+    result = await _execute_scan(db, cancel_event, corr, scan_type="full", lock_token=lock_token)
+    result.ranges_scanned = ranges_result.scanned
+    result.ranges_found = ranges_result.found
+    result.errors = [f"Range scan: {e}" for e in ranges_result.errors] + list(result.errors)
+    return result
 
 
 def _prepare_scan_setup(scan_mode: str, corr: str) -> dict:
@@ -395,6 +415,13 @@ def _build_range_setup(db: Session, scan_mode: str, corr: str, now: Optional[dat
             ranges, excluded, profiles_data,
             scan_settings.get("snmp_timeout", 3), scan_settings.get("snmp_retries", 1),
         )
+        # The skip window only applies to scheduled re-scans. "Scan all"
+        # (ranges_all, also the dry run) and "Scan now" (resets last_scan_at)
+        # are explicit requests and SNMP-probe every host again.
+        forced_ips: set = set()
+        for rng in ranges:
+            if scan_mode == "ranges_all" or rng.get("last_scan_at") is None:
+                forced_ips.update(range_ips(rng["cidr"]))
         if probe_skip_hours > 0 and range_targets:
             cutoff = now - timedelta(hours=probe_skip_hours)
             recent = {
@@ -402,7 +429,7 @@ def _build_range_setup(db: Session, scan_mode: str, corr: str, now: Optional[dat
                     PingCandidate.snmp_checked_at.isnot(None), PingCandidate.snmp_checked_at >= cutoff,
                 ).all()
             }
-            skip_ips = recent & {t["ip"] for t in range_targets}
+            skip_ips = (recent & {t["ip"] for t in range_targets}) - forced_ips
         _log_event(
             logging.INFO,
             "scan.range_probe.start",
@@ -540,11 +567,12 @@ def _build_scan_setup(db: Session, scan_mode: str, corr: str) -> dict:
     }
 
 
-async def _select_responding_profiles(ip: str, port: int, profiles: List[dict],
-                                      timeout: int = RANGE_PRECHECK_TIMEOUT_SEC) -> List[dict]:
-    """Quick SNMP pre-check of all profiles concurrently; keeps profile order.
+async def _select_responding_profiles(ip: str, port: int, profiles: List[dict], timeout: int) -> List[dict]:
+    """SNMP pre-check of all profiles concurrently; keeps profile order.
 
-    Returns the profiles whose single sysObjectID.0 GET answered.
+    Returns the profiles whose single sysObjectID.0 GET (no retries) answered.
+    ``timeout`` is the configured SNMP timeout: a shorter one made slow
+    agents (SNMPv3 engine discovery on embedded devices) look unreachable.
     """
     if not profiles:
         return []
@@ -561,7 +589,9 @@ async def _probe_range_host(ip: str, target: dict, cancel_event=None) -> tuple:
     returns data. Returns ``(switch_data or None, matched profile_id or None)``.
     """
     port = target.get("snmp_port", 161)
-    candidates = await _select_responding_profiles(ip, port, target.get("profiles_to_try") or [])
+    candidates = await _select_responding_profiles(
+        ip, port, target.get("profiles_to_try") or [], timeout=target.get("snmp_timeout", 3),
+    )
     for prof in candidates:
         if cancel_event and cancel_event.is_set():
             break
@@ -1338,7 +1368,7 @@ def _finalize_scan_db(
         )
 
         # Persist dry-run result to database
-        run_id = _persist_scan_run(db, result, [], [])
+        run_id = _persist_scan_run(db, result, [], [], scan_type="dry_run")
         dry_run_record = DryRunResult(
             scan_run_id=run_id,
             preview_json=dry_run_preview,
@@ -1884,9 +1914,12 @@ def _finalize_scan_db(
         errors.append("Scan cancelled after partial port data was committed; some devices have updated ports/endpoints")
         _log_event(logging.WARNING, "scan.cancelled_partial", correlation_id=corr)
 
+    # Range runs report only hosts that answered SNMP; ping-only range hosts
+    # are ping candidates, not devices.
+    found_ips = set(switch_data.keys()) if scan_mode in RANGE_MODES else discovered_ips
     result = ScanResult(
         scanned=scanned,
-        found=len(discovered_ips),
+        found=len(found_ips),
         links=link_count,
         errors=errors,
         max_workers=workers,
@@ -1894,7 +1927,7 @@ def _finalize_scan_db(
         switch_metrics=switch_metrics,
         status=status,
     )
-    snapshot_devices = sorted({str(ip) for ip in discovered_ips if ip})
+    snapshot_devices = sorted({str(ip) for ip in found_ips if ip})
     if snapshot_devices:
         snapshot_link_rows = db.query(TopologyLink).filter(TopologyLink.local_ip.in_(snapshot_devices)).all()
     else:
@@ -1908,7 +1941,8 @@ def _finalize_scan_db(
         )
         for link in snapshot_link_rows
     })
-    result.run_id = _persist_scan_run(db, result, snapshot_devices, snapshot_links)
+    run_type = "ranges" if scan_mode in RANGE_MODES else scan_mode
+    result.run_id = _persist_scan_run(db, result, snapshot_devices, snapshot_links, scan_type=run_type)
     _log_event(
         logging.INFO,
         "scan.end",

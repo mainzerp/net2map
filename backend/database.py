@@ -450,6 +450,8 @@ class ScanRun(Base):
 
     id                = Column(Integer, primary_key=True, index=True)
     status            = Column(String, default="finished")          # finished|cancelled|failed
+    # full|discovery|ports|links|macs|ranges|dry_run (migration 033; NULL for older runs)
+    scan_type         = Column(String(16), nullable=True)
     scanned           = Column(Integer, default=0)
     found             = Column(Integer, default=0)
     links             = Column(Integer, default=0)

@@ -15,19 +15,31 @@ router = APIRouter()
 @router.get("/scan-runs", response_model=List[ScanRunOut])
 def list_scan_runs(limit: int = 20, db: Session = Depends(get_db)):
     clamped = max(1, min(200, limit))
-    # Fetch one extra run so the oldest run in the window can be diffed
-    # against a real predecessor instead of an empty snapshot.
+    order = (ScanRun.created_at.desc().nulls_last(), ScanRun.id.desc())
     runs = (
         db.query(ScanRun)
         .options(selectinload(ScanRun.switch_metrics))
-        .order_by(ScanRun.created_at.desc().nulls_last(), ScanRun.id.desc())
-        .limit(clamped + 1)
+        .order_by(*order)
+        .limit(clamped)
         .all()
     )
 
+    # Each run is diffed against the previous run of the same scan type: a
+    # range scan and a device scan cover different hosts, so diffing across
+    # types reported every device as removed and then as new again.
+    def previous_of_type(idx: int, run: ScanRun):
+        prev = next((r for r in runs[idx + 1:] if r.scan_type == run.scan_type), None)
+        if prev is not None:
+            return prev
+        # Oldest run of its type in the window: look up its real predecessor
+        # instead of diffing against an empty snapshot.
+        same_type = ScanRun.scan_type.is_(None) if run.scan_type is None else ScanRun.scan_type == run.scan_type
+        older = ScanRun.created_at < run.created_at if run.created_at is not None else ScanRun.id < run.id
+        return db.query(ScanRun).filter(same_type, older).order_by(*order).first()
+
     out: List[ScanRunOut] = []
-    for idx, run in enumerate(runs[:clamped]):
-        prev_run = runs[idx + 1] if idx + 1 < len(runs) else None
+    for idx, run in enumerate(runs):
+        prev_run = previous_of_type(idx, run)
         current_devices = set(_safe_json_list(getattr(run, "devices_snapshot_json", "[]")))
         current_links = set(_safe_json_list(getattr(run, "links_snapshot_json", "[]")))
 
@@ -59,6 +71,7 @@ def list_scan_runs(limit: int = 20, db: Session = Depends(get_db)):
         out.append(ScanRunOut(
             id=run.id,
             status=run.status,
+            scan_type=run.scan_type,
             scanned=run.scanned,
             found=run.found,
             links=run.links,

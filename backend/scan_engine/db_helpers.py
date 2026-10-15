@@ -30,9 +30,11 @@ def _canonical_link_key(local_ip: str, local_port: str, remote_ip: str, remote_p
     return f"{local_ip}|{local_port}|{remote_ip}|{remote_port}"
 
 
-def _persist_scan_run(db: Session, result: ScanResult, devices_snapshot: List[str], links_snapshot: List[str]) -> int:
+def _persist_scan_run(db: Session, result: ScanResult, devices_snapshot: List[str], links_snapshot: List[str],
+                      scan_type: Optional[str] = None) -> int:
     run = ScanRun(
         status=result.status,
+        scan_type=scan_type,
         scanned=result.scanned,
         found=result.found,
         links=result.links,

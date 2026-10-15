@@ -947,6 +947,7 @@ class ScanSwitchMetric(BaseModel):
 class ScanRunOut(BaseModel):
     id:                int
     status:            str
+    scan_type:         Optional[str] = None
     scanned:           int
     found:             int
     links:             int
@@ -974,6 +975,9 @@ class ScanResult(BaseModel):
     switch_metrics:     List[ScanSwitchMetric] = []
     status:             str = "unknown"
     run_id:             Optional[int] = None
+    # Set only by a combined "full_ranges" job: counts of its range scan part.
+    ranges_scanned:     Optional[int] = None
+    ranges_found:       Optional[int] = None
 
 
 class DryRunPreviewItem(BaseModel):

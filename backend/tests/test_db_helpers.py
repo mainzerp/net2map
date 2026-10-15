@@ -104,10 +104,11 @@ def test_persist_scan_run(db):
         ],
         status="finished",
     )
-    run_id = _persist_scan_run(db, sr, ["10.0.0.1", "10.0.0.2"], ["link1"])
+    run_id = _persist_scan_run(db, sr, ["10.0.0.1", "10.0.0.2"], ["link1"], scan_type="macs")
     assert isinstance(run_id, int)
 
     run = db.query(ScanRun).filter(ScanRun.id == run_id).one()
+    assert run.scan_type == "macs"
     assert run.scanned == 5
     assert run.found == 3
     assert run.status == "finished"
