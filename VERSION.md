@@ -1,5 +1,26 @@
 # Version History
 
+## v4.4.0 -- Endpoint IPs from ARP fixed, DNS lookup test
+
+**Type:** MINOR. Commits: f4d5a27 (backend), f4f7a3a (frontend). No migration.
+
+### Fixes
+
+- Endpoints got no IP address (and therefore no DNS name): the ARP IP column
+  (`ipNetToMediaNetAddress`, type IpAddress) was decoded as text, which turned every
+  address into an empty string. The IP is now taken from the ARP row index
+  (`ifIndex.a.b.c.d`), the IP column is no longer walked, and IpAddress values are
+  rendered as dotted quads everywhere.
+
+### Features
+
+- `POST /dns-settings/test` and a "Test reverse lookup" card in Settings > DNS:
+  resolves one IP with the saved DNS servers and the backend container's resolver
+  (no cache) and shows each answer or error.
+- The device table shows the reverse DNS name under the device name when it differs.
+- DNS settings help text explains that Docker's resolver usually cannot answer PTR
+  queries for local addresses and a local DNS server should be entered.
+
 ## v4.3.0 -- Scan ranges, faster discovery and DNS, device DNS names
 
 **Type:** MINOR. Commits: 28898fb (backend), 13be9b4 (frontend). Migration 031 adds `devices.hostname`; migration

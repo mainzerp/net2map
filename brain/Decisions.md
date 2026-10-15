@@ -436,3 +436,14 @@
 - **Endpoint DNS out of the DB phase**: resolved concurrently up front with a
   process-wide TTL cache; NXDOMAIN from configured servers is final (no system resolver
   retry). Device DNS names (`devices.hostname`) only in discovery/full scans.
+
+## ARP IPs from the row index (2026-10-15)
+
+- **IPv4 of ARP entries comes from the `ipNetToMediaPhysAddress` row index**, not from
+  `ipNetToMediaNetAddress`: pysnmp `IpAddress` subclasses `OctetString`, and the text
+  decoder turned its 4 binary bytes into "" so no endpoint ever got an IP (and thus no
+  DNS name). One walk less per device; `_decode_snmp_str` renders `IpAddress` as a
+  dotted quad for all other callers.
+- **DNS problems are diagnosed, not guessed**: `POST /dns-settings/test` shows the
+  answer of the configured servers and of the container resolver. Docker's embedded
+  resolver often cannot answer PTR for local IPs, so a local DNS server must be set.

@@ -18,6 +18,14 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
+- Endpoint IPs from ARP and DNS lookup test (released v4.4.0) · priority: P1 · area: full-stack
+  Bug: ARP IpAddress values decoded as text -> every endpoint IP was empty, so no
+  endpoint DNS either. IP now from the ARP row index. New Settings > DNS "Test reverse
+  lookup" (`POST /dns-settings/test`). Passed: ruff, 1116 backend tests, typecheck,
+  378 frontend tests, decoder checked with pysnmp 7.1.30 in Docker.
+  User to verify: after update + MAC scan, /devices shows IPs; DNS test with a local
+  IP shows which resolver answers; enter the local DNS server if only "system" fails.
+
 - Reverse DNS names for network devices (released v4.3.0, migration 031) · priority: P2 · area: full-stack
   `devices.hostname` from PTR in discovery/full scans (concurrent `resolve_hosts`);
   display name sysName > DNS name > IP. User to verify: discovery scan, ping-only

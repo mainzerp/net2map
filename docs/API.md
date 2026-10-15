@@ -573,6 +573,9 @@ Scan tuning, discovery ranges and DNS resolvers.
 | DELETE | `/scan-ranges/{id}` | op+ | Delete a range. | -> `204` |
 | POST | `/scan-ranges/scan` | op+ | Scan all enabled ranges now (scan type `ranges_all`). 5/min. | -> `{job_id, status}` |
 | POST | `/scan-ranges/{id}/scan` | op+ | Mark this range due and start a `ranges` scan (other ranges due at that moment are scanned too). 5/min. | -> `{job_id, status}` |
+| GET | `/dns-settings` | any | DNS servers for PTR lookups. | `DnsSettingsOut` `{servers}` |
+| PUT | `/dns-settings` | op+ | Replace DNS servers. | `DnsSettingsUpdate` -> `DnsSettingsOut` |
+| POST | `/dns-settings/test` | op+ | Reverse-resolve one IP with the saved DNS servers (`custom`, only when configured) and the backend container resolver (`system`), without cache. `400 INVALID_IP`. | `DnsTestRequest` `{ip}` -> `DnsTestOut` `{ip, results: [{resolver, nameservers, host, error}]}` |
 
 Scan ranges are no longer probed by `full` or `discovery` scans. The scheduler checks
 at most every 60 s and starts a `ranges` scan when an enabled range is due
@@ -581,8 +584,6 @@ concurrency (`probe_workers`): ping first, then a 1 s single-GET SNMP pre-check 
 allowed profiles in parallel, then a discovery scan with the first answering profile.
 Hosts that answered ping but no SNMP are recorded as ping candidates
 (`snmp_checked_at`) and are not SNMP-probed again within `probe_skip_hours`.
-| GET | `/dns-settings` | any | DNS servers for PTR lookups. | `DnsSettingsOut` `{servers}` |
-| PUT | `/dns-settings` | op+ | Replace DNS servers. | `DnsSettingsUpdate` -> `DnsSettingsOut` |
 
 ### bulk (`routers/bulk.py`)
 
