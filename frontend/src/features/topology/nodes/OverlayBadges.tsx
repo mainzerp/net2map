@@ -3,15 +3,25 @@ import type { NodeOverlay } from "../overlays";
 
 // ── OverlayBadges ────────────────────────────────────────────────────────────
 // Small pills pinned to the top edge of a device/rack node for the active
-// logical layer: "Root" (STP root bridge, visible at every zoom tier) and the
-// member port count in the selected VLAN (mid/close tiers via topo-detail).
+// logical layer: "Root" (STP root bridge) and the spanning tree protocol
+// (STP / RSTP / MSTP), both visible at every zoom tier, and the member port
+// count in the selected VLAN (mid/close tiers via topo-detail).
 
 export default function OverlayBadges({ overlay }: { overlay?: NodeOverlay }) {
   if (!overlay) return null;
   const showVlan = overlay.vlanPorts != null && overlay.vlanPorts > 0;
-  if (!overlay.isRoot && !showVlan) return null;
+  if (!overlay.isRoot && !overlay.stpProtocol && !showVlan) return null;
   return (
     <span className="absolute -top-2 right-2 flex items-center gap-1 pointer-events-none">
+      {overlay.stpProtocol && (
+        <span
+          className="rounded-full border border-overlay-stp bg-panel px-1.5 font-mono text-[9px] leading-[14px] font-semibold text-overlay-stp"
+          title={`Spanning tree protocol: ${overlay.stpProtocol}`}
+          data-testid="stp-protocol-badge"
+        >
+          {overlay.stpProtocol}
+        </span>
+      )}
       {overlay.isRoot && (
         <span
           className="inline-flex items-center gap-0.5 rounded-full border border-overlay-stp bg-overlay-stp-soft px-1.5 text-[9px] leading-[14px] font-semibold text-overlay-stp"

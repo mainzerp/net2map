@@ -266,6 +266,8 @@ describe("TopologyCanvas logical layers", () => {
     expect(canvas.dataset.layer).toBe("stp");
     expect(screen.getByTestId("map-layer-legend").textContent).toContain("Spanning tree");
     expect(screen.getByTestId("stp-root-badge")).toBeTruthy();
+    expect(screen.getAllByTestId("stp-protocol-badge").map((b) => b.textContent)).toEqual(["RSTP", "RSTP"]);
+    expect(screen.getByTestId("stp-protocols").textContent).toContain("RSTP 2");
     // The parallel root + blocked links render one edge with a blocked marker.
     expect((await screen.findByTestId("stp-blocked-marker")).textContent).toContain("1 blocked");
 
@@ -273,6 +275,7 @@ describe("TopologyCanvas logical layers", () => {
     expect(storage.get(LAYER_STORAGE_KEY)).toBe("off");
     expect(screen.queryByTestId("map-layer-legend")).toBeNull();
     expect(screen.queryByTestId("stp-root-badge")).toBeNull();
+    expect(screen.queryByTestId("stp-protocol-badge")).toBeNull();
   });
 
   it("restores a stored layer and VLAN on mount", () => {

@@ -77,7 +77,8 @@ describe("DeviceInspector logical layer data", () => {
     expect(screen.getByText("designated").getAttribute("title")).toBe("Role: designated, State: forwarding, Path cost: 2000");
     expect(screen.getByText("blocked")).toBeTruthy();
     expect(screen.getByText("Spanning tree")).toBeTruthy();
-    expect(screen.getByText("RSTP")).toBeTruthy();
+    expect(screen.getByText("Protocol").nextElementSibling?.textContent).toBe("RSTP");
+    expect(screen.getByTestId("stp-protocol").textContent).toBe("RSTP");
     expect(screen.getByText("Root bridge").nextElementSibling?.textContent).toBe("Yes");
   });
 
@@ -86,6 +87,7 @@ describe("DeviceInspector logical layer data", () => {
     await screen.findByRole("dialog", { name: "core-sw2" });
     expect(headers()).toEqual(["Port", "Status", "Speed", "Endp."]);
     expect(screen.queryByText("Spanning tree")).toBeNull();
+    expect(screen.queryByTestId("stp-protocol")).toBeNull();
   });
 });
 

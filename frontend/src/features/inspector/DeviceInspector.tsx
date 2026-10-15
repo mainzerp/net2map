@@ -7,6 +7,7 @@ import { queryKeys, useDevices, useInvalidateApi, useTopology } from "../../hook
 import { useToast } from "../../components/ToastProvider";
 import FloorSelect from "../topology/FloorSelect";
 import { findFloor, flattenFloors } from "../topology/floors";
+import { stpProtocolName } from "../topology/overlays";
 import { searchWithInspect, useInspector } from "../../hooks/useInspector";
 import useNet2MapStore from "../../store";
 import { speedLabel } from "../../theme/visual";
@@ -177,6 +178,11 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
               {DEVICE_TYPE_LABEL[deviceType]}
             </Badge>
           )}
+          {stp && stp.protocol !== "unknown" && (
+            <Badge tone="accent" title="Spanning tree protocol" data-testid="stp-protocol">
+              {stpProtocolName(stp.protocol)}
+            </Badge>
+          )}
           {pingOnly && (
             <Badge tone="neutral" title="Monitored by ping only, no SNMP polling" data-testid="ping-only">
               Ping only
@@ -230,7 +236,7 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
         <InspectorSection title="Spanning tree">
           <FactList
             facts={[
-              { label: "Protocol", value: stp.protocol === "unknown" ? "Unknown" : stp.protocol.toUpperCase() },
+              { label: "Protocol", value: stpProtocolName(stp.protocol) },
               { label: "Root bridge", value: stp.is_root ? "Yes" : "No" },
               { label: "Root port", value: stp.is_root ? null : stp.root_port, mono: true },
               { label: "Root cost", value: stp.root_cost != null ? String(stp.root_cost) : null, mono: true },

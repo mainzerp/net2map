@@ -12,7 +12,7 @@
 // role; it is blocked when an endpoint port has the blocked role or a
 // blocking/broken state. Blocked wins over root for a single link.
 
-import type { LatencyDevice, LatencyStatus, PortInfo, TopologyLink, TopologyNode } from "../../types";
+import type { DeviceStpInfo, LatencyDevice, LatencyStatus, PortInfo, TopologyLink, TopologyNode } from "../../types";
 import { formatMs, latencyEdgeTone, worstStatus, type LatencyEdgeTone } from "../latency/latency";
 import { resolvePort, type AggregatedLink, type EndpointId } from "./graph";
 import { vlanColor, type VlanColor } from "./vlanColor";
@@ -204,6 +204,39 @@ export function stpDomainCount(nodes: TopologyNode[]): number {
   return roots.size;
 }
 
+export type StpProtocol = DeviceStpInfo["protocol"];
+
+const STP_PROTOCOL_ORDER: StpProtocol[] = ["mstp", "rstp", "stp", "unknown"];
+
+// Display name of a spanning tree protocol ("RSTP", "Unknown").
+export function stpProtocolName(protocol: StpProtocol): string {
+  return protocol === "unknown" ? "Unknown" : protocol.toUpperCase();
+}
+
+export interface StpProtocolCount {
+  protocol: StpProtocol;
+  count: number;
+}
+
+// Devices per spanning tree protocol (MSTP, RSTP, STP, unknown order); a mix
+// of known protocols marks region or interoperability boundaries.
+export function stpProtocolCounts(nodes: TopologyNode[]): StpProtocolCount[] {
+  const counts = new Map<StpProtocol, number>();
+  nodes.forEach(n => {
+    if (n.stp) counts.set(n.stp.protocol, (counts.get(n.stp.protocol) ?? 0) + 1);
+  });
+  return STP_PROTOCOL_ORDER.filter(p => counts.has(p)).map(p => ({ protocol: p, count: counts.get(p) ?? 0 }));
+}
+
+// Known protocols of the given devices as one label ("RSTP", "MSTP/RSTP");
+// null when none of them reports a known protocol.
+function stpProtocolLabel(devices: TopologyNode[]): string | null {
+  const known = new Set<StpProtocol | undefined>(devices.map(d => d.stp?.protocol));
+  known.delete("unknown");
+  const label = STP_PROTOCOL_ORDER.filter(p => known.has(p)).map(stpProtocolName).join("/");
+  return label || null;
+}
+
 // Latency classification --------------------------------------------------------
 // An aggregated edge takes the worst monitor status of the devices at the ends
 // of its member links, and the highest RTT among them for the label.
@@ -247,6 +280,8 @@ export interface NodeOverlay {
   vlanPorts: number | null;
   // STP mode: the node is (or contains) the root bridge.
   isRoot: boolean;
+  // STP mode: protocol label of the node's devices ("RSTP", "MSTP/RSTP").
+  stpProtocol?: string | null;
   // VLAN mode: color of the selected VLAN for the port-count badge.
   color?: VlanColor;
 }
@@ -262,7 +297,12 @@ export function nodeOverlay(devices: TopologyNode[], layer: MapLayer, vlan: numb
   if (layer === "stp") {
     const withStp = devices.filter(d => d.stp != null);
     if (withStp.length === 0) return { dim: "strong", vlanPorts: null, isRoot: false };
-    return { dim: "none", vlanPorts: null, isRoot: withStp.some(d => d.stp?.is_root) };
+    return {
+      dim: "none",
+      vlanPorts: null,
+      isRoot: withStp.some(d => d.stp?.is_root),
+      stpProtocol: stpProtocolLabel(withStp),
+    };
   }
   return NEUTRAL_NODE_OVERLAY;
 }

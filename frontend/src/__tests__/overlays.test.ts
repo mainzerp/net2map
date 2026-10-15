@@ -12,6 +12,8 @@ import {
   classifyLinkStp,
   classifyAggregatedStp,
   stpDomainCount,
+  stpProtocolCounts,
+  stpProtocolName,
   nodeOverlay,
 } from "../features/topology/overlays";
 import { vlanColor } from "../features/topology/vlanColor";
@@ -198,9 +200,23 @@ describe("STP classification", () => {
   });
 
   it("marks root nodes and strongly fades devices without STP data", () => {
-    expect(nodeOverlay([access, root], "stp", null)).toEqual({ dim: "none", vlanPorts: null, isRoot: true });
+    expect(nodeOverlay([access, root], "stp", null)).toEqual({ dim: "none", vlanPorts: null, isRoot: true, stpProtocol: "RSTP" });
     expect(nodeOverlay([access], "stp", null).isRoot).toBe(false);
     expect(nodeOverlay([device(4, "10.0.0.4", [])], "stp", null).dim).toBe("strong");
     expect(nodeOverlay([root], "off", null).dim).toBe("none");
+  });
+
+  it("labels the STP protocol per node and counts protocols across devices", () => {
+    const mstp = device(5, "10.0.0.5", [], { stp: stp({ protocol: "mstp" }) });
+    const unknown = device(6, "10.0.0.6", [], { stp: stp({ protocol: "unknown" }) });
+    expect(nodeOverlay([access, mstp, unknown], "stp", null).stpProtocol).toBe("MSTP/RSTP");
+    expect(nodeOverlay([unknown], "stp", null).stpProtocol).toBeNull();
+    expect(stpProtocolCounts([root, access, mstp, unknown, device(7, "10.0.0.7", [])])).toEqual([
+      { protocol: "mstp", count: 1 },
+      { protocol: "rstp", count: 2 },
+      { protocol: "unknown", count: 1 },
+    ]);
+    expect(stpProtocolName("stp")).toBe("STP");
+    expect(stpProtocolName("unknown")).toBe("Unknown");
   });
 });

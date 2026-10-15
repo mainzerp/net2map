@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Ban, Crown } from "lucide-react";
-import type { MapLayer } from "./overlays";
+import { stpProtocolName, type MapLayer, type StpProtocolCount } from "./overlays";
 import { vlanColor } from "./vlanColor";
 
 // ── MapLayerLegend ───────────────────────────────────────────────────────────
@@ -14,6 +14,8 @@ interface MapLayerLegendProps {
   vlanId?: number | null;
   vlanLabel?: string | null;
   stpDomains?: number;
+  // Devices per spanning tree protocol (see stpProtocolCounts).
+  stpProtocols?: StpProtocolCount[];
 }
 
 function Swatch({ color, dash, faded, arrow }: { color: string; dash?: string; faded?: boolean; arrow?: boolean }) {
@@ -44,8 +46,15 @@ function Row({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   );
 }
 
-export default function MapLayerLegend({ layer, vlanId, vlanLabel, stpDomains = 0 }: MapLayerLegendProps) {
+export default function MapLayerLegend({
+  layer,
+  vlanId,
+  vlanLabel,
+  stpDomains = 0,
+  stpProtocols = [],
+}: MapLayerLegendProps) {
   if (layer === "off") return null;
+  const mixedStp = stpProtocols.filter((p) => p.protocol !== "unknown").length > 1;
   const color = vlanId != null ? vlanColor(vlanId) : null;
   const vlanStroke = color?.stroke ?? "var(--overlay-vlan)";
   const vlanSoft = color?.soft ?? "var(--overlay-vlan-soft)";
@@ -106,6 +115,23 @@ export default function MapLayerLegend({ layer, vlanId, vlanLabel, stpDomains = 
           </Row>
           <Row icon={<Swatch color="var(--line-strong)" faded />}>Forwarding / no STP data</Row>
         </ul>
+      )}
+      {layer === "stp" && stpProtocols.length > 0 && (
+        <div className="mt-2 pt-1.5 border-t border-line" data-testid="stp-protocols">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span>Protocol:</span>
+            {stpProtocols.map((p) => (
+              <span key={p.protocol} className="whitespace-nowrap">
+                <span className="font-mono font-semibold text-overlay-stp">{stpProtocolName(p.protocol)}</span> {p.count}
+              </span>
+            ))}
+          </div>
+          {mixedStp && (
+            <div className="text-warning font-semibold" role="note">
+              Mixed protocols
+            </div>
+          )}
+        </div>
       )}
       {layer === "stp" && stpDomains > 1 && (
         <div className="mt-2 pt-1.5 border-t border-line text-warning font-semibold" role="note">

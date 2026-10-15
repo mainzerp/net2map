@@ -87,6 +87,7 @@ import {
   defaultVlan,
   hasStpData,
   stpDomainCount,
+  stpProtocolCounts,
   classifyAggregatedVlan,
   classifyAggregatedStp,
   classifyAggregatedLatency,
@@ -393,6 +394,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
   const vlanOptions = useMemo(() => collectVlanOptions(nodes), [nodes]);
   const vlanAvailable = vlanOptions.length > 0;
   const stpDomains = useMemo(() => stpDomainCount(nodes), [nodes]);
+  const stpProtocols = useMemo(() => stpProtocolCounts(nodes), [nodes]);
   const latencyAvailable = latency?.enabled === true;
   const layer: MapLayer =
     (layerPref === "stp" && !stpAvailable) ||
@@ -997,7 +999,7 @@ function TopologyCanvasInner(props: TopologyCanvasProps) {
             onChange={onActiveFloorChange}
           />
         )}
-        <MapLayerLegend layer={layer} vlanId={selectedVlan} vlanLabel={selectedVlanLabel} stpDomains={stpDomains} />
+        <MapLayerLegend layer={layer} vlanId={selectedVlan} vlanLabel={selectedVlanLabel} stpDomains={stpDomains} stpProtocols={stpProtocols} />
         {scan?.active && <ScanOverlay progress={scan.progress} label={scan.label} />}
       </div>
     </div>
