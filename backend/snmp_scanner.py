@@ -43,6 +43,7 @@ from pysnmp.proto.rfc1905 import EndOfMibView, NoSuchInstance, NoSuchObject
 from scanners.detection import detect_vendor
 from scanners.health import OID_UPS_IDENT_MANUFACTURER, collect_ups_health
 from scanners.parsing import (
+    build_mstp_info,
     build_stp_info,
     mac_from_octets,
     map_lldp_local_ports,
@@ -190,6 +191,11 @@ OID_DOT1D_STP_VERSION           = "1.3.6.1.2.1.17.2.16.0"  # RSTP-MIB dot1dStpVe
 OID_DOT1D_STP_PORT_STATE        = "1.3.6.1.2.1.17.2.15.1.3"  # dot1dStpPortState (index = bridge port)
 OID_DOT1D_STP_PORT_PATH_COST    = "1.3.6.1.2.1.17.2.15.1.5"  # dot1dStpPortPathCost (index = bridge port)
 
+# Multiple spanning tree instances (IEEE8021-MSTP-MIB), read for MSTP bridges only
+OID_MSTP_ENTRY      = "1.3.111.2.802.1.1.6.1.2.1"     # ieee8021MstpEntry (index component.mstId)
+OID_MSTP_PORT_STATE = "1.3.111.2.802.1.1.6.1.4.1.5"   # ieee8021MstpPortState (component.mstId.port)
+OID_MSTP_PORT_ROLE  = "1.3.111.2.802.1.1.6.1.4.1.12"  # ieee8021MstpPortRole (component.mstId.port)
+
 STP_SCALAR_OIDS = (
     OID_DOT1D_BASE_BRIDGE_ADDRESS, OID_DOT1D_STP_PROTOCOL_SPEC, OID_DOT1D_STP_PRIORITY,
     OID_DOT1D_STP_DESIGNATED_ROOT, OID_DOT1D_STP_ROOT_COST, OID_DOT1D_STP_ROOT_PORT,
@@ -211,6 +217,8 @@ class IfInfo:
     stp_state:     Optional[str] = None
     stp_role:      Optional[str] = None
     stp_path_cost: Optional[int] = None
+    # MSTI id (string) -> {state, role} from IEEE8021-MSTP-MIB, None if not reported
+    stp_instances: Optional[Dict[str, dict]] = None
 
 
 @dataclass
@@ -239,6 +247,9 @@ class SwitchData:
     # Bridge-level STP summary (keys: protocol, bridge_id, root_id, root_cost,
     # root_port) or None when the device reports no STP data.
     stp:            Optional[dict] = None
+    # MSTP bridges: MSTIs (keys: id, bridge_id, root_id, root_cost, root_port,
+    # vlans) from IEEE8021-MSTP-MIB; empty when none are reported.
+    stp_instances:  List[dict] = field(default_factory=list)
     vlan_names:     Dict[str, str] = field(default_factory=dict)  # "vlan id" -> name
     # True when ifDescr/ifAlias were walked in this scan (the caller stores
     # them as the device's interface name cache); False when served from it.
@@ -921,6 +932,50 @@ async def _collect_stp_and_vlan_names(
         log.debug("STP for %s: %s, %d ports", ip, sw.stp, len(per_ifindex))
     except Exception:
         log.debug("STP walk failed for %s (BRIDGE-MIB dot1dStp not supported)", ip)
+        return
+
+    if (sw.stp or {}).get("protocol") == "mstp":
+        await _collect_mstp_instances(sw, ip, snmp_port, auth, snmp_timeout, snmp_retries, engine, bridge_to_ifindex)
+
+
+async def _collect_mstp_instances(
+    sw: SwitchData,
+    ip: str,
+    snmp_port: int,
+    auth,
+    snmp_timeout: int,
+    snmp_retries: int,
+    engine: SnmpEngine,
+    bridge_to_ifindex: Dict[int, int],
+) -> None:
+    """Fill sw.stp_instances and the per-interface MSTI data (best effort).
+
+    Reads IEEE8021-MSTP-MIB ieee8021MstpTable (raw for the bridge IDs and VLAN
+    bitmaps, decoded for cost / root port) and the port state / role columns.
+    Agents without the MIB leave everything empty; this never raises.
+    """
+    kw = {"timeout": snmp_timeout, "retries": snmp_retries, "engine": engine}
+    try:
+        table_raw, table_rows, state_rows, role_rows = await asyncio.gather(
+            snmp_bulk_walk_raw(ip, snmp_port, auth, OID_MSTP_ENTRY, **kw),
+            snmp_bulk_walk(ip, snmp_port, auth, OID_MSTP_ENTRY, **kw),
+            snmp_bulk_walk(ip, snmp_port, auth, OID_MSTP_PORT_STATE, **kw),
+            snmp_bulk_walk(ip, snmp_port, auth, OID_MSTP_PORT_ROLE, **kw),
+        )
+        port_names = {idx: iface.descr for idx, iface in sw.interfaces.items() if iface.descr}
+        sw.stp_instances, per_ifindex = build_mstp_info(
+            table_raw, table_rows, state_rows, role_rows, bridge_to_ifindex, port_names,
+            table_entry_oid=OID_MSTP_ENTRY,
+            port_state_oid=OID_MSTP_PORT_STATE,
+            port_role_oid=OID_MSTP_PORT_ROLE,
+        )
+        for ifindex, data in per_ifindex.items():
+            iface = sw.interfaces.get(ifindex)
+            if iface is not None:
+                iface.stp_instances = data
+        log.debug("MSTP for %s: %d instances", ip, len(sw.stp_instances))
+    except Exception:
+        log.debug("MSTP walk failed for %s (IEEE8021-MSTP-MIB not supported)", ip)
 
 
 # --- LLDP local port mapping ---------------------------------------------------

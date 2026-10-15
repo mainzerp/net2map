@@ -545,6 +545,12 @@ class CredentialOut(CredentialBase):
 
 # ─── Port ─────────────────────────────────────────────────────────────────────
 
+class PortStpInstance(BaseModel):
+    """Port state and role in one MSTI (same vocabulary as the CIST fields)."""
+    state: Optional[str] = None
+    role:  Optional[str] = None
+
+
 class PortOut(BaseModel):
     id:          int
     if_index:    Optional[int] = 0
@@ -560,6 +566,8 @@ class PortOut(BaseModel):
     # root|designated|blocked|disabled (derived from state and root port)
     stp_role:    Optional[str] = None
     stp_path_cost: Optional[int] = None
+    # MSTI id (string) -> {state, role} for MSTP bridges (IEEE8021-MSTP-MIB)
+    stp_instances: Optional[Dict[str, PortStpInstance]] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -576,6 +584,8 @@ class PortOut(BaseModel):
             for field, fallback in defaults.items():
                 if data.get(field) is None:
                     data[field] = fallback
+            if not isinstance(data.get("stp_instances"), dict):
+                data["stp_instances"] = None
             # Compute endpoint_count from associations if present
             if "endpoint_count" not in data or data.get("endpoint_count") is None:
                 assocs = data.get("endpoint_associations")
@@ -641,6 +651,22 @@ class StpInfo(BaseModel):
     is_root:   bool = False
 
 
+class StpInstanceInfo(BaseModel):
+    """One multiple spanning tree instance (MSTI) of an MSTP bridge."""
+    id:        int
+    bridge_id: Optional[str] = None
+    root_id:   Optional[str] = None
+    root_cost: Optional[int] = None
+    root_port: Optional[str] = None
+    vlans:     str = ""                   # range string, e.g. "10-20,30"
+    is_root:   bool = False
+
+    @model_validator(mode="after")
+    def _derive_is_root(self):
+        self.is_root = bool(self.bridge_id and self.root_id and self.bridge_id == self.root_id)
+        return self
+
+
 def build_stp_info(protocol, bridge_id, root_id, root_cost, root_port) -> Optional[StpInfo]:
     """Build StpInfo from the Device STP columns; None when no STP data exists."""
     if bridge_id is None and root_id is None and protocol is None:
@@ -675,6 +701,8 @@ class DeviceOut(DeviceBase):
     ports_per_row: Optional[int] = None   # resolved from switch_model
     total_ports:   Optional[int] = None   # port cutoff: ports beyond this index are hidden
     stp:           Optional[StpInfo] = None
+    # MSTIs of an MSTP bridge (empty unless IEEE8021-MSTP-MIB reports them)
+    stp_instances: List[StpInstanceInfo] = Field(default_factory=list)
     vlan_names:    Dict[str, str] = Field(default_factory=dict)
     # Device kind ("switch" | "firewall" | "ups" | "server" | "other") and the
     # normalized health snapshot (see scanners.health), NULL when not reported.
@@ -715,6 +743,11 @@ class DeviceOut(DeviceBase):
     @classmethod
     def _coerce_health(cls, v):
         return v if isinstance(v, dict) else None
+
+    @field_validator("stp_instances", mode="before")
+    @classmethod
+    def _coerce_stp_instances(cls, v):
+        return [i for i in v if isinstance(i, dict) and isinstance(i.get("id"), int)] if isinstance(v, list) else []
 
     @field_validator("vlan_names", mode="before")
     @classmethod

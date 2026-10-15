@@ -960,6 +960,7 @@ def _apply_stp_vlan_names(device: Device, sw) -> None:
         device.stp_root_id = stp.get("root_id")
         device.stp_root_cost = stp.get("root_cost")
         device.stp_root_port = stp.get("root_port")
+        device.stp_instances = list(getattr(sw, "stp_instances", None) or []) or None
         device.stp_at = now
     if getattr(sw, "vlan_collected", True):
         vlan_names = getattr(sw, "vlan_names", None)
@@ -1487,6 +1488,7 @@ def _finalize_scan_db(
                             stp_state=getattr(stp_src, "stp_state", None),
                             stp_role=getattr(stp_src, "stp_role", None),
                             stp_path_cost=getattr(stp_src, "stp_path_cost", None),
+                            stp_instances=getattr(stp_src, "stp_instances", None) or None,
                         )
                         ports_with_endpoints.append((port_obj, iface, endpoint_entries))
 

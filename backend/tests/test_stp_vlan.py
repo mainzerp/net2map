@@ -401,7 +401,9 @@ def test_device_out_without_stp():
     out = DeviceOut.model_validate(dict(_DEVICE_BASE, vlan_names=None)).model_dump(mode="json")
     assert out["stp"] is None
     assert out["vlan_names"] == {}
-    assert not any(k.startswith("stp_") for k in out)
+    # Raw STP columns stay hidden; stp_instances is the only stp_* output field.
+    assert [k for k in out if k.startswith("stp_")] == ["stp_instances"]
+    assert out["stp_instances"] == []
 
 
 def test_device_out_with_stp_from_columns():

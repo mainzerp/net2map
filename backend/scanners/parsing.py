@@ -426,3 +426,153 @@ def build_stp_info(
         "root_cost": root_cost,
         "root_port": root_port_name,
     }, per_ifindex
+
+
+# --- Multiple spanning tree instances (IEEE8021-MSTP-MIB) ----------------------
+
+# ieee8021MstpPortState (differs from BRIDGE-MIB dot1dStpPortState numbering)
+_MSTP_PORT_STATES = {1: "disabled", 2: "listening", 3: "learning", 4: "forwarding", 5: "blocking"}
+
+# ieee8021MstpPortRole mapped onto the CIST role vocabulary: alternate and
+# backup ports discard, so they count as "blocked".
+_MSTP_PORT_ROLES = {1: "root", 2: "blocked", 3: "designated", 4: "blocked"}
+
+# Columns of ieee8021MstpEntry (index: componentId.mstId)
+MSTP_COL_BRIDGE_ID = 3
+MSTP_COL_DESIGNATED_ROOT = 7
+MSTP_COL_ROOT_COST = 8
+MSTP_COL_ROOT_PORT = 9
+_MSTP_COL_VIDS = (11, 12, 13, 14)  # ieee8021MstpVids0..3, 1024 VLAN bits each
+
+
+def _oid_suffix(oid: str, prefix: str) -> Optional[List[int]]:
+    """Return the integer arcs of ``oid`` below ``prefix`` (None if outside)."""
+    oid = (oid or "").strip().lstrip(".")
+    prefix = prefix.strip().lstrip(".")
+    if not oid.startswith(prefix + "."):
+        return None
+    try:
+        return [int(a) for a in oid[len(prefix) + 1:].split(".")]
+    except ValueError:
+        return None
+
+
+def vlan_ranges(vlans) -> str:
+    """Compress VLAN ids into a range string, e.g. [10, 11, 12, 30] -> "10-12,30"."""
+    ids = sorted(set(vlans))
+    parts: List[str] = []
+    i = 0
+    while i < len(ids):
+        j = i
+        while j + 1 < len(ids) and ids[j + 1] == ids[j] + 1:
+            j += 1
+        parts.append(str(ids[i]) if i == j else f"{ids[i]}-{ids[j]}")
+        i = j + 1
+    return ",".join(parts)
+
+
+def _vids_from_bitmap(offset: int, data: bytes) -> List[int]:
+    """VLAN ids set in one ieee8021MstpVidsN bitmap (MSB of octet 0 = ``offset``)."""
+    out: List[int] = []
+    for byte_idx, byte in enumerate(data or b""):
+        for bit in range(8):
+            if byte & (0x80 >> bit):
+                vid = offset + byte_idx * 8 + bit
+                if 1 <= vid <= 4094:
+                    out.append(vid)
+    return out
+
+
+def build_mstp_info(
+    table_raw: List[Tuple[str, bytes]],
+    table_rows: List[Tuple[str, str]],
+    port_state_rows: List[Tuple[str, str]],
+    port_role_rows: List[Tuple[str, str]],
+    bridge_to_ifindex: Dict[int, int],
+    port_name_by_ifindex: Dict[int, str],
+    *,
+    table_entry_oid: str,
+    port_state_oid: str,
+    port_role_oid: str,
+) -> Tuple[List[dict], Dict[int, Dict[str, dict]]]:
+    """Combine IEEE8021-MSTP-MIB walks into MSTI summaries and per-port data.
+
+    ``table_raw`` / ``table_rows`` are raw (bytes) and decoded walks of
+    ieee8021MstpEntry; the port walks cover ieee8021MstpPortState / Role.
+    Returns (instances, per_ifindex): instances is a list sorted by MSTI id of
+    {id, bridge_id, root_id, root_cost, root_port, vlans} (vlans as a range
+    string); per_ifindex maps ifIndex -> {"<msti>": {state, role}}. Only the
+    first bridge component is used. Never raises on malformed input.
+    """
+    component: Optional[int] = None
+
+    def _accept(comp: int) -> bool:
+        nonlocal component
+        if component is None:
+            component = comp
+        return comp == component
+
+    instances: Dict[int, dict] = {}
+    vids: Dict[int, List[int]] = {}
+
+    def _inst(msti: int) -> dict:
+        return instances.setdefault(msti, {
+            "id": msti, "bridge_id": None, "root_id": None, "root_cost": None, "root_port": None, "vlans": "",
+        })
+
+    for oid, raw in table_raw:
+        arcs = _oid_suffix(oid, table_entry_oid)
+        if not arcs or len(arcs) != 3 or not _accept(arcs[1]) or not 1 <= arcs[2] <= 4094:
+            continue
+        col, msti = arcs[0], arcs[2]
+        if col == MSTP_COL_BRIDGE_ID:
+            _inst(msti)["bridge_id"] = parse_bridge_id(raw)
+        elif col == MSTP_COL_DESIGNATED_ROOT:
+            _inst(msti)["root_id"] = parse_bridge_id(raw)
+        elif col in _MSTP_COL_VIDS:
+            _inst(msti)
+            vids.setdefault(msti, []).extend(_vids_from_bitmap(_MSTP_COL_VIDS.index(col) * 1024, _to_bytes(raw) or b""))
+
+    for oid, val in table_rows:
+        arcs = _oid_suffix(oid, table_entry_oid)
+        if not arcs or len(arcs) != 3 or not _accept(arcs[1]) or not 1 <= arcs[2] <= 4094:
+            continue
+        col, msti = arcs[0], arcs[2]
+        if col == MSTP_COL_ROOT_COST:
+            _inst(msti)["root_cost"] = _to_int(val)
+        elif col == MSTP_COL_ROOT_PORT:
+            bp = _to_int(val)
+            ifindex = bridge_to_ifindex.get(bp) if bp else None
+            _inst(msti)["root_port"] = (port_name_by_ifindex.get(ifindex) or None) if ifindex is not None else None
+
+    for msti, ids in vids.items():
+        instances[msti]["vlans"] = vlan_ranges(ids)
+
+    def _port_values(rows, prefix) -> Dict[Tuple[int, int], Optional[int]]:
+        out: Dict[Tuple[int, int], Optional[int]] = {}
+        for oid, val in rows:
+            arcs = _oid_suffix(oid, prefix)
+            if not arcs or len(arcs) != 3 or not _accept(arcs[0]) or not 1 <= arcs[1] <= 4094:
+                continue
+            out[(arcs[1], arcs[2])] = _to_int(val)
+        return out
+
+    states = _port_values(port_state_rows, port_state_oid)
+    roles = _port_values(port_role_rows, port_role_oid)
+    per_ifindex: Dict[int, Dict[str, dict]] = {}
+    for msti, bp in set(states) | set(roles):
+        ifindex = bridge_to_ifindex.get(bp)
+        if ifindex is None:
+            continue
+        state = _MSTP_PORT_STATES.get(states.get((msti, bp)))
+        role = _MSTP_PORT_ROLES.get(roles.get((msti, bp)))
+        if state == "disabled":
+            role = "disabled"
+        elif role is None:
+            role = derive_stp_role(state, False)
+        if state is None and role is None:
+            continue
+        per_ifindex.setdefault(ifindex, {})[str(msti)] = {"state": state, "role": role}
+        _inst(msti)
+
+    return [instances[k] for k in sorted(instances)], per_ifindex

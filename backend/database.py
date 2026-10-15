@@ -288,6 +288,9 @@ class Device(Base):
     stp_root_id   = Column(String(32), nullable=True)
     stp_root_cost = Column(Integer, nullable=True)
     stp_root_port = Column(String(64), nullable=True)   # port name (if_descr) toward the root
+    # MSTP bridges: list of MSTIs {id, bridge_id, root_id, root_cost, root_port,
+    # vlans} from IEEE8021-MSTP-MIB; NULL when not reported
+    stp_instances = Column(JSONB, nullable=True)
     # VLAN id (string) -> name from dot1qVlanStaticName
     vlan_names    = Column(JSONB, nullable=True, default=dict, server_default="{}")
     # Interface name cache: ifIndex (string) -> [ifDescr, ifAlias], refreshed
@@ -334,6 +337,8 @@ class Port(Base):
     stp_state     = Column(String(16), nullable=True)   # disabled|blocking|listening|learning|forwarding|broken
     stp_role      = Column(String(16), nullable=True)   # root|designated|blocked|disabled (derived)
     stp_path_cost = Column(Integer, nullable=True)
+    # MSTI id (string) -> {state, role} (IEEE8021-MSTP-MIB); NULL when not reported
+    stp_instances = Column(JSONB, nullable=True)
 
     device = relationship("Device", back_populates="ports")
     endpoint_associations = relationship(
