@@ -51,6 +51,37 @@ def mac_from_octets(value) -> str:
         return ""
 
 
+def parse_arp_table(mac_rows: List[Tuple[str, object]], base_oid: str) -> Dict[str, str]:
+    """Build {mac: ipv4} from an ipNetToMediaPhysAddress walk.
+
+    The row index is ``ifIndex.a.b.c.d``, so the IPv4 address is taken from
+    the last four index arcs. ipNetToMediaNetAddress is not needed: it is an
+    IpAddress (an OCTET STRING subtype) whose decoded rendering is binary,
+    which made every IP disappear when it was read as text. Rows with an
+    invalid MAC or index are skipped; a MAC seen on several interfaces keeps
+    the last address.
+    """
+    prefix = base_oid.strip(".") + "."
+    table: Dict[str, str] = {}
+    for oid_s, mac_val in mac_rows:
+        oid_s = (oid_s or "").strip().lstrip(".")
+        if not oid_s.startswith(prefix):
+            continue
+        arcs = oid_s[len(prefix):].split(".")
+        if len(arcs) != 5:
+            continue
+        try:
+            octets = [int(a) for a in arcs[1:]]
+        except ValueError:
+            continue
+        if not all(0 <= o <= 255 for o in octets):
+            continue
+        mac = mac_from_octets(mac_val)
+        if mac:
+            table[mac] = ".".join(str(o) for o in octets)
+    return table
+
+
 # LLDP-MIB LldpPortIdSubtype values used for local port mapping
 _LLDP_PORT_ID_INTERFACE_ALIAS = 1
 _LLDP_PORT_ID_INTERFACE_NAME = 5

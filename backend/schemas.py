@@ -1079,6 +1079,22 @@ class DnsSettingsOut(BaseModel):
     servers: List[str]
 
 
+class DnsTestRequest(BaseModel):
+    ip: str = Field(..., max_length=64)
+
+
+class DnsTestResult(BaseModel):
+    resolver: str             # "custom" (configured servers) | "system" (container resolver)
+    nameservers: List[str] = []
+    host: str = ""
+    error: str = ""
+
+
+class DnsTestOut(BaseModel):
+    ip: str
+    results: List[DnsTestResult]
+
+
 # ─── Discovery Ranges ────────────────────────────────────────────────────────
 
 class DiscoveryRangesUpdate(BaseModel):

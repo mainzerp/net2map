@@ -448,11 +448,8 @@ def test_mac_from_octets(value, expected):
 
 
 def test_arp_walk_decodes_printable_mac_bytes(scanner, monkeypatch):  # noqa: F811
-    walks = {
-        scanner.OID_IF_DESCR: [(f"{scanner.OID_IF_DESCR}.1", "1/1/1")],
-        scanner.OID_ARP_IP: [(f"{scanner.OID_ARP_IP}.1.10.0.0.5", "10.0.0.5"),
-                             (f"{scanner.OID_ARP_IP}.1.10.0.0.6", "10.0.0.6")],
-    }
+    # The IP comes from the row index; ipNetToMediaNetAddress is not walked.
+    walks = {scanner.OID_IF_DESCR: [(f"{scanner.OID_IF_DESCR}.1", "1/1/1")]}
     raw = {
         scanner.OID_ARP_MAC: [(f"{scanner.OID_ARP_MAC}.1.10.0.0.5", b"ABCDEF"),
                               (f"{scanner.OID_ARP_MAC}.1.10.0.0.6", b"")],
@@ -770,3 +767,21 @@ def test_model_and_version_patterns_shared():
     # Vendors without VERSION_PATTERN keep the generic version patterns
     assert get_scanner("generic").extract_version("Foo Version 1.2.3") == "1.2.3"
     assert get_scanner("generic").extract_model(None) == ""
+
+
+def test_parse_arp_table_takes_ip_from_row_index():
+    from scanners.parsing import parse_arp_table
+
+    base = "1.3.6.1.2.1.4.22.1.2"
+    rows = [
+        (f"{base}.12.192.168.1.5", b"\x00\x11\x22\x33\x44\x55"),
+        (f".{base}.3.10.0.0.9", b"\xaa\xbb\xcc\xdd\xee\xff"),
+        (f"{base}.12.10.0.0.300", b"\x00\x00\x00\x00\x00\x01"),  # invalid octet
+        (f"{base}.12.10.0.0", b"\x00\x00\x00\x00\x00\x02"),      # short index
+        (f"{base}.12.10.0.0.7", b""),                            # no MAC
+        ("1.3.6.1.2.1.4.22.1.3.12.10.0.0.8", b"\x00\x00\x00\x00\x00\x03"),  # other column
+    ]
+    assert parse_arp_table(rows, base) == {
+        "00:11:22:33:44:55": "192.168.1.5",
+        "aa:bb:cc:dd:ee:ff": "10.0.0.9",
+    }

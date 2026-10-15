@@ -1,4 +1,5 @@
 """Scan settings, discovery ranges, and DNS settings endpoints."""
+import ipaddress
 from typing import List
 
 from fastapi import APIRouter, Depends, Request
@@ -10,11 +11,14 @@ from schemas import (
     DiscoveryRangesUpdate,
     DnsSettingsOut,
     DnsSettingsUpdate,
+    DnsTestOut,
+    DnsTestRequest,
     ScanSettingsOut,
     ScanSettingsUpdate,
 )
 from shared.audit import log_audit
 from shared.auth import require_role
+from shared.dns_check import check_reverse_dns
 from shared.errors import api_error
 from shared.file_settings import (
     _read_dns_settings,
@@ -86,6 +90,18 @@ def update_discovery_ranges(body: DiscoveryRangesUpdate, request: Request, db: S
 def get_dns_settings():
     """Return configured DNS servers for reverse lookups."""
     return _read_dns_settings()
+
+
+@router.post("/dns-settings/test", response_model=DnsTestOut,
+             dependencies=[require_role("admin", "operator")])
+def test_dns_settings(body: DnsTestRequest):
+    """Reverse-resolve one IP with the configured servers and the system resolver (no cache)."""
+    try:
+        ip = str(ipaddress.ip_address(body.ip.strip()))
+    except ValueError:
+        api_error(400, "INVALID_IP", f"Invalid IP address: {body.ip}", field="ip")
+    servers = _read_dns_settings().get("servers", [])
+    return {"ip": ip, "results": check_reverse_dns(ip, servers)}
 
 
 @router.put("/dns-settings", response_model=DnsSettingsOut,

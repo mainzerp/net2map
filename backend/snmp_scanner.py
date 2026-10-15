@@ -47,6 +47,7 @@ from scanners.parsing import (
     build_stp_info,
     mac_from_octets,
     map_lldp_local_ports,
+    parse_arp_table,
     parse_vlan_names,
     resolve_fdb_candidates,
 )
@@ -745,6 +746,16 @@ def _decode_snmp_str(val) -> str:
     """
     from pysnmp.proto.rfc1902 import OctetString as _OctetString
 
+    try:
+        from pysnmp.proto.rfc1902 import IpAddress as _IpAddress
+    except ImportError:  # stubbed pysnmp in tests
+        _IpAddress = None
+
+    # IpAddress subclasses OctetString; its raw bytes are binary, so use the
+    # dotted-quad rendering instead of decoding them as text.
+    if _IpAddress is not None and isinstance(val, _IpAddress):
+        return val.prettyPrint()
+
     # Non-string SNMP types: use str() which gives the correct decimal value.
     if not isinstance(val, _OctetString):
         return str(val).strip()
@@ -1321,12 +1332,12 @@ async def _scan_switch_inner(
         async def _no_rows():
             return []
 
-        (arp_mac_rows, arp_ip_rows,
+        (arp_mac_rows,
          base_port_rows, fdb_rows) = await asyncio.gather(
             # MAC-typed column: walked raw so a 6-byte MAC whose bytes happen
-            # to be printable is never decoded as text.
+            # to be printable is never decoded as text. The IP address is part
+            # of the row index, so ipNetToMediaNetAddress is not walked.
             snmp_bulk_walk_raw(ip, snmp_port, auth, OID_ARP_MAC, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
-            snmp_bulk_walk(ip, snmp_port, auth, OID_ARP_IP, timeout=snmp_timeout, retries=snmp_retries, engine=engine),
             snmp_bulk_walk(ip, snmp_port, auth, OID_DOT1D_BASE_PORT_IF_INDEX, timeout=snmp_timeout, retries=snmp_retries, engine=engine)
             if wants_fdb else _no_rows(),
             snmp_bulk_walk(ip, snmp_port, auth, fdb_oid, timeout=snmp_timeout, retries=snmp_retries, engine=engine)
@@ -1347,22 +1358,12 @@ async def _scan_switch_inner(
                 fdb_strategy = "dot1d" if fdb_strategy == "qbridge" else "qbridge"
 
         log.info(
-            "MAC/ARP walk results for %s (%s): arp_mac=%d, arp_ip=%d, base_port=%d, fdb=%d",
+            "MAC/ARP walk results for %s (%s): arp=%d, base_port=%d, fdb=%d",
             ip, sw.sys_name,
-            len(arp_mac_rows), len(arp_ip_rows),
-            len(base_port_rows), len(fdb_rows),
+            len(arp_mac_rows), len(base_port_rows), len(fdb_rows),
         )
 
-        ip_by_suffix: Dict[str, str] = {}
-        for oid_s, val in arp_ip_rows:
-            suffix = ".".join(oid_s.split(".")[-5:])
-            ip_by_suffix[suffix] = val
-        for oid_s, mac_val in arp_mac_rows:
-            suffix = ".".join(oid_s.split(".")[-5:])
-            arp_ip = ip_by_suffix.get(suffix, "")
-            mac = mac_from_octets(mac_val)
-            if mac and arp_ip:
-                sw.arp_table[mac] = arp_ip
+        sw.arp_table.update(parse_arp_table(arp_mac_rows, OID_ARP_MAC))
 
         bridge_to_ifindex.clear()
         for oid_s, ifindex_val in base_port_rows:
