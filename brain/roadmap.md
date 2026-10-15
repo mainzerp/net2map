@@ -18,6 +18,15 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
+- Endpoints rename, Network Devices search, floors outside racks (released v4.6.0) · priority: P2 · area: full-stack
+  `/devices` -> `/endpoints` (redirect keeps query), labels "Endpoints"; search field
+  in Settings > Network Devices over credentials, unassigned devices, ping candidates;
+  unracking keeps the rack's floor (single, bulk, rack delete); Floor field in the
+  Network page edit dialog.
+  Passed: ruff, backend pytest, typecheck, vitest. User to verify: sidebar shows
+  Endpoints, an old /devices bookmark lands on /endpoints; search "GA-AP" shows only
+  the AP candidates; drag a device from a rack to the tray, it stays on that floor.
+
 - DNS names for ping candidates (released v4.5.1, migration 034) · priority: P1 · area: backend
   Range scans resolve PTR for ping-only range hosts and store it on the candidate.
   Passed: ruff, 1122 backend tests, alembic 034 on postgres:16.

@@ -469,3 +469,13 @@
   migration 034), resolved by range scans. Live: 30 access points in 192.168.210.0/24
   have PTR records but no SNMP, so they never became devices or endpoints with an IP
   and showed no name anywhere.
+
+## Floors of devices outside racks (2026-10-15)
+
+- **Leaving a rack copies the rack's floor to the device** (backend, all three paths:
+  single meta, bulk `clear_rack`, rack delete via `shared.rack_space.carry_rack_floors`).
+  The effective floor rule stays "rack's floor while racked, else own `floor_id`";
+  without the copy a device jumped to a stale floor or "Unassigned" on the map. An
+  explicit floor in the same request wins, so the UI can still choose another one.
+- **Endpoints page is `/endpoints`** (was `/devices`, now a redirect keeping the
+  query): "Devices" was ambiguous next to the managed network devices.

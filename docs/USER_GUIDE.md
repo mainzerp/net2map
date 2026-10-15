@@ -85,7 +85,7 @@ All setup happens under `Settings` in the sidebar. The page opens on the
    while they are scanned.
 6. **View the result.** Open `Topology` in the sidebar. The map shows
    discovered switches, racks and links. Find your switches under `Network`,
-   the attached end devices under `Devices`, and place switches into racks
+   the attached end devices under `Endpoints`, and place switches into racks
    under `Racks` or `Settings > Racks`.
 
 Tip: use `Dry Run` on the scan settings tab before the first real run to see
@@ -126,7 +126,7 @@ scan the hint "Add credentials in Settings and run a scan." is shown instead.
 - `Racks overview` (only when racks exist): one row per rack with `Rack`,
   `Room`, `Switches`, `Ports` and an `Active` port-utilization bar;
   `Open racks` goes to `/racks`.
-- Quick navigation links: `Topology map`, `Devices`, `Settings`.
+- Quick navigation links: `Topology map`, `Endpoints`, `Settings`.
 - `Refresh` re-fetches the dashboard data.
 
 ### Topology (`/map`)
@@ -207,9 +207,12 @@ canvas color. Once at least one floor exists:
   over the remembered one. Without either, the first floor of the first
   building is shown.
 - Racks are assigned to floors in `Settings > Racks` or in the rack inspector;
-  devices outside racks in the device inspector (`Floor`) or in bulk via
-  `Move to floor...` on the Network page. Racked devices always follow their
-  rack's floor.
+  devices outside racks in the device inspector (`Floor`), in the `Edit`
+  dialog on the Network page, or in bulk via `Move to floor...` there.
+  Racked devices always follow their rack's floor (the edit dialog shows it
+  as `(from rack)`). A device taken out of a rack (unassigned, dragged to the
+  tray, rack deleted) keeps the rack's floor, unless a floor is chosen in the
+  same edit.
 - Racks and devices without a floor (for example devices found by a new scan)
   appear on the `Unassigned` tab, which is only shown while something is
   unassigned; its badge shows how many devices are waiting for a floor.
@@ -223,7 +226,10 @@ canvas color. Once at least one floor exists:
 Without any floors the map works as before: one canvas, all racks and devices,
 no background image.
 
-### Devices (`/devices`)
+### Endpoints (`/endpoints`)
+
+Named `Devices` at `/devices` before v4.6.0; old `/devices` links redirect
+here and keep their query (`?q=`, `?inspect=`).
 
 ![Endpoints](screenshots/devices.png)
 
@@ -328,6 +334,10 @@ order), `SNMP Version` (`v2c`/`v3`), `SNMP Port` (default `161`), credential
 fields, `SNMP profile` reference, `Engine ID` (v3 override), `Include in scan`.
 Defaults: `v2c`, community `public`, v3 `authPriv`/`SHA-256`/`AES-128`.
 
+- `Search network devices...` above the cards filters all lists of the tab
+  (credentials, `DISCOVERED WITHOUT CREDENTIALS`, ping candidates) by label,
+  IP, sysName, DNS name, vendor/model, profile, SNMP user, rack and MAC; every
+  word must match. The query is kept in the URL (`?q=`).
 - Each credential card shows label, `ip:port`, the SNMP version badge, the
   community/username or linked profile label, and status badges: the rack the
   device sits in (or `no rack`), `discovered` (matched to a scanned device)
@@ -461,7 +471,7 @@ to move, `Enter` to open, `Esc` to close.
 
 - The sidebar sun/moon button toggles `Switch to light theme` / `Switch to
   dark theme`. Light is the default; the choice is persisted in the browser.
-- Number keys `1`-`7` jump to pages: `1` Dashboard, `2` Topology, `3` Devices,
+- Number keys `1`-`7` jump to pages: `1` Dashboard, `2` Topology, `3` Endpoints,
   `4` Network, `5` Logs, `6` Settings, `7` Racks.
 - `s` starts a scan (operator/admin; viewers get a failure toast).
 - `Esc` closes the current dialog/inspector.
@@ -526,8 +536,7 @@ Scan scope details:
   optional `Total ports` cutoff) used for port visualization.
 - **Racks and placement**: `Settings > Racks` defines racks; `/racks` assigns
   and positions devices by drag and drop and sets `U height`.
-- **Ignoring**: `Ignore`/`Re-enable` on `Network` (devices) and `Devices`
-  (endpoints). Ignored devices are skipped by scans and hidden on the map;
+- **Ignoring**: `Ignore`/`Re-enable` on `Network` (devices) and `Endpoints`. Ignored devices are skipped by scans and hidden on the map;
   ignored endpoints are hidden but kept.
 - **Full configuration**: `Settings > Backup & Restore` exports/imports
   settings, profiles and credentials as JSON. CSV/JSON bulk import/export of

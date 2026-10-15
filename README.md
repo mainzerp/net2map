@@ -16,7 +16,7 @@ The project consists of a FastAPI backend (scan, persistence, API) and a React/V
 - Firmware version capture per device (ENTITY-MIB OID, then vendor MIB scalars such as MIKROTIK-MIB `mtxrLicVersion`, then vendor parsing from sysDescr)
 - Interactive topology map (React Flow) based on LLDP links, including port/speed info, auto-layout, device search, minimap and optional background image; layers "STP" (root bridge, root paths, blocked ports, STP / RSTP / MSTP badge per device, protocol mix in the legend, protocol boundary markers on links, and an instance picker for MSTP bridges that shows each MSTI from IEEE8021-MSTP-MIB with its VLANs), "VLAN" and "Latency"
 - Buildings and floors: model a campus as buildings with floors, each floor with its own floor plan; the map shows one floor at a time with a floor switcher, an "Unassigned" tab for racks/devices without a floor, and portal nodes for links to other floors (click to jump to the remote device)
-- Endpoint tracking under `/devices`: MAC, IP, hostname and switch port per end device, including port history and ignoring
+- Endpoint tracking under `/endpoints` (formerly `/devices`, which redirects): MAC, IP, hostname and switch port per end device, including port history and ignoring
 - Network device overview under `/network` with rack, class, model, firmware and status
 - Rack elevation under `/racks`: real U positions (U1 at the bottom), drag and drop with preview, adjustable device height (`u_height`, stepper up to 10U)
 - Dashboard with status cards, "Attention needed" list, deep links and live scan display

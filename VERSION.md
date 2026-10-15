@@ -1,5 +1,31 @@
 # Version History
 
+## v4.6.0 -- Endpoints page renamed, search in Network Devices, floors outside racks
+
+**Type:** MINOR. Commits: 26c8237 (backend), 49ee815 (frontend). No migration.
+
+### Changed behavior
+
+- The `Devices` page (end devices from MAC/ARP tables) is now `Endpoints` at
+  `/endpoints`: sidebar, dashboard links, command palette, port dialog, shortcut `3`.
+  Old `/devices` links redirect and keep `?q=` / `?inspect=`. The command palette
+  group for managed devices is now `Network devices`. The API paths are unchanged.
+- A device taken out of a rack keeps the rack's floor: `PATCH .../meta` with
+  `rack_id: null`, bulk `clear_rack` and rack deletion copy the rack's `floor_id`
+  to the device (an explicit `floor_id` / `clear_floor` in the same request wins;
+  racks without a floor change nothing). Before, the device fell back to its stale
+  own floor or to "Unassigned" on the map.
+
+### Features
+
+- Settings > Network Devices has a search field (`Search network devices...`, kept in
+  `?q=`). It filters the credential cards, `DISCOVERED WITHOUT CREDENTIALS` and the
+  ping candidates by label, IP, sysName, DNS name, vendor/model, profile, SNMP user,
+  rack and MAC; every word must match.
+- The `Edit` dialog on the Network page has a `Floor` field for devices outside a
+  rack; racked devices show the rack's floor read-only `(from rack)`. Removing the
+  rack in the dialog preselects the rack's floor.
+
 ## v4.5.1 -- DNS names for ping candidates
 
 **Type:** PATCH. Commit: e8a1e74 (backend). Migration 034 adds `ping_candidates.hostname`. No manual steps.
