@@ -223,6 +223,11 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
               <Badge tone="neutral" title="Monitored by ping only, no SNMP polling">Ping only</Badge>
             )}
           </div>
+          {d.hostname && d.hostname !== deviceDisplayName(d) && (
+            <div className="text-[10px] text-muted font-mono" title="Reverse DNS name">
+              {d.hostname}
+            </div>
+          )}
           {d.vendor && (
             <div className="text-[10px] text-muted">
               {d.vendor}

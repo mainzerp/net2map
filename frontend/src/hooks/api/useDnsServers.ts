@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api";
 import { queryKeys } from "./keys";
 import { useApiMutation, type MutationHookOptions } from "./mutation";
+import type { DnsTestResponse } from "../../types";
 
 // ── DNS resolver settings (DnsTab) ───────────────────────────────────────────
 
@@ -24,6 +25,15 @@ export function useUpdateDnsServers(options?: MutationHookOptions<string[], stri
       return Array.isArray(result?.servers) ? result.servers : list;
     },
     [queryKeys.dnsSettings],
+    options,
+  );
+}
+
+/** Reverse-resolve one IP with the configured servers and the system resolver (no cache). */
+export function useTestDns(options?: MutationHookOptions<DnsTestResponse, string>) {
+  return useApiMutation<DnsTestResponse, string>(
+    async (ip) => (await api.post("/api/dns-settings/test", { ip })) as DnsTestResponse,
+    [],
     options,
   );
 }

@@ -50,7 +50,7 @@ export {
   type AppSetting,
   type ScanRunEntry,
 } from "./useScanConfig";
-export { useDnsServers, useUpdateDnsServers } from "./useDnsServers";
+export { useDnsServers, useTestDns, useUpdateDnsServers } from "./useDnsServers";
 export {
   useExportConfig,
   useImportConfig,

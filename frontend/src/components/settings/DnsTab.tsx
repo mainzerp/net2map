@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { extractErrorMessage } from "../../api";
-import { useDnsServers, useUpdateDnsServers } from "../../hooks/api";
-import { Button, Card } from "../ui";
+import { useDnsServers, useTestDns, useUpdateDnsServers } from "../../hooks/api";
+import { Button, Card, Input } from "../ui";
 import { SectionHeader, TabLoading } from "./shared";
 
 // ── DnsSettingsTabContent ───────────────────────────────────────────────────
@@ -42,8 +42,10 @@ function DnsSettingsTabContent() {
     <div className="flex-1 overflow-y-auto pt-5 flex flex-col gap-5">
       <Card title={<SectionHeader>DNS RESOLVER</SectionHeader>}>
         <div className="text-muted text-[11px] leading-relaxed mb-3">
-          Configure DNS servers for reverse lookup of peer hostnames during scans.
-          Leave empty to use system/default DNS resolver.
+          DNS servers for reverse lookups (PTR) of endpoint and device names during scans.
+          Leave empty to use the resolver of the backend container. Docker&apos;s built-in
+          resolver usually cannot answer PTR queries for local addresses, so enter the DNS
+          server that knows your local names (e.g. the router or firewall running DHCP).
         </div>
         {isLoading ? (
           <TabLoading />
@@ -68,7 +70,64 @@ function DnsSettingsTabContent() {
           </div>
         )}
       </Card>
+      <DnsTestCard />
     </div>
+  );
+}
+
+// ── DnsTestCard ─────────────────────────────────────────────────────────────
+// Reverse-resolves one IP with the saved servers and the container resolver
+// (no cache) and shows each answer or error.
+function DnsTestCard() {
+  const [ip, setIp] = useState("");
+  const [err, setErr] = useState("");
+  const testMutation = useTestDns({ onError: (ex) => setErr(extractErrorMessage(ex)) });
+  const result = testMutation.data;
+
+  const run = () => {
+    setErr("");
+    if (ip.trim()) testMutation.mutate(ip.trim());
+  };
+
+  return (
+    <Card title={<SectionHeader>TEST REVERSE LOOKUP</SectionHeader>}>
+      <div className="text-muted text-[11px] leading-relaxed mb-3">
+        Resolve one IP address with the saved DNS servers and the container resolver, without cache.
+      </div>
+      <div className="flex gap-2 items-center">
+        <Input
+          aria-label="IP address to resolve"
+          value={ip}
+          placeholder="e.g. 10.0.0.25"
+          onChange={(e) => setIp(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") run();
+          }}
+          className="max-w-56"
+        />
+        <Button variant="secondary" onClick={run} disabled={!ip.trim() || testMutation.isPending}>
+          {testMutation.isPending ? "Resolving..." : "Resolve"}
+        </Button>
+      </div>
+      {err && <div className="mt-2 text-[11px] text-danger">{err}</div>}
+      {result && (
+        <ul className="mt-3 flex flex-col gap-1.5 text-[11px]" data-testid="dns-test-results">
+          {result.results.map((r) => (
+            <li key={r.resolver} className="flex flex-wrap items-baseline gap-x-2">
+              <span className="font-semibold text-primary w-28 shrink-0">
+                {r.resolver === "custom" ? "DNS servers" : "Container resolver"}
+              </span>
+              <span className="font-mono text-muted">{r.nameservers.join(", ") || "-"}</span>
+              {r.host ? (
+                <span className="font-mono text-success">{r.host}</span>
+              ) : (
+                <span className="text-danger">{r.error || "no name"}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 

@@ -465,6 +465,20 @@ export interface ScanRangeSave {
   profile_ids?: number[];
 }
 
+/** One resolver path of POST /api/dns-settings/test. */
+export interface DnsTestResult {
+  /** "custom" = configured DNS servers, "system" = resolver of the backend container. */
+  resolver: "custom" | "system";
+  nameservers: string[];
+  host: string;
+  error: string;
+}
+
+export interface DnsTestResponse {
+  ip: string;
+  results: DnsTestResult[];
+}
+
 /** Response of the manual range scan endpoints. */
 export interface ScanRangeJob {
   job_id: string;
