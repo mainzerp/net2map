@@ -334,6 +334,12 @@ order), `SNMP Version` (`v2c`/`v3`), `SNMP Port` (default `161`), credential
 fields, `SNMP profile` reference, `Engine ID` (v3 override), `Include in scan`.
 Defaults: `v2c`, community `public`, v3 `authPriv`/`SHA-256`/`AES-128`.
 
+- `Display name (optional)`: the name shown for the device everywhere (map,
+  racks, lists, inspector, command palette). Empty: the `Label` is shown; a
+  label that only repeats the IP falls back to sysName, DNS name and IP. The
+  field is stored on the discovered device, so it is only editable once the
+  device was found by a scan. It is also editable in the `Edit` dialog on the
+  Network page. Renaming the `Label` renames the device label as well.
 - `Search network devices...` above the cards filters all lists of the tab
   (credentials, `DISCOVERED WITHOUT CREDENTIALS`, ping candidates) by label,
   IP, sysName, DNS name, vendor/model, profile, SNMP user, rack and MAC; every

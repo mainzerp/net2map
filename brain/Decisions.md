@@ -477,5 +477,10 @@
   The effective floor rule stays "rack's floor while racked, else own `floor_id`";
   without the copy a device jumped to a stale floor or "Unassigned" on the map. An
   explicit floor in the same request wins, so the UI can still choose another one.
+- **Display name on the device, label as fallback** (`devices.display_name`,
+  migration 035). One rule in `deviceDisplayName` for every view: display name >
+  label > sysName > DNS > IP. Stored on the device (not the credential) because
+  every view renders devices; the credential form edits it once the device exists.
+  The device label now follows credential label renames (it was copied once only).
 - **Endpoints page is `/endpoints`** (was `/devices`, now a redirect keeping the
   query): "Devices" was ambiguous next to the managed network devices.

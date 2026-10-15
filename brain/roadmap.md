@@ -18,6 +18,13 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
+- Display name for network devices (released v4.7.0, migration 035) · priority: P2 · area: full-stack
+  `devices.display_name`; name rule display name > label > sysName > DNS > IP in all
+  views; credential label renames reach the device label. Passed: ruff, 1127 backend
+  tests, alembic 035 on postgres:16 incl. label re-sync, typecheck, 391 frontend tests.
+  User to verify: set a display name in Settings > Network Devices > Edit, the map,
+  rack view and Network page show it; clear it, the label is shown.
+
 - Endpoints rename, Network Devices search, floors outside racks (released v4.6.0) · priority: P2 · area: full-stack
   `/devices` -> `/endpoints` (redirect keeps query), labels "Endpoints"; search field
   in Settings > Network Devices over credentials, unassigned devices, ping candidates;

@@ -1,5 +1,24 @@
 # Version History
 
+## v4.7.0 -- Display name for network devices
+
+**Type:** MINOR. Commits: 314339a (backend), 651819c (frontend). Migration 035 adds `devices.display_name` and
+re-syncs `devices.label` from the linked credential label. No manual steps.
+
+### Features
+
+- Network devices have an optional `Display name` (Settings > Network Devices edit
+  form, Network page edit dialog; API `display_name` on `DeviceOut` and
+  `PATCH /topology/devices/{id}/meta`). Name rule everywhere (map, racks, tables,
+  inspector, dashboard, command palette, latency): display name > label > sysName >
+  DNS name > IP; a label or sysName equal to the IP is skipped.
+
+### Changed behavior
+
+- The label of an SNMP login (credential) is now used as the device name when no
+  display name is set; before, the scanned sysName won. Renaming a credential label
+  also renames the device label (it was only copied once at device creation).
+
 ## v4.6.0 -- Endpoints page renamed, search in Network Devices, floors outside racks
 
 **Type:** MINOR. Commits: 26c8237 (backend), 49ee815 (frontend). No migration.
