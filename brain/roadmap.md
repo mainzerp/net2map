@@ -18,7 +18,7 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
-- MikroTik + WatchGuard SNMP scanners, STP protocol badges (released v4.1.0) · priority: P2 · area: full-stack
+- MikroTik + WatchGuard SNMP scanners, STP protocol badges (released v4.1.0, fix v4.1.1) · priority: P2 · area: full-stack
   New vendors `mikrotik` (switch, firmware via MIKROTIK-MIB) and `watchguard`
   (firewall, no STP); STP layer shows STP/RSTP/MSTP per node, legend counts and flags
   mixed protocols, inspector header badge. Passed: ruff, backend pytest (7

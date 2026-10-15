@@ -1,5 +1,15 @@
 # Version History
 
+## v4.1.1 -- Keep manual device type for MikroTik
+
+**Type:** PATCH. Commit: 5ed673e. No migration.
+
+### Fixes
+
+- A device type set manually for a MikroTik device (e.g. a CCR/RB router as
+  `firewall`) is no longer reset to `switch` by every scan
+  (`VendorScanner.DEVICE_TYPE_IS_GUESS`).
+
 ## v4.1.0 -- MikroTik and WatchGuard scanners, STP protocol on the map
 
 **Type:** MINOR. Commits: 0bdfc41 (backend scanners), 38adf9d (frontend STP
