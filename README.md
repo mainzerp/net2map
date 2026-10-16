@@ -18,14 +18,15 @@ The project consists of a FastAPI backend (scan, persistence, API) and a React/V
 - Buildings and floors: model a campus as buildings with floors, each floor with its own floor plan; the map shows one floor at a time with a floor switcher, an "Unassigned" tab for racks/devices without a floor, and portal nodes for links to other floors (click to jump to the remote device)
 - Endpoint tracking under `/endpoints` (formerly `/devices`, which redirects): MAC, IP, hostname and switch port per end device, including port history and ignoring
 - Network device overview under `/network` with rack, class, model, firmware and status
-- Rack elevation under `/racks`: real U positions (U1 at the bottom), drag and drop with preview, adjustable device height (`u_height`, stepper up to 10U)
+- Rack elevation under `/racks`: real U positions (U1 at the bottom), drag and drop with preview, adjustable device height (`u_height`, stepper up to the rack height, max 60U), class color stripe per device; racks can be created and edited directly on the page
 - Dashboard with status cards, "Attention needed" list, deep links and live scan display
 - Inspector sidebar for switches, endpoints and racks (linkable via `?inspect=`) and command palette (`Ctrl/Cmd+K` or `/`)
 - Scan history with changes per run, duration per switch and dry-run preview
 - Users and roles (admin, operator, viewer), audit log, log view under `/logs`
 - CSV/JSON import/export as well as export/import of the complete configuration
 - Dark/light theme (Tailwind design system, toggle in the sidebar)
-- Manual metadata adjustment per device (e.g. vendor/model), switch classes and hardware models with port layout
+- Manual metadata adjustment per device (e.g. vendor/model); device classes (role label, map color, visibility without a rack) and hardware models (port layout templates, suggested from the model the device reports)
+- Settings grouped by setup order: Discovery (network devices, SNMP profiles, scan, DNS), Site & Hardware (buildings and floors, racks, device classes, hardware models), System (backup and restore)
 - Network latency monitor: a dedicated service pings the devices continuously (every 10 s by default) and shows latency, jitter, packet loss and deviation from the 24 h baseline in the dashboard, in the inspector (with history 1 h / 24 h / 7 d) and as the topology layer "Latency"
 
 ## Screenshots

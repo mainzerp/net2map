@@ -1,5 +1,46 @@
 # Version History
 
+## v4.8.0 -- Clearer settings and rack, class, model setup
+
+**Type:** MINOR. Commits: 6811a2b (backend), 3d085c7 (frontend). No migration, no manual steps.
+
+### Features
+
+- Settings grouped by setup order: Discovery (Network Devices, SNMP Profiles, Scan,
+  DNS), Site & Hardware (Buildings & Floors, Racks, Device Classes, Hardware
+  Models), System (Backup & Restore). Tab ids and URLs are unchanged.
+- Per-tab create buttons ("New device", "New rack", "New class", "New model",
+  "New profile") and a one-sentence explanation on the floors, racks, classes and
+  models tabs. Below the md breakpoint the settings navigation is a select.
+- Command palette finds every settings tab (e.g. "classes", "switch models").
+- Racks page: "New rack" and "Edit rack" (admin/operator) with the same dialog as
+  Settings > Racks; header line with room, floor and height.
+- Settings > Racks cards show "N placed, M unplaced, X/Y U used" (devices only) and
+  link to the elevation to place unplaced devices.
+- Hardware models: live port preview in the dialog; devices whose reported model
+  matches the model name are suggested with "Assign all".
+- Rack elevation: class color stripe on placed devices.
+- Device inspector shows "Reported model", "Class" and "Hardware model".
+
+### Changed behavior
+
+- UI names: "Classes" are "Device Classes", "Models" are "Hardware Models", the
+  SNMP model string is "Reported model". API and database names are unchanged.
+- New device classes default to "Show devices without a rack on the map" (on).
+  Existing classes keep their setting. A class that requires a rack only offers
+  devices that are in a rack.
+- Rack dialog: height outside 6-60 U is an error instead of being clamped; the floor
+  field is always shown, with a link to create floors when none exist.
+- U-height stepper goes up to the rack height (max 60U, was 10U).
+- Assign and unassign errors in Settings > Racks and Hardware Models are shown on
+  the card (they were silent).
+
+### Fixes
+
+- Devices, rack items and rack layout entries can be placed at U49-U60 (schema
+  limit was 48 although racks may be 60U).
+- Deleting a rack also clears the U position of its former devices.
+
 ## v4.7.0 -- Display name for network devices
 
 **Type:** MINOR. Commits: 314339a (backend), 651819c (frontend). Migration 035 adds `devices.display_name` and

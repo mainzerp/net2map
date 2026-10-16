@@ -484,3 +484,24 @@
   The device label now follows credential label renames (it was copied once only).
 - **Endpoints page is `/endpoints`** (was `/devices`, now a redirect keeping the
   query): "Devices" was ambiguous next to the managed network devices.
+
+## Settings and rack/class/model UX (2026-10-16)
+
+- **Settings grouped by setup order, not by data type**: Discovery (Network Devices,
+  SNMP Profiles, Scan, DNS), Site & Hardware (Buildings & Floors, Racks, Device
+  Classes, Hardware Models), System (Backup & Restore). Tab ids and URLs are unchanged
+  so deep links (`/settings/scan`) keep working. Reason: the old groups ("CREDENTIALS"
+  with only profiles, floors under "APPEARANCE") did not match their contents.
+- **UI names: "Device class" and "Hardware model"**; the SNMP string is "Reported
+  model". API and DB names (`switch_classes`, `switch_models`) stay. Reason: three
+  different things were all called "model"; renaming the API would be a breaking
+  change for no user benefit.
+- **New classes default to "Show devices without a rack on the map"** (form default
+  only; the backend default and existing classes are unchanged). Reason: the old
+  default silently hid unracked devices from the map.
+- **Rack create/edit is one dialog** (`features/racks/RackFormModal.tsx`) used by
+  Settings > Racks and the Racks page, so a rack can be set up where devices are
+  placed. Settings keeps the overview and bulk assignment.
+- **Hardware models are suggested, not auto-applied**: the Models tab proposes
+  devices whose reported model string matches the model name and assigns them on one
+  click. No scanner-side auto-match, so a manual choice is never overwritten by a scan.

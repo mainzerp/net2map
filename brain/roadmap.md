@@ -18,6 +18,20 @@ cards. Short indented lines under a card carry outcome, next step, or verificati
 
 ## Testing
 
+- Settings and rack/class/model UX overhaul (released v4.8.0, no migration) · priority: P1 · area: full-stack
+  Settings regrouped (Discovery / Site & Hardware / System) with per-tab "New ..."
+  buttons, intros, mobile select, palette entries per tab; device classes default to
+  "shown without rack" and only offer racked devices when a rack is required;
+  hardware models with port preview and "Assign all" for matching reported models;
+  one rack dialog on Settings and /racks, usage summary per rack, class color
+  stripe, U stepper up to rack height; inspector shows class and hardware model.
+  Backend: U49-60 placeable, rack delete clears the U position.
+  Passed: ruff, 1138 backend tests, typecheck, 430 frontend tests, vite build.
+  Not verified: browser, mobile layout.
+  User to verify: local build, Settings nav on desktop and phone width; create a rack
+  on /racks with "New rack"; a hardware model named like a switch's reported model
+  shows "Assign all"; a rack-required class only offers racked devices.
+
 - Display name for network devices (released v4.7.0, migration 035) · priority: P2 · area: full-stack
   `devices.display_name`; name rule display name > label > sysName > DNS > IP in all
   views; credential label renames reach the device label. Passed: ruff, 1127 backend

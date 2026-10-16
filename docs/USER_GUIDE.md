@@ -58,14 +58,14 @@ Sessions and logout:
 ## First steps: getting your first map
 
 All setup happens under `Settings` in the sidebar. The page opens on the
-`Switches` tab by default.
+`Network Devices` tab by default.
 
-1. **SNMP access - `Settings > Profiles` (optional but recommended).** Create a
-   reusable SNMP profile with `+ New Entry`: `SNMP Version` `v2c` (community
-   string) or `v3` (security level, username, auth/priv protocols and
-   passwords). Defaults: `v2c`, community `public`, v3 `authPriv` with
+1. **SNMP access - `Settings > SNMP Profiles` (optional but recommended).**
+   Create a reusable SNMP profile with `New profile`: `SNMP Version` `v2c`
+   (community string) or `v3` (security level, username, auth/priv protocols
+   and passwords). Defaults: `v2c`, community `public`, v3 `authPriv` with
    `SHA-256`/`AES-128`.
-2. **Switches - `Settings > Switches`.** Add each switch with `+ New Entry`:
+2. **Switches - `Settings > Network Devices`.** Add each switch with `New device`:
    `IP`, `SNMP Version`, credentials or a profile reference, `SNMP Port`
    (default `161`), `Priority` (`0` = primary; additional entries for the same
    IP are tried in priority order) and `Include in scan`. A `v3` credential can
@@ -195,7 +195,7 @@ Rack side panel (open a rack box):
 #### Buildings, floors and portals
 
 A site can be modelled as buildings with floors (`Settings > Buildings &
-floors`). Each floor has its own floor plan background, opacity, zoom and
+Floors`). Each floor has its own floor plan background, opacity, zoom and
 canvas color. Once at least one floor exists:
 
 - The map shows exactly one floor at a time. A floor switcher sits at the top
@@ -261,7 +261,7 @@ jump to the map.
 Managed infrastructure ("Managed network equipment (switches, routers,
 firewalls)"), split into `ACTIVE NETWORK DEVICES` and
 `IGNORED NETWORK DEVICES`. Columns: `Name`, `IP`, `MAC`, `Rack`, `Class`,
-`Model`, `Firmware`, `Location`, `Last Seen`, `Status`.
+`Hw model` (hardware model), `Firmware`, `Location`, `Last Seen`, `Status`.
 
 - `Search name or IP...` and the status dropdown (`All statuses`, `Online`,
   `Offline`, `Unknown`) filter the list; both are reflected in the URL
@@ -269,8 +269,9 @@ firewalls)"), split into `ACTIVE NETWORK DEVICES` and
   `online`/`offline`/`unknown` with the ping RTT when online.
 - Click a row to open the device inspector (details, latency, spanning tree,
   ports table with status/speed/VLAN/STP/endpoint counts, neighbors).
-- `Edit` opens `Edit device` to assign `Rack`, `Class` and `Model`
-  (`-- No rack --`, `-- No class --`, `-- No model --` clear them).
+- `Edit` opens `Edit device` to assign `Rack`, `Device class` and
+  `Hardware model` (the port layout template from
+  `Settings > Hardware Models`); `-- No rack --`, `-- No class --`, `-- No model --` clear them.
 - `Ignore` / `Re-enable` toggles the ignored flag. Ignored devices are excluded
   from scans and hidden from the topology map, but remain in the database and
   can be re-enabled at any time.
@@ -281,14 +282,17 @@ firewalls)"), split into `ACTIVE NETWORK DEVICES` and
 
 ![Rack elevation](screenshots/racks.png)
 
-Rack elevation view. `U1` is at the bottom, higher U numbers at the top. With
-no racks defined the page shows "No racks defined yet" and a `Manage racks`
-link.
+Rack elevation view. `U1` is at the bottom, higher U numbers at the top
+(up to `U60`). With no racks defined the page shows "No racks defined yet"
+and offers `New rack`.
 
-- `Select rack` dropdown lists racks as `Label (room) - NU`. Devices display
-  as blocks spanning their U height; devices without a U height count as `1U`.
-- `Manage racks` opens `Settings > Racks` (definitions). `/racks?rack=<id>`
-  deep-links to a specific rack.
+- `Select rack` dropdown lists racks as `Label (room) - NU`; a header line
+  shows the selected rack's room, floor and height. Devices display as blocks
+  spanning their U height (devices without a U height count as `1U`), with a
+  thin stripe in their class color.
+- `New rack` and `Edit rack` (operator/admin) open the same rack dialog as
+  `Settings > Racks`. `All racks in Settings` opens `Settings > Racks`.
+  `/racks?rack=<id>` deep-links to a specific rack.
 - `Activity` toggles a subtle blink animation on up-port LEDs (off by
   default, not offered when reduced motion is preferred).
 - Drag and drop: drag a device from the trays (`Unplaced in this rack`,
@@ -296,7 +300,7 @@ link.
   preview marks an invalid placement (overlap or out of range). Positions save
   on drop.
 - `U height`: the `-` / `+` stepper on each placed device changes its height
-  (`1`-`4U`) and saves immediately.
+  (`1U` up to the rack height, max `60U`) and saves immediately.
 - Click a device name to open its inspector. Click a port to highlight the
   connected remote port.
 - Viewers see a read-only view; operators and admins can rearrange.
@@ -320,15 +324,17 @@ Rack definitions live under `Settings > Racks`.
 
 ### Settings (`/settings`)
 
-`/settings` redirects to `/settings/credentials` ("Switches"). The tabs are
-grouped as `Credentials` (`Switches`, `Profiles`), `Infrastructure` (`Racks`,
-`Classes`, `Models`), `Engine` (`Scan`, `DNS`), `Appearance` (`Map`) and
-`Backup` (`Backup & Restore`). Tabs with entries offer `+ New Entry` next to
-the tab bar.
+`/settings` redirects to `/settings/credentials` (`Network Devices`). The
+tabs sit in a left sidebar (a select at the top on narrow screens), grouped as
+`Discovery` (`Network Devices`, `SNMP Profiles`, `Scan`, `DNS`),
+`Site & Hardware` (`Buildings & Floors`, `Racks`, `Device Classes`,
+`Hardware Models`) and `System` (`Backup & Restore`). Tabs with a create
+dialog offer a named button (`New device`, `New profile`, `New rack`,
+`New class`, `New model`). The command palette finds every settings tab.
 
-#### `Switches` (credentials)
+#### `Network Devices` (credentials)
 
-SNMP credentials per switch IP. Fields: `Label`, `IP`, `Priority`
+SNMP credentials per switch IP (`/settings/credentials`). Fields: `Label`, `IP`, `Priority`
 (`0` = primary; additional credentials for the same IP are tried in priority
 order), `SNMP Version` (`v2c`/`v3`), `SNMP Port` (default `161`), credential
 fields, `SNMP profile` reference, `Engine ID` (v3 override), `Include in scan`.
@@ -356,35 +362,51 @@ Defaults: `v2c`, community `public`, v3 `authPriv`/`SHA-256`/`AES-128`.
   working credential (`unassigned` badge); `+ Add credentials` opens a
   prefilled new-credential form for that IP.
 
-#### `Profiles`
+#### `SNMP Profiles`
 
 Reusable SNMP profiles (`v2c` or `v3` with the same protocol options).
-Referenced by credentials via `SNMP profile`. `Create profile`, `Edit`,
+Referenced by credentials via `SNMP profile`. `New profile`, `Edit`,
 `Delete` (asks to confirm; `Delete Profile` cannot be undone). The form warns
 when the community is `public`.
 
 #### `Racks`
 
-Rack definitions: `Label` (required), `Room`, `Description`, `Height (U)`
-(default `42`, allowed `6`-`60`), and `Floor` (once floors exist; each rack
-card shows its `Building / Floor`). `Create rack`, `Edit`, `Delete`, and
-`Open elevation` jumps to `/racks`. Deleting a rack unassigns its switches.
+Rack definitions. `New rack` / `Edit` open the rack dialog: `Label`
+(required), `Room/location`, `Height (U)` (default `42`, `6`-`60`; out of
+range is an error), `Description` and `Floor` (options `Building / Floor`;
+without floors the select is disabled and links to create a building and
+floor first). Each card shows "N placed, M unplaced, X/Y U used" (devices
+only; rack items are not counted) and a `Place M unplaced` link to
+`/racks?rack=<id>`. Assigning a device on the card adds it to the rack without
+a U position - place it on the Racks page. `Open elevation` jumps to `/racks`;
+`Delete` unassigns the rack's switches.
 
-#### `Classes`
+#### `Device Classes`
 
-Switch classes (roles/colors for grouping and filtering). Fields: `Label`
-(required), `Color` (default `#5a86b8`), `Description`, and
-`Allow outside rack placement` - when off (`Rack required` badge), switches of
-that class must sit in a rack. `Available devices`/`Assigned devices` let you
-assign switches; the count column shows `N` per class. Deleting a class
-unassigns its switches.
+Device classes (roles/colors for grouping and filtering). `New class` / `Edit`
+fields: `Label` (required), `Color` (with swatch preview, default `#5a86b8`),
+`Description`, and `Map visibility` with the checkbox
+`Show devices without a rack on the map` (on by default for new classes).
 
-#### `Models`
+- On: badge `Shown without rack`.
+- Off: badge `Rack required` - devices of the class must be in a rack,
+  unracked ones are hidden from the map, and the assignment picker only offers
+  devices that are in a rack.
 
-Hardware models that drive the port-layout rendering. Fields: `Name`
-(required), `Ports per row` (default `24`, up to `96`), optional
-`Total ports (cutoff)` to hide ports beyond a count for partly populated
-models, `Description`. Assign devices per model; `Delete` unassigns them.
+The `Assign device` search under `ASSIGNED DEVICES` assigns devices; assign/unassign errors
+appear on the card. Deleting a class unassigns its devices.
+
+#### `Hardware Models`
+
+Port layout templates for the device faceplate (map device panel and rack
+view) - not the model string a device reports (shown as `Reported model` in
+the inspector). `New model` / `Edit` fields: `Name` (required),
+`Port columns per row` (each column is an odd/even port pair, so `24` columns
+= 48 ports per row; affects the map device panel), an optional total ports
+cutoff (ports above that number are hidden), `Description`. The dialog shows a
+live port preview. Cards suggest unassigned devices whose reported model
+matches the model name ("N devices report a matching model") with
+`Assign all N`; `Delete` unassigns the model's devices.
 
 #### `Scan`
 
@@ -417,7 +439,7 @@ models, `Description`. Assign devices per model; `Delete` unassigns them.
 during scans - one per line. `Save DNS Settings` applies; leaving it empty
 uses the system/default DNS resolver.
 
-#### `Buildings & floors`
+#### `Buildings & Floors`
 
 Buildings and their floors for the topology map (replaces the former global
 `Map` background settings; `/settings/map` redirects here). `Add building` and
@@ -458,7 +480,9 @@ command palette's `Recent` group.
 ![Inspector](screenshots/inspector.png)
 
 The switch inspector shows `Show on map` (centers the map on the device),
-`Open rack`, `Details` (hostname, model, MAC, firmware, location, rack), the
+`Open rack`, `Details` (hostname, `Reported model` - the SNMP model string,
+`Class` - swatch and name or "none", `Hardware model` - name or "none", MAC,
+firmware, location, rack), the
 `Latency` section, `Spanning tree` (when data exists), a `Ports` table
 (status, speed, VLAN, STP role/state, endpoint count) and `Neighbors`
 (discovered links; click a neighbor to switch to it).
@@ -467,8 +491,8 @@ The switch inspector shows `Show on map` (centers the map on the device),
 
 Open with `Ctrl+K` / `Cmd+K`, or `/` when not typing. Search field:
 "Search switches, endpoints, racks, ports or commands...". Results group into
-pages, `Start scan` and `Toggle theme` actions, switches, endpoints, racks and
-ports; selecting a device, endpoint or rack opens its inspector. `Up`/`Down`
+pages (including every settings tab), `Start scan` and `Toggle theme`
+actions, switches, endpoints, racks and ports; selecting a device, endpoint or rack opens its inspector. `Up`/`Down`
 to move, `Enter` to open, `Esc` to close.
 
 ![Command palette](screenshots/command-palette.png)
@@ -532,16 +556,20 @@ Scan scope details:
 
 ## Maintaining data
 
-- **Device metadata**: `Edit` on the `Network` page assigns `Rack`, `Class`
-  and `Model`. Vendor and other detected fields are refreshed by scans; the
-  API additionally supports per-device overrides (vendor override, label,
-  sysName, location, U height - see [API.md](API.md)).
-- **Classes**: `Settings > Classes` defines colored roles; `Allow outside rack
-  placement` controls whether members may sit outside a rack.
-- **Models**: `Settings > Models` defines port layouts (`Ports per row`,
-  optional `Total ports` cutoff) used for port visualization.
-- **Racks and placement**: `Settings > Racks` defines racks; `/racks` assigns
-  and positions devices by drag and drop and sets `U height`.
+- **Device metadata**: `Edit` on the `Network` page assigns `Rack`,
+  `Device class` and `Hardware model`. Vendor and other detected fields are
+  refreshed by scans; the API additionally supports per-device overrides
+  (vendor override, label, sysName, location, U height - see
+  [API.md](API.md)).
+- **Device classes**: `Settings > Device Classes` defines colored roles;
+  `Show devices without a rack on the map` controls whether unracked members
+  appear on the map (off = `Rack required`).
+- **Hardware models**: `Settings > Hardware Models` defines port layout
+  templates (`Port columns per row`, optional total ports cutoff) for the
+  device faceplate.
+- **Racks and placement**: `Settings > Racks` or `New rack` / `Edit rack` on
+  `/racks` define racks; `/racks` positions devices by drag and drop and sets
+  `U height`.
 - **Ignoring**: `Ignore`/`Re-enable` on `Network` (devices) and `Endpoints`. Ignored devices are skipped by scans and hidden on the map;
   ignored endpoints are hidden but kept.
 - **Full configuration**: `Settings > Backup & Restore` exports/imports
@@ -584,7 +612,7 @@ Where you see it:
 
 - **No devices on the map**: the map shows "No switches found - add
   credentials in Settings and run Scan". Check that credentials exist and have
-  `Include in scan` enabled (`Settings > Switches`), that discovery ranges are
+  `Include in scan` enabled (`Settings > Network Devices`), that discovery ranges are
   saved (`Settings > Scan`), then `Run Scan`.
 - **SNMP timeouts / devices not found**: a credential shows as failed in the
   scan errors list (`Settings > Scan` result panel, `ERRORS`). Verify the

@@ -277,7 +277,8 @@ Rules of thumb:
   `command-palette/` (Ctrl/Cmd+K and `/`, pure scoring in `search.ts`), `topology/` (React Flow map: TopologyCanvas, graph/layout,
   nodes/ incl. PortalNode, edges/, MapToolbar; buildings/floors in `floors.ts` (pure floor
   resolution), `useActiveFloor.ts` (`?floor=` + localStorage), FloorSwitcher, FloorSelect), `racks/` (rack elevation view at route `/racks`:
-  RackElevation, useRackLayout, rackLayout), `latency/` (latency monitor UI:
+  RackElevation, useRackLayout, rackLayout; RackFormModal is the one rack create/edit
+  dialog, shared with Settings > Racks), `latency/` (latency monitor UI:
   LatencyCard on the dashboard, DeviceLatencySection in the inspector, helpers in
   `latency.ts`; the map's "latency" layer lives in `topology/overlays.ts`; dependency-free
   `Sparkline` primitive in `src/components/ui/`).
