@@ -154,4 +154,13 @@ describe("buildPaletteResults", () => {
     expect(groups.map((g) => g.id)).toEqual(["recent", "pages", "actions"]);
     expect(groups[1].hits.map((h) => h.item.key)).toEqual(["page"]);
   });
+
+  it("lists query-only items only when something is typed", () => {
+    const index = emptyIndex();
+    index.pages.push(item("page", "Dashboard", [{ text: "Dashboard" }], "pages"));
+    index.pages.push({ ...item("racks", "Settings: Racks", [{ text: "Racks" }], "pages"), queryOnly: true });
+    expect(buildPaletteResults("", index)[0].hits.map((h) => h.item.key)).toEqual(["page"]);
+    const typed = buildPaletteResults("racks", index).find((g) => g.id === "pages");
+    expect(typed?.hits.map((h) => h.item.key)).toEqual(["racks"]);
+  });
 });

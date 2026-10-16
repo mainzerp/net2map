@@ -47,17 +47,82 @@ const PAGES: PageDef[] = [
   { to: "/styleguide", label: "Styleguide", icon: "styleguide", keywords: "styleguide design system", hidden: true },
 ];
 
+// One entry per settings tab (/settings/<tab>). Kept here instead of importing
+// the settings page so the palette does not pull the lazy settings chunk.
+// Keywords carry both the current and the former tab names.
+export const SETTINGS_TAB_PAGES: PageDef[] = [
+  {
+    to: "/settings/credentials",
+    label: "Settings: Network Devices",
+    icon: "settings",
+    keywords: "credentials snmp network devices candidates scan targets",
+  },
+  {
+    to: "/settings/profiles",
+    label: "Settings: SNMP Profiles",
+    icon: "settings",
+    keywords: "profiles snmp credentials community v3 reusable",
+  },
+  {
+    to: "/settings/scan",
+    label: "Settings: Scan",
+    icon: "settings",
+    keywords: "scan engine discovery schedule ranges history latency ping",
+  },
+  { to: "/settings/dns", label: "Settings: DNS", icon: "settings", keywords: "dns reverse lookup servers ptr" },
+  {
+    to: "/settings/floors",
+    label: "Settings: Buildings & Floors",
+    icon: "settings",
+    keywords: "buildings floors map plan background locations appearance",
+  },
+  { to: "/settings/racks", label: "Settings: Racks", icon: "settings", keywords: "racks rack definitions cabinet location" },
+  {
+    to: "/settings/classes",
+    label: "Settings: Device Classes",
+    icon: "settings",
+    keywords: "class role color switch classes device classes",
+  },
+  {
+    to: "/settings/models",
+    label: "Settings: Hardware Models",
+    icon: "settings",
+    keywords: "model port layout switch models hardware faceplate",
+  },
+  {
+    to: "/settings/import-export",
+    label: "Settings: Backup & Restore",
+    icon: "settings",
+    keywords: "backup restore import export configuration",
+  },
+];
+
+const ALL_PAGES: PageDef[] = [...PAGES, ...SETTINGS_TAB_PAGES];
+
+// Settings tab labels are long ("Settings: Backup & Restore"); a weight just
+// below 1 disables subsequence fuzzy matching so short device queries such as
+// "core" do not surface them above real matches.
+const SETTINGS_LABEL_WEIGHT = 0.95;
+
 function pageItems(): PaletteItem[] {
-  return PAGES.map((page) => {
+  return ALL_PAGES.map((page) => {
+    const isSettingsTab = page.to.startsWith("/settings/");
     return {
       key: `page:${page.to}`,
       group: "pages",
       label: page.label,
       detail: page.to,
-      hint: "Page",
-      fields: [{ text: page.label }, { text: page.keywords, weight: 0.7 }],
+      hint: isSettingsTab ? "Settings" : "Page",
+      fields: isSettingsTab
+        ? [
+            { text: page.label.replace(/^Settings: /, ""), weight: SETTINGS_LABEL_WEIGHT },
+            { text: page.label, weight: SETTINGS_LABEL_WEIGHT },
+            { text: page.keywords, weight: 0.7 },
+          ]
+        : [{ text: page.label }, { text: page.keywords, weight: 0.7 }],
       payload: { type: "navigate", to: page.to },
       hiddenUnlessQueryIncludes: page.hidden ? "style" : undefined,
+      queryOnly: isSettingsTab || undefined,
     };
   });
 }
@@ -95,7 +160,7 @@ export function iconFor(item: PaletteItem): PaletteIcon {
   const command = item.payload;
   if (command.type === "navigate") {
     const to = command.to;
-    return PAGES.find((page) => page.to === to)?.icon ?? "dashboard";
+    return ALL_PAGES.find((page) => page.to === to)?.icon ?? "dashboard";
   }
   if (command.type === "action") return command.action;
   if (item.group === "ports") return "port";

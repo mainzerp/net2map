@@ -189,7 +189,7 @@ function SnmpProfilesTabContent({ newEntryTrigger }: SnmpProfilesTabContentProps
       {isLoading ? (
         <TabLoading />
       ) : profiles.length === 0 ? (
-        <EmptyState title="No profiles defined yet" hint="Create a profile with + New Entry above." />
+        <EmptyState title="No profiles defined yet" hint="Create a profile with the New profile button above." />
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2">
           {profiles.map((p) => {

@@ -179,7 +179,7 @@ describe("RackElevation faceplates for UPS / server", () => {
   });
 
   it("allows raising the U height up to the new cap", async () => {
-    expect(MAX_DEVICE_U).toBe(10);
+    expect(MAX_DEVICE_U).toBe(60);
     const nodes = [makeNode({ id: 1, sys_name: "srv", device_type: "server", rack_id: 1, rack_u_position: 1, u_height: 4 })];
     renderWithRouter(<RackElevation rack={RACK} nodes={nodes} />);
     const inc = await screen.findByRole("button", { name: "Increase U height of srv" });

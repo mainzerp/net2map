@@ -296,7 +296,7 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
     },
     {
       key: "model",
-      header: "Model",
+      header: "Hw model",
       sortable: true,
       sortValue: (d) => (d.model_id && modelMap[d.model_id] ? modelMap[d.model_id].name : "").toLowerCase(),
       render: (d) =>
@@ -563,7 +563,7 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
             )
           )}
           <label className="block text-[11px] text-muted select-none">
-            Class
+            Device class
             <Select
               className="mt-1"
               value={form.class_id ?? ""}
@@ -577,21 +577,27 @@ export default function DeviceTable({ title, subtitle, activeLabel, ignoredLabel
               ))}
             </Select>
           </label>
-          <label className="block text-[11px] text-muted select-none">
-            Model
-            <Select
-              className="mt-1"
-              value={form.model_id ?? ""}
-              onChange={(e) => setForm((p) => ({ ...p, model_id: e.target.value ? +e.target.value : null }))}
-            >
-              <option value="">-- No model --</option>
-              {[...models].sort((a, b) => a.name.localeCompare(b.name)).map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </Select>
-          </label>
+          <div>
+            <label className="block text-[11px] text-muted select-none">
+              Hardware model
+              <Select
+                className="mt-1"
+                aria-describedby="device-edit-hw-model-hint"
+                value={form.model_id ?? ""}
+                onChange={(e) => setForm((p) => ({ ...p, model_id: e.target.value ? +e.target.value : null }))}
+              >
+                <option value="">-- No model --</option>
+                {[...models].sort((a, b) => a.name.localeCompare(b.name)).map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <span id="device-edit-hw-model-hint" className="block mt-1 text-[11px] text-muted">
+              Port layout template (Settings &gt; Hardware Models)
+            </span>
+          </div>
           {err && <div className="text-xs text-danger">{err}</div>}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={resetForm}>

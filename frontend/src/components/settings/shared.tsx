@@ -6,11 +6,18 @@ import { deviceDisplayName, filterDevices } from "../../utils/deviceSearch";
 // Shared building blocks for the settings tabs: uniform form rows, section
 // headers, async states and the destructive-action confirm dialog.
 
-export function Field({ label, error, children }: { label: ReactNode; error?: string; children: ReactNode }) {
+export function Field({ label, error, hint, children }: {
+  label: ReactNode;
+  error?: string;
+  // Short help text under the control: says what the field does, not how.
+  hint?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <label className="block">
       <span className="block text-[10px] text-muted select-none mb-1">{label}</span>
       {children}
+      {hint && <span className="block mt-1 text-[11px] text-muted leading-snug">{hint}</span>}
       {error && <span className="block mt-1 text-[11px] text-danger">{error}</span>}
     </label>
   );
@@ -68,9 +75,17 @@ interface DeviceAssignmentProps {
   available: TopologyNode[];
   onAssign: (devId: number) => void;
   onUnassign: (devId: number) => void;
+  // Optional explanation of what assigning does (e.g. "places nothing yet").
+  hint?: ReactNode;
+  // Last assign/unassign failure, shown under the picker.
+  error?: string;
+  // Placeholder when no device can be assigned (defaults to "No unassigned devices").
+  emptyPlaceholder?: string;
 }
 
-export function DeviceAssignment({ assigned, available, onAssign, onUnassign }: DeviceAssignmentProps) {
+export function DeviceAssignment({
+  assigned, available, onAssign, onUnassign, hint, error, emptyPlaceholder,
+}: DeviceAssignmentProps) {
   const [query, setQuery] = useState("");
   // Devices picked but not yet gone from `available` (mutation + refetch in
   // flight) are hidden so a fast second pick never hits the same device.
@@ -95,6 +110,7 @@ export function DeviceAssignment({ assigned, available, onAssign, onUnassign }: 
       <div className="text-muted text-[10px] tracking-[1px] mb-1.5 select-none">
         ASSIGNED DEVICES ({assigned.length})
       </div>
+      {hint && <div className="text-[11px] text-muted leading-snug mb-1.5">{hint}</div>}
       {assigned.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-2">
           {assigned.map((d) => (
@@ -119,7 +135,7 @@ export function DeviceAssignment({ assigned, available, onAssign, onUnassign }: 
         getKey={(d) => d.id}
         onSelect={assign}
         ariaLabel="Assign device"
-        placeholder={candidates.length === 0 ? "No unassigned devices" : "Search by name, IP, vendor, model..."}
+        placeholder={candidates.length === 0 ? (emptyPlaceholder ?? "No unassigned devices") : "Search by name, IP, vendor, model..."}
         disabled={candidates.length === 0}
         emptyText="No matching devices"
         footer={more > 0 ? `${more} more, refine search` : undefined}
@@ -133,6 +149,7 @@ export function DeviceAssignment({ assigned, available, onAssign, onUnassign }: 
           </span>
         )}
       />
+      {error && <div role="alert" className="mt-1 text-[11px] text-danger">{error}</div>}
     </div>
   );
 }

@@ -94,6 +94,16 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
     () => (device?.rack_id != null ? data?.racks.find((r) => r.id === device.rack_id) : undefined),
     [data, device],
   );
+  // Class and hardware model come from the topology payload, the same source
+  // the map uses for class colors and port layouts.
+  const switchClass = useMemo(
+    () => (device?.class_id != null ? data?.classes?.find((c) => c.id === device.class_id) : undefined),
+    [data, device],
+  );
+  const hardwareModel = useMemo(
+    () => (device?.model_id != null ? data?.models?.find((m) => m.id === device.model_id) : undefined),
+    [data, device],
+  );
 
   const neighbors = useMemo<Neighbor[]>(() => {
     if (!device || !data) return [];
@@ -222,7 +232,26 @@ export default function DeviceInspector({ id, titleId }: { id: number; titleId: 
         <FactList
           facts={[
             { label: "Hostname", value: device.hostname && device.hostname !== title ? device.hostname : null },
-            { label: "Model", value: device.model },
+            { label: "Reported model", value: device.model },
+            {
+              label: "Class",
+              value: switchClass ? (
+                <span className="inline-flex items-center gap-1.5" data-testid="device-class">
+                  <span
+                    aria-hidden="true"
+                    className="inline-block w-2.5 h-2.5 rounded-sm border border-line-strong shrink-0"
+                    style={{ background: switchClass.color }}
+                  />
+                  {switchClass.label}
+                </span>
+              ) : (
+                <span className="text-muted">none</span>
+              ),
+            },
+            {
+              label: "Hardware model",
+              value: hardwareModel ? hardwareModel.name : <span className="text-muted">none</span>,
+            },
             { label: "MAC", value: device.mac, mono: true },
             { label: "Firmware", value: device.firmware, mono: true },
             { label: "Location", value: device.location },

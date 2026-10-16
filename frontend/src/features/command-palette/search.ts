@@ -44,6 +44,8 @@ export interface SearchItem<P = unknown> {
   payload: P;
   // Only shown when the normalized query contains this text (e.g. "style").
   hiddenUnlessQueryIncludes?: string;
+  // Listed only for a non-empty query (keeps the empty palette short).
+  queryOnly?: boolean;
 }
 
 export interface SearchHit<P = unknown> {
@@ -272,7 +274,7 @@ export function buildPaletteResults<P>(
   };
   const asHits = (items: SearchItem<P>[]) =>
     items
-      .filter((item) => !item.hiddenUnlessQueryIncludes)
+      .filter((item) => !item.hiddenUnlessQueryIncludes && !item.queryOnly)
       .map((item) => ({ item, score: 0, labelRanges: [] as MatchRange[] }));
 
   if (!q) {

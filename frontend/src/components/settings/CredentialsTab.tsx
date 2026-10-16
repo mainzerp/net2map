@@ -219,7 +219,7 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
   return (
     <div className="flex-1 overflow-y-auto pt-5">
       {/* New / edit credential dialog */}
-      <Modal open={editState.open} onClose={resetForm} title={editState.id ? "Edit Entry" : "New Entry"} width={560}>
+      <Modal open={editState.open} onClose={resetForm} title={editState.id ? "Edit device" : "New device"} width={560}>
         <form onSubmit={submit}>
           <div className="flex flex-col gap-3">
             <div className="grid grid-cols-2 gap-2">
@@ -426,7 +426,7 @@ function CredentialsTabContent({ newEntryTrigger }: CredentialsTabContentProps) 
       {isLoading ? (
         <TabLoading />
       ) : creds.length === 0 ? (
-        <EmptyState title="No entries yet" hint="Add device credentials with + New Entry above." />
+        <EmptyState title="No entries yet" hint="Add a device to scan with the New device button above." />
       ) : visibleCreds.length === 0 ? (
         <EmptyState title="No entries match your search" className="mb-5" />
       ) : (

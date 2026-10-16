@@ -2,13 +2,16 @@
 // Rack elevation view: pick a rack, see its true U layout, drag devices into
 // place. Deep-linkable via /racks?rack={id}.
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Activity } from "lucide-react";
+import { Activity, Pencil, Plus } from "lucide-react";
 import { getStoredUser } from "../api";
 import { useTopology } from "../hooks/api";
-import { EmptyState, Select, Spinner } from "../components/ui";
+import { Button, EmptyState, Select, Spinner } from "../components/ui";
 import RackElevation from "../features/racks/RackElevation";
+import RackFormModal from "../features/racks/RackFormModal";
+import { findFloor } from "../features/topology/floors";
+import type { RackInfo } from "../types";
 import { rackHeightU } from "../features/racks/rackLayout";
 import { useRackActivity } from "../features/racks/useRackActivity";
 
@@ -26,6 +29,30 @@ export default function RacksPage() {
 
   const role = getStoredUser()?.role ?? "viewer";
   const readOnly = role === "viewer";
+  // Admins and operators may create and edit racks here; viewers only look.
+  const canEdit = !readOnly;
+
+  // Rack dialog: "new" creates, a rack edits it; null is closed.
+  const [form, setForm] = useState<{ rack: RackInfo | null } | null>(null);
+
+  const selectRack = (id: number) =>
+    // Keep other params (e.g. the inspector drawer target) intact.
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("rack", String(id));
+      return next;
+    });
+
+  const rackForm = form && (
+    <RackFormModal
+      open
+      rack={form.rack}
+      onClose={() => setForm(null)}
+      onSaved={(saved) => {
+        if (form.rack == null) selectRack(saved.id);
+      }}
+    />
+  );
 
   if (isLoading) {
     return (
@@ -47,17 +74,37 @@ export default function RacksPage() {
 
   if (racks.length === 0) {
     return (
-      <EmptyState
-        title="No racks defined yet"
-        hint="Create racks in the settings first."
-        action={
-          <Link to="/settings/racks" className="text-accent text-xs hover:underline">
-            Manage racks
-          </Link>
-        }
-      />
+      <>
+        <EmptyState
+          title="No racks defined yet"
+          hint="A rack is a physical cabinet on a floor. Create one, then drag devices into it here."
+          action={
+            <div className="flex items-center gap-3">
+              {canEdit && (
+                <Button size="sm" variant="primary" onClick={() => setForm({ rack: null })}>
+                  <Plus size={13} strokeWidth={1.75} aria-hidden="true" />
+                  New rack
+                </Button>
+              )}
+              <Link to="/settings/racks" className="text-accent text-xs hover:underline">
+                All racks in Settings
+              </Link>
+            </div>
+          }
+        />
+        {rackForm}
+      </>
     );
   }
+
+  const activeFloor = activeRack ? findFloor(data?.buildings, activeRack.floor_id) : null;
+  const rackFacts = activeRack
+    ? [
+        activeRack.room ? `Room ${activeRack.room}` : "No room",
+        activeFloor ? `${activeFloor.building.label} / ${activeFloor.floor.label}` : "No floor",
+        `${rackHeightU(activeRack)}U`,
+      ]
+    : [];
 
   return (
     <div className="flex flex-col gap-4 h-full overflow-y-auto pb-6">
@@ -68,14 +115,7 @@ export default function RacksPage() {
           <Select
             aria-label="Select rack"
             value={activeRack?.id ?? ""}
-            onChange={(e) =>
-              // Keep other params (e.g. the inspector drawer target) intact.
-              setSearchParams((prev) => {
-                const next = new URLSearchParams(prev);
-                next.set("rack", e.target.value);
-                return next;
-              })
-            }
+            onChange={(e) => selectRack(Number(e.target.value))}
           >
             {racks.map((r) => (
               <option key={r.id} value={r.id}>
@@ -85,6 +125,20 @@ export default function RacksPage() {
             ))}
           </Select>
         </div>
+        {canEdit && (
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="primary" onClick={() => setForm({ rack: null })}>
+              <Plus size={13} strokeWidth={1.75} aria-hidden="true" />
+              New rack
+            </Button>
+            {activeRack && (
+              <Button size="sm" onClick={() => setForm({ rack: activeRack })}>
+                <Pencil size={12} strokeWidth={1.75} aria-hidden="true" />
+                Edit rack
+              </Button>
+            )}
+          </div>
+        )}
         <div className="flex items-center gap-3 ml-auto">
           {activityPref.available && (
             <button
@@ -104,14 +158,27 @@ export default function RacksPage() {
             </button>
           )}
           <Link to="/settings/racks" className="text-accent text-[11px] hover:underline">
-            Manage racks
+            All racks in Settings
           </Link>
         </div>
       </div>
 
       {activeRack && (
-        <RackElevation rack={activeRack} nodes={nodes} readOnly={readOnly} activity={activityPref.active} />
+        <div className="-mt-2 text-muted text-[11px]" data-testid="rack-header-facts">
+          {rackFacts.join(" - ")}
+        </div>
       )}
+
+      {activeRack && (
+        <RackElevation
+          rack={activeRack}
+          nodes={nodes}
+          readOnly={readOnly}
+          activity={activityPref.active}
+          classes={data?.classes}
+        />
+      )}
+      {rackForm}
     </div>
   );
 }

@@ -22,7 +22,7 @@ import VendorBadge from "../../components/map/VendorBadge";
 import { useCreateRackItem, useRackItems, useUpdateRackItem } from "../../hooks/api";
 import { extractErrorMessage } from "../../api";
 import { useToast } from "../../components/ToastProvider";
-import type { PortInfo, RackInfo, RackItem, RackItemKind, RackSide, TopologyNode } from "../../types";
+import type { PortInfo, RackInfo, RackItem, RackItemKind, RackSide, SwitchClass, TopologyNode } from "../../types";
 import {
   HEALTH_STATUS_LABEL,
   clampPercent,
@@ -73,6 +73,9 @@ interface RackElevationProps {
   readOnly?: boolean;
   // Subtle LED blink on up ports (user toggle, off under reduced motion).
   activity?: boolean;
+  // Switch classes from the topology payload; a device with a class gets a
+  // thin stripe in the class color on its faceplate.
+  classes?: SwitchClass[];
 }
 
 function portKeyOf(p: PortInfo, i: number): string {
@@ -399,9 +402,9 @@ function RackRail({ side, rows, testId }: { side: "left" | "right"; rows: number
 }
 
 // ── U height stepper ─────────────────────────────────────────────────────────
-// Upper bound of the stepper: tall enough for tower UPS units and 4U+ servers
-// (the API accepts up to 60).
-export const MAX_DEVICE_U = 10;
+// Upper bound of the stepper: the device meta API accepts u_height 1-60
+// (DeviceMetaUpdate in backend/schemas.py); the rack height caps it further.
+export const MAX_DEVICE_U = 60;
 
 function UHeightControl({
   device,
@@ -602,6 +605,7 @@ function Faceplate({
   highlighted,
   onHighlight,
   onRemove,
+  switchClass,
 }: {
   device: TopologyNode;
   readOnly: boolean;
@@ -617,6 +621,8 @@ function Faceplate({
   // Shared hover/focus highlight with the device's label in the label column.
   highlighted: boolean;
   onHighlight: (on: boolean) => void;
+  // Assigned switch class, drawn as a thin stripe in its (user-chosen) color.
+  switchClass?: SwitchClass | null;
 }) {
   const ping = device.ping_status || "unknown";
   const status = ping === "online" ? "up" : ping === "offline" ? "down" : "unknown";
@@ -658,6 +664,14 @@ function Faceplate({
       } ${dragging ? "opacity-40" : ""}`}
       style={{ touchAction: "none" }}
     >
+      {switchClass && (
+        <span
+          data-testid={`faceplate-class-${device.id}`}
+          title={`Class: ${switchClass.label}`}
+          className="w-[3px] shrink-0"
+          style={{ backgroundColor: switchClass.color }}
+        />
+      )}
       <RackEar side="left" />
       {/* No name/model block: names live in the label column right of the
           rack, so the port block gets the full width between LED and stepper. */}
@@ -947,8 +961,15 @@ function uRangeLabel(pos: number, uHeight: number): string {
 const SIDE_LABEL: Record<RackSide, string> = { front: "Front", rear: "Rear" };
 
 // ── RackElevation ────────────────────────────────────────────────────────────
-export default function RackElevation({ rack, nodes, readOnly = false, activity = false }: RackElevationProps) {
+export default function RackElevation({
+  rack,
+  nodes,
+  readOnly = false,
+  activity = false,
+  classes,
+}: RackElevationProps) {
   const heightU = rackHeightU(rack);
+  const classById = useMemo(() => new Map((classes ?? []).map((c) => [c.id, c])), [classes]);
   const frontBodyRef = useRef<HTMLDivElement>(null);
   const rearBodyRef = useRef<HTMLDivElement>(null);
   const bodyRefs: RackBodyRefs = useMemo(() => ({ front: frontBodyRef, rear: rearBodyRef }), []);
@@ -1259,6 +1280,7 @@ export default function RackElevation({ rack, nodes, readOnly = false, activity 
                         highlighted={highlightId === device.id}
                         onHighlight={(on) => highlight(device.id, on)}
                         onRemove={readOnly ? undefined : () => removeDevice(device)}
+                        switchClass={device.class_id != null ? classById.get(device.class_id) : null}
                       />
                     </div>
                   ))}
