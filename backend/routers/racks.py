@@ -80,10 +80,10 @@ def delete_rack(rack_id: int, request: Request, db: Session = Depends(get_db)):
     if not rack:
         api_error(404, "RACK_NOT_FOUND", "Rack not found")
     # Detach devices assigned to this rack before deleting; they stay on the
-    # rack's floor.
+    # rack's floor and lose their elevation slot (same as unracking via meta).
     racked_ids = [row[0] for row in db.query(Device.id).filter(Device.rack_id == rack_id).all()]
     carry_rack_floors(db, racked_ids)
-    db.query(Device).filter(Device.rack_id == rack_id).update({"rack_id": None})
+    db.query(Device).filter(Device.rack_id == rack_id).update({"rack_id": None, "rack_u_position": None})
     log_audit(request, "delete", "rack", str(rack_id), {"label": rack.label})
     db.delete(rack)
     db.commit()

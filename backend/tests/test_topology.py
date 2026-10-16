@@ -496,3 +496,63 @@ def test_device_out_contains_vendor_override_default(client, auth_headers, db):
     assert r.status_code == 200
     entry = [d for d in r.json() if d["ip"] == "10.9.0.5"][0]
     assert entry["vendor_override"] is False
+
+
+def test_update_device_meta_places_device_above_u48_in_60u_rack(client, auth_headers, db):
+    """Positions up to the 60U rack maximum pass schema validation."""
+    rack = RackModel(label="Tall60", room="Room T", height_u=60)
+    db.add(rack)
+    db.flush()
+    dev = Device(sys_name="tall-sw", ip="10.8.1.40", vendor="generic", rack_id=rack.id)
+    db.add(dev)
+    db.commit()
+
+    r = client.patch(
+        f"/api/topology/devices/{dev.id}/meta",
+        json={"rack_u_position": 55, "u_height": 2},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["rack_u_position"] == 55
+
+    db.refresh(dev)
+    assert dev.rack_u_position == 55
+
+
+def test_update_device_meta_rejects_u_position_above_rack_height(client, auth_headers, db):
+    """A position valid for the schema but above the rack's own height is a 409."""
+    rack = RackModel(label="Std42", room="Room T", height_u=42)
+    db.add(rack)
+    db.flush()
+    dev = Device(sys_name="std-sw", ip="10.8.1.41", vendor="generic", rack_id=rack.id, rack_u_position=3)
+    db.add(dev)
+    db.commit()
+
+    r = client.patch(
+        f"/api/topology/devices/{dev.id}/meta",
+        json={"rack_u_position": 55},
+        headers=auth_headers,
+    )
+    assert r.status_code == 409
+    error = r.json()["error"]
+    assert error["code"] == "U_POSITION_OUT_OF_RANGE"
+    assert "only has 42U" in error["message"]
+
+    db.refresh(dev)
+    assert dev.rack_u_position == 3
+
+
+def test_update_device_meta_rejects_u_position_above_rack_maximum(client, auth_headers, db):
+    rack = RackModel(label="Tall60Max", room="Room T", height_u=60)
+    db.add(rack)
+    db.flush()
+    dev = Device(sys_name="max-sw", ip="10.8.1.42", vendor="generic", rack_id=rack.id)
+    db.add(dev)
+    db.commit()
+
+    r = client.patch(
+        f"/api/topology/devices/{dev.id}/meta",
+        json={"rack_u_position": 61},
+        headers=auth_headers,
+    )
+    assert r.status_code == 422

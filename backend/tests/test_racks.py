@@ -108,3 +108,31 @@ def test_rack_shrink_rejects_truncating_device(client, auth_headers, db):
     assert response.status_code == 409
     db.refresh(rack)
     assert rack.height_u == 42
+
+
+def test_delete_rack_clears_device_u_position(client, auth_headers, db):
+    """Deleting a rack unracks its devices without leaving a stale U slot."""
+    from database import Building, Device, Floor, Rack
+
+    building = Building(label="B1")
+    db.add(building)
+    db.flush()
+    floor = Floor(building_id=building.id, label="F1")
+    db.add(floor)
+    db.flush()
+    rack = Rack(label="DelPos", height_u=42, floor_id=floor.id)
+    db.add(rack)
+    db.flush()
+    dev = Device(ip="10.0.0.9", rack_id=rack.id, rack_u_position=12, u_height=2, rack_side="rear")
+    db.add(dev)
+    db.commit()
+
+    r = client.delete(f"/api/racks/{rack.id}", headers=auth_headers)
+    assert r.status_code == 204
+
+    db.refresh(dev)
+    assert dev.rack_id is None
+    assert dev.rack_u_position is None
+    assert dev.floor_id == floor.id
+    # Side and depth are kept, as when unracking via the meta PATCH
+    assert dev.rack_side == "rear"

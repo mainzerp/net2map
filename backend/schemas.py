@@ -131,13 +131,18 @@ class AppSettingOut(AppSettingBase):
 
 # ─── Rack ─────────────────────────────────────────────────────────────────────
 
+# Tallest supported rack. U positions and heights share this bound; the fit
+# against the rack's own height_u is checked in the routers (409).
+RACK_MAX_U = 60
+
+
 class RackBase(BaseModel):
     label:       str
     room:        str = ""
     description: str = ""
     map_x:       float = 100.0
     map_y:       float = 100.0
-    height_u:    int = Field(42, ge=6, le=60)
+    height_u:    int = Field(42, ge=6, le=RACK_MAX_U)
     floor_id:    Optional[int] = None
 
 
@@ -151,7 +156,7 @@ class RackUpdate(BaseModel):
     description: Optional[str] = None
     map_x:       Optional[float] = None
     map_y:       Optional[float] = None
-    height_u:    Optional[int] = Field(None, ge=6, le=60)
+    height_u:    Optional[int] = Field(None, ge=6, le=RACK_MAX_U)
     # Explicit null removes the rack from its floor
     floor_id:    Optional[int] = None
 
@@ -175,8 +180,8 @@ class RackLayoutEntry(BaseModel):
     stored side and depth.
     """
     device_id:       int
-    rack_u_position: int = Field(..., ge=1, le=48)
-    u_height:        int = Field(..., ge=1, le=60)
+    rack_u_position: int = Field(..., ge=1, le=RACK_MAX_U)
+    u_height:        int = Field(..., ge=1, le=RACK_MAX_U)
     rack_side:       Optional[RackSide] = None
     full_depth:      Optional[bool] = None
 
@@ -192,8 +197,8 @@ class RackItemCreate(BaseModel):
     """Manually maintained rack placeholder (no ports, never scanned)."""
     kind:            RackItemKind = "patch_panel"
     label:           str = Field("", max_length=120)
-    rack_u_position: int = Field(..., ge=1, le=48)
-    u_height:        int = Field(1, ge=1, le=60)
+    rack_u_position: int = Field(..., ge=1, le=RACK_MAX_U)
+    u_height:        int = Field(1, ge=1, le=RACK_MAX_U)
     rack_side:       RackSide = "front"
     full_depth:      bool = False
     note:            Optional[str] = Field(None, max_length=2000)
@@ -202,8 +207,8 @@ class RackItemCreate(BaseModel):
 class RackItemUpdate(BaseModel):
     kind:            Optional[RackItemKind] = None
     label:           Optional[str] = Field(None, max_length=120)
-    rack_u_position: Optional[int] = Field(None, ge=1, le=48)
-    u_height:        Optional[int] = Field(None, ge=1, le=60)
+    rack_u_position: Optional[int] = Field(None, ge=1, le=RACK_MAX_U)
+    u_height:        Optional[int] = Field(None, ge=1, le=RACK_MAX_U)
     rack_side:       Optional[RackSide] = None
     full_depth:      Optional[bool] = None
     note:            Optional[str] = Field(None, max_length=2000)
@@ -799,8 +804,8 @@ class DeviceMetaUpdate(BaseModel):
     # Manual display name; "" or null clears it (stored trimmed)
     display_name: Optional[str] = Field(None, max_length=120)
     enabled:  Optional[bool] = None
-    rack_u_position: Optional[int] = Field(None, ge=1, le=48)
-    u_height: Optional[int] = Field(None, ge=1, le=60)
+    rack_u_position: Optional[int] = Field(None, ge=1, le=RACK_MAX_U)
+    u_height: Optional[int] = Field(None, ge=1, le=RACK_MAX_U)
     rack_side: Optional[RackSide] = None
     full_depth: Optional[bool] = None
     # Explicit control over the manual-vendor flag; wins over the implicit
